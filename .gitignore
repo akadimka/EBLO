@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CSV files (can be regenerated)
+proposed_series_report.csv
+summary_csv.csv
+
+# Test & Debug files (temporary, for development only)
+test_*.py
+debug_*.py
+trace_*.py
+show_*.py
+verify_*.py
+analyze_*.py
+check_*.py
+compare_keys.py
+export_*.py
+fix_work_*.py
+regenerate_*.py
+*_test.py
+*_debug.py
+test_*.txt
+debug_*.txt
+test_*.csv
+*_cache.csv
+
+# Logs
+*.log
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Cache files
+.library_cache.db
+
