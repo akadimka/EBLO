@@ -406,5 +406,6 @@
     "Ясмина",
     "Наталия"
   ],
-  "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml"
+  "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
+  "folder_parse_limit": 5
 }

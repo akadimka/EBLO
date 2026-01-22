@@ -95,6 +95,19 @@ class SettingsManager:
         self.settings['genres_file_path'] = path
         self.save()
 
+    def get_folder_parse_limit(self):
+        """Get folder parse limit / Получить предел количества папок при парсинге."""
+        return self.settings.get('folder_parse_limit', 5)
+        
+    def set_folder_parse_limit(self, limit):
+        """Set folder parse limit / Установить предел количества папок при парсинге."""
+        try:
+            self.settings['folder_parse_limit'] = int(limit)
+        except (ValueError, TypeError):
+            # Если не удаётся преобразовать в int, используем значение по умолчанию
+            self.settings['folder_parse_limit'] = 5
+        self.save()
+
     def get_test_window_path(self):
         """
         Get test window saved path.

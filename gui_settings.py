@@ -80,6 +80,25 @@ class SettingsWindow(tk.Toplevel):
         entry.bind('<Return>', lambda event: self._save())
         
         ttk.Button(entry_frame, text='Обзор', command=self._choose_folder).grid(row=0, column=1)
+        
+        # Separator
+        ttk.Separator(self.tab_general, orient='horizontal').pack(fill='x', padx=10, pady=10)
+        
+        # Folder parse limit
+        self.folder_limit_var = tk.StringVar(value=str(self.settings_manager.get_folder_parse_limit()))
+        
+        limit_frame = ttk.Frame(self.tab_general)
+        limit_frame.pack(fill='x', padx=10, pady=5)
+        limit_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(limit_frame, text='Предел количества папок при парсинге, начиная от файла:').grid(row=0, column=0, sticky='w', padx=(0, 5))
+        
+        # Entry for limit with validation
+        limit_entry = ttk.Entry(limit_frame, textvariable=self.folder_limit_var, width=10)
+        limit_entry.grid(row=0, column=1, sticky='w')
+        limit_entry.bind('<FocusOut>', self._validate_folder_limit)
+        limit_entry.bind('<Return>', lambda event: self._save())
+
 
     def _create_lists_tab(self):
         """Create Lists management tab."""
@@ -242,17 +261,23 @@ class SettingsWindow(tk.Toplevel):
         # Save immediately
         self._save_current_list()
 
-    def _save_current_list(self):
-        """Save the current list being edited."""
-        key = self.list_key_var.get()
-        if key:
-            ls_items = [self.ls_listbox.get(i) for i in range(self.ls_listbox.size())]
-            self.settings_manager.set_list(key, ls_items)
+    def _validate_folder_limit(self, event=None):
+        """Validate folder limit input - must be a positive integer."""
+        value = self.folder_limit_var.get()
+        try:
+            int_value = int(value)
+            if int_value <= 0:
+                raise ValueError("Must be positive")
+            # Valid - do nothing, value will be saved
+        except (ValueError, TypeError):
+            # Invalid - restore previous value
+            self.folder_limit_var.set(str(self.settings_manager.get_folder_parse_limit()))
 
     def _save(self):
         """Save all settings and close."""
         # General
         self.settings_manager.set_library_path(self.path_var.get())
+        self.settings_manager.set_folder_parse_limit(self.folder_limit_var.get())
             
         # Lists panel: persist current list
         key = self.list_key_var.get()
