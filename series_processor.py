@@ -4,6 +4,11 @@
 Использует конфигурационные списки паттернов для поиска серий в:
 - Названиях файлов (author_series_patterns_in_files)
 - Структурах папок (author_series_patterns_in_folders)
+
+Приоритет источников (от низшего к высшему):
+1. FOLDER_STRUCTURE - структура папок
+2. FILENAME - название файла
+3. FB2_METADATA - метаданные FB2 файла
 """
 
 import re
@@ -12,9 +17,21 @@ from typing import Optional, List, Dict, Tuple, Any
 try:
     from settings_manager import SettingsManager
     from pattern_converter import compile_patterns
+    from extraction_constants import (
+        SeriesExtractionPriority,
+        ConfidenceLevel,
+        FilterReason,
+        ExtractionResult
+    )
 except ImportError:
     from .settings_manager import SettingsManager
     from .pattern_converter import compile_patterns
+    from .extraction_constants import (
+        SeriesExtractionPriority,
+        ConfidenceLevel,
+        FilterReason,
+        ExtractionResult
+    )
 
 
 class SeriesProcessor:
@@ -56,7 +73,7 @@ class SeriesProcessor:
         sequence_patterns_raw = self.settings.get_sequence_patterns()
         self.sequence_patterns = compile_patterns(sequence_patterns_raw) if sequence_patterns_raw else []
     
-    def extract_series_from_filename(self, filename: str) -> Optional[Dict[str, Any]]:
+    def extract_series_from_filename(self, filename: str) -> Optional[List[ExtractionResult]]:
         """
         Извлечь информацию о серии из названия файла.
         
@@ -64,23 +81,18 @@ class SeriesProcessor:
             filename: Название файла (без расширения)
         
         Returns:
-            Словарь с информацией о серии или None
-            Структура: {
-                'series': str,           # Название серии
-                'pattern': str,          # Использованный паттерн
-                'pattern_index': int,    # Индекс паттерна в списке
-                'confidence': float,     # Уверенность (0.0-1.0)
-                'groups': dict           # Все извлечённые группы из regex
-            }
+            Список результатов извлечения (может быть несколько совпадений)
+            или None если ничего не найдено
         """
         # TODO: Реализовать логику извлечения серии из названия файла
         # - Применить все паттерны file_patterns
         # - Найти совпадение в названии файла
         # - Извлечь группу 'series' (если есть)
-        # - Вернуть результат с уверенностью
+        # - Проверить против filename_blacklist (BL)
+        # - Вернуть результаты с уверенностью FILENAME (0.60-0.80)
         pass
     
-    def extract_series_from_filepath(self, filepath: str) -> Optional[Dict[str, Any]]:
+    def extract_series_from_filepath(self, filepath: str) -> Optional[List[ExtractionResult]]:
         """
         Извлечь информацию о серии из пути файла (анализ структуры папок).
         
@@ -88,16 +100,18 @@ class SeriesProcessor:
             filepath: Полный путь к файлу
         
         Returns:
-            Словарь с информацией о серии или None
+            Список результатов извлечения или None
         """
         # TODO: Реализовать логику извлечения серии из структуры папок
         # - Разбить путь на составные части
         # - Применить паттерны folder_patterns к названиям папок
+        # - Использовать folder_parse_limit для ограничения поиска вверх
         # - Найти совпадение
-        # - Вернуть результат с указанием уровня вложенности
+        # - Проверить против filename_blacklist (BL)
+        # - Вернуть результаты с уверенностью FOLDER (0.60-0.80)
         pass
     
-    def extract_sequence_number(self, text: str) -> Optional[Dict[str, Any]]:
+    def extract_sequence_number(self, text: str) -> Optional[List[ExtractionResult]]:
         """
         Извлечь номер последовательности/книги в серии.
         
@@ -105,18 +119,12 @@ class SeriesProcessor:
             text: Текст для поиска номера (обычно часть имени файла или папки)
         
         Returns:
-            Словарь с информацией о номере или None
-            Структура: {
-                'number': int,           # Извлечённый номер
-                'pattern': str,          # Использованный паттерн
-                'position': tuple,       # (start, end) позиция в тексте
-                'confidence': float      # Уверенность (0.0-1.0)
-            }
+            Список результатов извлечения (содержит число)
         """
         # TODO: Реализовать логику извлечения номера последовательности
         # - Применить sequence_patterns
         # - Извлечь числовое значение
-        # - Вернуть номер и позицию в строке
+        # - Вернуть результаты с информацией о позиции и уверенности
         pass
     
     def extract_series_combined(self, filename: str, filepath: str) -> Optional[Dict[str, Any]]:
@@ -129,12 +137,6 @@ class SeriesProcessor:
         
         Returns:
             Словарь с наиболее вероятной информацией о серии
-            Структура: {
-                'series': str,           # Название серии
-                'number': Optional[int], # Номер в серии (если извлечён)
-                'source': str,           # Источник: 'filename' или 'filepath'
-                'confidence': float      # Общая уверенность
-            }
         """
         # TODO: Реализовать комбинированную логику
         # - Попробовать extract_series_from_filename
@@ -178,3 +180,9 @@ if __name__ == '__main__':
     print(f"Паттерны в файлах: {len(processor.file_patterns)}")
     print(f"Паттерны в папках: {len(processor.folder_patterns)}")
     print(f"Паттерны последовательности: {len(processor.sequence_patterns)}")
+    print(f"Предел папок при парсинге: {processor.folder_parse_limit}")
+    print()
+    print(f"Приоритеты извлечения серий:")
+    for priority in SeriesExtractionPriority.ORDER:
+        print(f"  {priority}: {SeriesExtractionPriority.get_name(priority)}")
+

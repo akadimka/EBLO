@@ -5,6 +5,11 @@
 - Названиях файлов (author_series_patterns_in_files)
 - Структурах папок (author_series_patterns_in_folders)
 - Отдельных паттернах имён авторов (author_name_patterns)
+
+Приоритет источников (от низшего к высшему):
+1. FOLDER_STRUCTURE - структура папок
+2. FILENAME - название файла
+3. FB2_METADATA - метаданные FB2 файла
 """
 
 import re
@@ -13,9 +18,21 @@ from typing import Optional, List, Dict, Tuple, Any
 try:
     from settings_manager import SettingsManager
     from pattern_converter import compile_patterns
+    from extraction_constants import (
+        AuthorExtractionPriority,
+        ConfidenceLevel,
+        FilterReason,
+        ExtractionResult
+    )
 except ImportError:
     from .settings_manager import SettingsManager
     from .pattern_converter import compile_patterns
+    from .extraction_constants import (
+        AuthorExtractionPriority,
+        ConfidenceLevel,
+        FilterReason,
+        ExtractionResult
+    )
 
 
 class AuthorProcessor:
@@ -57,7 +74,7 @@ class AuthorProcessor:
         author_patterns_raw = self.settings.get_author_name_patterns()
         self.author_patterns = compile_patterns(author_patterns_raw) if author_patterns_raw else []
     
-    def extract_author_from_filename(self, filename: str) -> Optional[Dict[str, Any]]:
+    def extract_author_from_filename(self, filename: str) -> Optional[List[ExtractionResult]]:
         """
         Извлечь информацию об авторе из названия файла.
         
@@ -65,23 +82,18 @@ class AuthorProcessor:
             filename: Название файла (без расширения)
         
         Returns:
-            Словарь с информацией об авторе или None
-            Структура: {
-                'author': str,           # Имя автора
-                'pattern': str,          # Использованный паттерн
-                'pattern_index': int,    # Индекс паттерна в списке
-                'confidence': float,     # Уверенность (0.0-1.0)
-                'groups': dict           # Все извлечённые группы из regex
-            }
+            Список результатов извлечения (может быть несколько совпадений)
+            или None если ничего не найдено
         """
         # TODO: Реализовать логику извлечения автора из названия файла
         # - Применить все паттерны file_patterns
         # - Найти совпадение в названии файла
         # - Извлечь группу 'author' (если есть)
-        # - Вернуть результат с уверенностью
+        # - Проверить против filename_blacklist (BL)
+        # - Вернуть результаты с уверенностью FILENAME (0.60-0.80)
         pass
     
-    def extract_author_from_filepath(self, filepath: str) -> Optional[Dict[str, Any]]:
+    def extract_author_from_filepath(self, filepath: str) -> Optional[List[ExtractionResult]]:
         """
         Извлечь информацию об авторе из пути файла (анализ структуры папок).
         
@@ -89,13 +101,15 @@ class AuthorProcessor:
             filepath: Полный путь к файлу
         
         Returns:
-            Словарь с информацией об авторе или None
+            Список результатов извлечения или None
         """
         # TODO: Реализовать логику извлечения автора из структуры папок
         # - Разбить путь на составные части
         # - Применить паттерны folder_patterns к названиям папок
+        # - Использовать folder_parse_limit для ограничения поиска вверх
         # - Найти совпадение
-        # - Вернуть результат с указанием уровня вложенности
+        # - Проверить против filename_blacklist (BL)
+        # - Вернуть результаты с уверенностью FOLDER (0.60-0.80)
         pass
     
     def parse_author_name(self, author_string: str) -> Optional[Dict[str, Any]]:
@@ -141,6 +155,40 @@ class AuthorProcessor:
         # - Вернуть результат с указанием источника
         pass
     
+    def _merge_with_priority(self, results_by_priority: Dict[int, List[ExtractionResult]]) -> Optional[Dict[str, Any]]:
+        """
+        Слить результаты с учетом приоритетов.
+        
+        Args:
+            results_by_priority: Словарь {priority: [ExtractionResult, ...]}
+        
+        Returns:
+            Финальный результат или None
+        """
+        # TODO: Реализовать логику слияния
+        # - Пройти по AuthorExtractionPriority.ORDER от начала к концу
+        # - Для каждого приоритета взять результаты с наивысшей уверенностью
+        # - Первый найденный - финальный, остальные - альтернативы
+        # - Вернуть структурированный результат
+        pass
+    
+    def _is_blacklisted(self, value: str) -> Tuple[bool, List[str]]:
+        """
+        Проверить, содержится ли значение в черном списке.
+        
+        Args:
+            value: Значение для проверки
+        
+        Returns:
+            (is_blacklisted, reasons) - флаг и список причин совпадения
+        """
+        # TODO: Реализовать проверку против filename_blacklist
+        # - Получить filename_blacklist из конфигурации
+        # - Проверить точное совпадение
+        # - Проверить совпадение частей слова
+        # - Вернуть результат и причины
+        pass
+    
     def reload_patterns(self):
         """Перезагрузить паттерны из конфигурации."""
         self._load_patterns()
@@ -153,3 +201,9 @@ if __name__ == '__main__':
     print(f"Паттерны в файлах: {len(processor.file_patterns)}")
     print(f"Паттерны в папках: {len(processor.folder_patterns)}")
     print(f"Паттерны для имён: {len(processor.author_patterns)}")
+    print(f"Предел папок при парсинге: {processor.folder_parse_limit}")
+    print()
+    print(f"Приоритеты извлечения авторов:")
+    for priority in AuthorExtractionPriority.ORDER:
+        print(f"  {priority}: {AuthorExtractionPriority.get_name(priority)}")
+
