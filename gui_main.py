@@ -506,7 +506,7 @@ class MainWindow(tk.Tk):
         
         # Создаем новое окно для нормализации
         normalizer_root = tk.Toplevel(self)
-        app = CSVNormalizerApp(normalizer_root, current_folder)
+        app = CSVNormalizerApp(normalizer_root, current_folder, self.logger)
         self.logger.log('Окно нормализации открыто')
         window_manager = get_window_manager()
         window_manager.open_child_window(self, normalizer_root)

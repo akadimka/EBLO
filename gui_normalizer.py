@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 import threading
+import sys
 
 try:
     from regen_csv import RegenCSVService
@@ -10,10 +11,13 @@ except ImportError:
 
 
 class CSVNormalizerApp:
-    def __init__(self, root, folder_path=None):
+    def __init__(self, root, folder_path=None, logger=None):
         self.root = root
         self.root.title("Нормализация")
         self.root.geometry("1400x700")
+        
+        # Logger из главного окна (если передан)
+        self.logger = logger
         
         # Переменные
         self.folder_path = tk.StringVar()
@@ -26,6 +30,8 @@ class CSVNormalizerApp:
         # Сервис для генерации CSV
         self.csv_service = RegenCSVService()
         self.processing = False
+        
+        self._log("Инициализация окна нормализации")
         
         # Создание GUI
         self.create_widgets()
@@ -113,25 +119,38 @@ class CSVNormalizerApp:
         ttk.Button(buttons_frame, text="Удалить пустые папки", command=self.delete_empty_folders).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Логи", command=self.show_logs).pack(side=tk.LEFT, padx=2)
         
+    def _log(self, message: str):
+        """Логирование в окно логов и консоль."""
+        if self.logger:
+            self.logger.log(message)
+        # Временное логирование в консоль
+        print(f"[NORMALIZER] {message}", file=sys.stdout)
+        sys.stdout.flush()
+        
     def browse_folder(self):
         folder = filedialog.askdirectory(initialdir=self.folder_path.get())
         if folder:
             self.folder_path.set(folder)
+            self._log(f"Папка выбрана: {folder}")
             
     def create_csv(self):
         """Создать CSV из FB2 файлов в папке."""
         folder = self.folder_path.get()
+        self._log(f"Начало создания CSV для папки: {folder}")
         
         if not folder or not os.path.isdir(folder):
+            self._log(f"ОШИБКА: Папка не существует или не указана: {folder}")
             messagebox.showerror("Ошибка", "Укажите корректную папку")
             return
         
         if self.processing:
+            self._log("ОШИБКА: Обработка уже в процессе")
             messagebox.showwarning("Внимание", "Обработка уже в процессе")
             return
         
         # Запустить обработку в отдельном потоке
         self.processing = True
+        self._log("Запуск потока генерации CSV")
         thread = threading.Thread(
             target=self._process_csv_thread,
             args=(folder,),
@@ -142,16 +161,22 @@ class CSVNormalizerApp:
     def _process_csv_thread(self, folder_path: str):
         """Обработка CSV в отдельном потоке."""
         try:
+            self._log(f"Начало генерации CSV для папки: {folder_path}")
+            
             def progress_callback(current, total, status):
                 """Обновить прогресс в UI."""
+                self._log(f"Прогресс: {current}/{total} - {status}")
                 self.root.after(0, lambda: self._update_progress(current, total, status))
             
             # Генерировать CSV
+            self._log("Запуск сервиса генерации CSV")
             records = self.csv_service.generate_csv(
                 folder_path,
                 output_csv_path=None,  # Не сохраняем CSV на диск сейчас
                 progress_callback=progress_callback
             )
+            
+            self._log(f"CSV сгенерирован: {len(records)} записей")
             
             # Обновить таблицу в UI
             self.root.after(0, lambda: self._fill_table(records))
@@ -164,7 +189,9 @@ class CSVNormalizerApp:
                     f"Обработано {len(records)} файлов\nТаблица обновлена"
                 )
             )
+            self._log(f"Обработка завершена успешно: {len(records)} файлов")
         except Exception as e:
+            self._log(f"ОШИБКА при обработке CSV: {str(e)}")
             self.root.after(
                 0,
                 lambda: messagebox.showerror(
