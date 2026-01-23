@@ -98,6 +98,20 @@ class SettingsWindow(tk.Toplevel):
         limit_entry.grid(row=0, column=1, sticky='w')
         limit_entry.bind('<FocusOut>', self._validate_folder_limit)
         limit_entry.bind('<Return>', lambda event: self._save())
+        
+        # Separator
+        ttk.Separator(self.tab_general, orient='horizontal').pack(fill='x', padx=10, pady=10)
+        
+        # CSV generation setting
+        self.generate_csv_var = tk.BooleanVar(value=self.settings_manager.get_generate_csv())
+        csv_frame = ttk.Frame(self.tab_general)
+        csv_frame.pack(fill='x', padx=10, pady=5)
+        
+        ttk.Checkbutton(
+            csv_frame,
+            text='Генерировать CSV-файл при нормализации',
+            variable=self.generate_csv_var
+        ).pack(anchor='w')
 
 
     def _create_lists_tab(self):
@@ -278,6 +292,7 @@ class SettingsWindow(tk.Toplevel):
         # General
         self.settings_manager.set_library_path(self.path_var.get())
         self.settings_manager.set_folder_parse_limit(self.folder_limit_var.get())
+        self.settings_manager.set_generate_csv(self.generate_csv_var.get())
             
         # Lists panel: persist current list
         key = self.list_key_var.get()

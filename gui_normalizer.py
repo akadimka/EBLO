@@ -3,6 +3,7 @@ from tkinter import ttk, filedialog, messagebox
 import os
 import threading
 import sys
+from pathlib import Path
 
 try:
     from regen_csv import RegenCSVService
@@ -11,13 +12,16 @@ except ImportError:
 
 
 class CSVNormalizerApp:
-    def __init__(self, root, folder_path=None, logger=None):
+    def __init__(self, root, folder_path=None, logger=None, settings_manager=None):
         self.root = root
         self.root.title("Нормализация")
         self.root.geometry("1400x700")
         
         # Logger из главного окна (если передан)
         self.logger = logger
+        
+        # Settings manager из главного окна (если передан)
+        self.settings_manager = settings_manager
         
         # Переменные
         self.folder_path = tk.StringVar()
@@ -168,15 +172,26 @@ class CSVNormalizerApp:
                 self._log(f"Прогресс: {current}/{total} - {status}")
                 self.root.after(0, lambda: self._update_progress(current, total, status))
             
+            # Определяем путь сохранения CSV если нужно
+            output_csv_path = None
+            if self.settings_manager and self.settings_manager.get_generate_csv():
+                # Сохраняем в папку проекта с именем regen.csv
+                output_csv_path = str(Path(__file__).parent / 'regen.csv')
+                self._log(f"CSV будет сохранён в: {output_csv_path}")
+            else:
+                self._log("Параметр 'Генерировать CSV-файл' отключен - CSV не будет сохранён")
+            
             # Генерировать CSV
             self._log("Запуск сервиса генерации CSV")
             records = self.csv_service.generate_csv(
                 folder_path,
-                output_csv_path=None,  # Не сохраняем CSV на диск сейчас
+                output_csv_path=output_csv_path,
                 progress_callback=progress_callback
             )
             
             self._log(f"CSV сгенерирован: {len(records)} записей")
+            if output_csv_path:
+                self._log(f"CSV-файл сохранён: {output_csv_path}")
             
             # Обновить таблицу в UI
             self.root.after(0, lambda: self._fill_table(records))

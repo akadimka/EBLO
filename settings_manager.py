@@ -108,6 +108,15 @@ class SettingsManager:
             self.settings['folder_parse_limit'] = 5
         self.save()
 
+    def get_generate_csv(self):
+        """Get CSV generation flag / Получить флаг генерации CSV-файла."""
+        return self.settings.get('generate_csv', False)
+        
+    def set_generate_csv(self, value):
+        """Set CSV generation flag / Установить флаг генерации CSV-файла."""
+        self.settings['generate_csv'] = bool(value)
+        self.save()
+
     def get_test_window_path(self):
         """
         Get test window saved path.
