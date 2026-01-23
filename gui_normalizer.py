@@ -10,14 +10,18 @@ except ImportError:
 
 
 class CSVNormalizerApp:
-    def __init__(self, root):
+    def __init__(self, root, folder_path=None):
         self.root = root
         self.root.title("Нормализация")
         self.root.geometry("1400x700")
         
         # Переменные
         self.folder_path = tk.StringVar()
-        self.folder_path.set("E:/Users/dmitriy.murov/Downloads/Tribler/Downloads/Test1")
+        # Если папка передана, используем её, иначе используем по умолчанию
+        if folder_path and os.path.isdir(folder_path):
+            self.folder_path.set(folder_path)
+        else:
+            self.folder_path.set("E:/Users/dmitriy.murov/Downloads/Tribler/Downloads/Test1")
         
         # Сервис для генерации CSV
         self.csv_service = RegenCSVService()
