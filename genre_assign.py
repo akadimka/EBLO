@@ -24,9 +24,9 @@ class GenreAssignmentService:
     # Namespaces для FB2
     FB2_NAMESPACE = 'http://www.gribuser.ru/xml/fictionbook/2.0'
     
-    def __init__(self):
+    def __init__(self, logger=None):
         """Инициализация сервиса."""
-        self.logger = Logger()
+        self.logger = logger if logger is not None else Logger()
         self.processed_count = 0
     
     def assign_genre_to_folder(
@@ -59,31 +59,14 @@ class GenreAssignmentService:
             self.logger.log("ОШИБКА: genre_name не задан или пуст!")
             return 0
         
-        folder = Path(folder_path)
+        # Normalize path - convert mixed slashes to backslashes on Windows
+        folder_path_normalized = str(folder_path).strip().replace('/', '\\')
         
-        self.logger.log(f"GenreAssignmentService.assign_genre_to_folder called")
-        self.logger.log(f"  folder_path type: {type(folder_path).__name__}")
-        self.logger.log(f"  folder_path repr: {repr(folder_path)}")
-        self.logger.log(f"  folder_path len: {len(str(folder_path))}")
-        
-        # Convert to string explicitly
-        folder_path_str = str(folder_path).strip()
-        if not folder_path_str:
-            self.logger.log(f"ОШИБКА: folder_path пуст!")
-            return 0
-        
-        folder = Path(folder_path_str)
-        self.logger.log(f"  folder.exists(): {folder.exists()}")
+        folder = Path(folder_path_normalized)
         
         if not folder.exists():
-            self.logger.log(f"Папка не найдена: {folder_path}")
-            self.logger.log(f"  Trying absolute path...")
-            folder = Path(folder_path_str).resolve()
-            self.logger.log(f"  Resolved exists: {folder.exists()}")
-            if not folder.exists():
-                return 0
-        
-        self.logger.log(f"Поиск FB2 файлов в: {folder.resolve()}")
+            self.logger.log(f"Папка не найдена: {folder_path_normalized}")
+            return 0
         
         # Найти все FB2 файлы (*.fb2 покрывает оба случая на Windows)
         fb2_files = list(folder.rglob('*.fb2')) + list(folder.rglob('*.FBZ'))
@@ -194,7 +177,8 @@ def assign_genre_threaded(
     folder_path: str,
     genre_name: str,
     progress_callback: Optional[Callable] = None,
-    completion_callback: Optional[Callable] = None
+    completion_callback: Optional[Callable] = None,
+    logger: Optional[object] = None
 ) -> threading.Thread:
     """
     Запустить присвоение жанра в отдельном потоке.
@@ -204,11 +188,12 @@ def assign_genre_threaded(
         genre_name: Название жанра
         progress_callback: Callback для прогресса
         completion_callback: Callback для завершения
+        logger: Logger instance (optional)
     
     Returns:
         Thread объект (уже запущен)
     """
-    service = GenreAssignmentService()
+    service = GenreAssignmentService(logger=logger)
     
     def worker():
         service.assign_genre_to_folder(

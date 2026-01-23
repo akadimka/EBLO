@@ -627,7 +627,8 @@ class MainWindow(tk.Tk):
                 folder_path,
                 selected_genre,
                 progress_callback=update_progress,
-                completion_callback=on_completion
+                completion_callback=on_completion,
+                logger=self.logger  # Передаем логгер приложения
             )
         
         selected_genre = None  # Variable для использования в on_completion
