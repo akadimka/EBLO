@@ -124,3 +124,20 @@ class GenresManager:
         if node and genre_str in node.assigned:
             node.assigned.remove(genre_str)
             self.save()
+    def get_all_genres(self):
+        """
+        Получить список всех жанров в плоском формате.
+        
+        Returns:
+            List[str] - список всех названий жанров
+        """
+        genres = []
+        
+        def collect_genres(nodes):
+            for node in nodes:
+                genres.append(node.name)
+                if node.children:
+                    collect_genres(node.children)
+        
+        collect_genres(self.root_nodes)
+        return genres

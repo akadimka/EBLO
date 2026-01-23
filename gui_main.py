@@ -14,9 +14,22 @@ from tkinter import ttk, filedialog, messagebox
 import threading
 import sys
 import os
+from pathlib import Path
 
 # Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(__file__))
+
+# Genre assignment
+try:
+    import genre_assign
+    import importlib
+    importlib.reload(genre_assign)
+    from genre_assign import assign_genre_threaded
+except Exception:
+    try:
+        from .genre_assign import assign_genre_threaded
+    except ImportError:
+        from fb2parser.genre_assign import assign_genre_threaded
 
 # Window persistence
 from window_persistence import save_window_geometry, restore_window_geometry
@@ -193,6 +206,14 @@ class MainWindow(tk.Tk):
         self.folder_tree.config(yscrollcommand=folder_tree_scroll.set)
         folder_tree_scroll.pack(side='right', fill='y')
         self.folder_tree.bind('<Double-Button-1>', self._on_folder_tree_double_click)
+        self.folder_tree.bind('<Button-3>', self._on_folder_tree_right_click)  # ПКМ
+        
+        # Контекстное меню для папок
+        self.folder_tree_context_menu = tk.Menu(self.folder_tree, tearoff=0)
+        self.folder_tree_context_menu.add_command(
+            label='Присвоить жанр',
+            command=self._assign_genre_to_folder
+        )
         
         # Добавляем панели в main_pane в зависимости от режима
         if self.view_mode == 'tree':
@@ -436,6 +457,193 @@ class MainWindow(tk.Tk):
         """Обработчик действия 'Синхронизация'."""
         self.logger.log('Синхронизация запущена')
         # TODO: Реализовать синхронизацию
+
+    def _on_folder_tree_right_click(self, event):
+        """Обработчик ПКМ на Treeview элемент."""
+        # Выбрать элемент в точке клика
+        item = self.folder_tree.identify('item', event.x, event.y)
+        if item:
+            self.folder_tree.selection_set(item)
+            self.selected_tree_item = item
+            # Показать контекстное меню
+            self.folder_tree_context_menu.post(event.x_root, event.y_root)
+    
+    def _assign_genre_to_folder(self):
+        """Присвоить жанр выбранной папке/файлу."""
+        if not hasattr(self, 'selected_tree_item'):
+            messagebox.showwarning('Предупреждение', 'Ничего не выбрано')
+            return
+        
+        item = self.selected_tree_item
+        
+        # Получить путь элемента
+        try:
+            path_text = self.folder_tree.item(item, 'text')
+        except:
+            messagebox.showerror('Ошибка', 'Не удалось получить информацию об элементе')
+            return
+        
+        # Показать диалог выбора жанра
+        self._open_genre_assignment_dialog(path_text, item)
+    
+    def _open_genre_assignment_dialog(self, path_text: str, tree_item: str):
+        """Открыть диалог присвоения жанра."""
+        # Получить список всех доступных жанров
+        genres = self.genres_manager.get_all_genres()
+        
+        if not genres:
+            messagebox.showwarning('Внимание', 'Список жанров пуст')
+            return
+        
+        # Получить полный путь к папке из дерева
+        try:
+            folder_path = self.folder_tree.item(tree_item, 'tags')[0]
+            # Убедиться, что путь абсолютный
+            if not os.path.isabs(folder_path):
+                folder_path = os.path.abspath(folder_path)
+            self.logger.log(f"DEBUG: Извлеченный путь: {folder_path}")
+            self.logger.log(f"DEBUG: Путь абсолютный: {os.path.isabs(folder_path)}")
+        except (IndexError, ValueError) as e:
+            self.logger.log(f"DEBUG: Ошибка при получении пути: {e}")
+            messagebox.showerror('Ошибка', 'Не удалось получить путь папки')
+            return
+        
+        # Создать окно выбора
+        dialog = tk.Toplevel(self)
+        dialog.title('Выбор жанра')
+        dialog.geometry('400x300')
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text=f'Выберите жанр для:\n{path_text}').pack(padx=10, pady=10)
+        
+        # Listbox для выбора жанра
+        listbox_frame = ttk.Frame(dialog)
+        listbox_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        listbox = tk.Listbox(listbox_frame, height=10)
+        listbox.pack(side='left', fill='both', expand=True)
+        
+        scrollbar = ttk.Scrollbar(listbox_frame, command=listbox.yview)
+        scrollbar.pack(side='right', fill='y')
+        listbox.config(yscrollcommand=scrollbar.set)
+        
+        # Добавить жанры
+        for genre in genres:
+            listbox.insert(tk.END, genre)
+        
+        # Progress window reference
+        progress_window = None
+        progress_label = None
+        
+        def update_progress(current: int, total: int, filename: str):
+            """Обновить прогресс."""
+            nonlocal progress_window, progress_label
+            
+            if progress_window and progress_label:
+                progress_label.config(
+                    text=f'Обработка: {filename}\n({current}/{total})'
+                )
+                progress_window.update()
+        
+        def on_completion(count: int):
+            """Завершение обработки."""
+            nonlocal progress_window
+            
+            if progress_window:
+                progress_window.destroy()
+                progress_window = None
+            
+            # Обновить статус бар
+            self.progress_var.set(f'Жанр изменен у {count} файлов')
+            
+            self.logger.log(f'Жанр "{selected_genre}" присвоен {count} файлам в "{path_text}"')
+            messagebox.showinfo('Успех', f'Жанр "{selected_genre}" присвоен {count} файлам')
+            
+            dialog.destroy()
+        
+        def confirm():
+            nonlocal progress_window, progress_label, selected_genre
+            
+            selection = listbox.curselection()
+            if not selection:
+                messagebox.showwarning('Внимание', 'Выберите жанр из списка')
+                return
+            
+            selected_genre = listbox.get(selection[0])
+            
+            # Логировать путь перед обработкой
+            self.logger.log(f"DEBUG: Начинаю присвоение жанра '{selected_genre}' для папки: {folder_path}")
+            self.logger.log(f"DEBUG: Полный путь (abs): {os.path.abspath(folder_path)}")
+            self.logger.log(f"DEBUG: Путь существует: {os.path.isdir(folder_path)}")
+            
+            # Создать окно прогресса
+            progress_window = tk.Toplevel(dialog)
+            progress_window.title('Присвоение жанра')
+            progress_window.geometry('400x150')
+            progress_window.transient(dialog)
+            progress_window.resizable(False, False)
+            
+            # Отключить закрытие окна во время обработки
+            def on_closing():
+                messagebox.showwarning('Внимание', 'Пожалуйста, дождитесь завершения обработки')
+            
+            progress_window.protocol('WM_DELETE_WINDOW', on_closing)
+            
+            # Информация
+            info_label = ttk.Label(
+                progress_window,
+                text=f'Присвоение жанра: {selected_genre}\nПапка: {path_text}'
+            )
+            info_label.pack(padx=10, pady=10)
+            
+            # Прогресс
+            progress_label = ttk.Label(
+                progress_window,
+                text='Инициализация...\n(0/0)'
+            )
+            progress_label.pack(padx=10, pady=5)
+            
+            # Скрыть диалог выбора
+            dialog.withdraw()
+            
+            # Запустить присвоение жанра в отдельном потоке
+            self.logger.log(f"DEBUG: Вызов assign_genre_threaded с:")
+            self.logger.log(f"  folder_path: {folder_path}")
+            self.logger.log(f"  selected_genre: {selected_genre}")
+            
+            assign_genre_threaded(
+                folder_path,
+                selected_genre,
+                progress_callback=update_progress,
+                completion_callback=on_completion
+            )
+        
+        selected_genre = None  # Variable для использования в on_completion
+        
+        # Кнопки
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Button(btn_frame, text='Присвоить', command=confirm).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text='Отмена', command=dialog.destroy).pack(side='left', padx=5)
+    
+    def _store_genre_for_item(self, tree_item: str, path: str, genre: str):
+        """Сохранить выбранный жанр для элемента дерева."""
+        # Сохраняем в памяти приложения (можно расширить чтобы сохранять в конфиг)
+        if not hasattr(self, 'genre_assignments'):
+            self.genre_assignments = {}
+        
+        self.genre_assignments[path] = genre
+        
+        # Обновить текст элемента в дереве (добавить жанр)
+        try:
+            current_text = self.folder_tree.item(tree_item, 'text')
+            if ' [' not in current_text:  # Если еще не добавили жанр
+                new_text = f"{current_text} [{genre}]"
+                self.folder_tree.item(tree_item, text=new_text)
+        except:
+            pass
 
     def _on_closing(self):
         """Обработчик закрытия окна."""
