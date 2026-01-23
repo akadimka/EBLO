@@ -28,7 +28,8 @@ class SettingsManager:
             'last_scan_path': '',
             'genres_file_path': 'genres.xml',  # Путь к файлу жанров
             'genre_association_method': 'context_menu',
-            'window_sizes': {}  # Для хранения размеров окон
+            'window_sizes': {},  # Для хранения размеров окон
+            'generate_csv': False  # Флаг генерации CSV файла
         }
         self._loaded_settings = None  # Для отслеживания оригинальных значений
         self.load()
@@ -37,7 +38,9 @@ class SettingsManager:
         """Load settings from config file / Загрузить настройки из файла конфига."""
         if self.config_path.exists():
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                self.settings = json.load(f)
+                loaded = json.load(f)
+                # Обновляем только загруженные значения, сохраняя defaults для отсутствующих ключей
+                self.settings.update(loaded)
         # Сохраняем копию загруженных настроек для проверки изменений
         self._loaded_settings = copy.deepcopy(self.settings)
 

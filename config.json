@@ -9,7 +9,10 @@
       "state": "normal"
     },
     "genres_manager": "944x406+221+220",
-    "log": "1536x889+246+59",
+    "log": {
+      "geometry": "1536x889+47+59",
+      "state": "zoomed"
+    },
     "duplicates_window": {
       "geometry": "1000x652+64+38",
       "state": "normal"
@@ -407,5 +410,6 @@
     "Наталия"
   ],
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
-  "folder_parse_limit": 5
+  "folder_parse_limit": 5,
+  "generate_csv": true
 }

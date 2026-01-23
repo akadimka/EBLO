@@ -89,13 +89,17 @@ class BookRecord:
 class RegenCSVService:
     """Сервис для регенерации CSV из FB2 файлов."""
     
-    def __init__(self, settings_path: str = 'config.json'):
+    def __init__(self, settings_path: str = None):
         """
         Инициализация сервиса.
         
         Args:
-            settings_path: Путь к файлу конфигурации
+            settings_path: Путь к файлу конфигурации (если None, ищет в папке скрипта)
         """
+        # Если путь не задан, ищем config.json в папке скрипта
+        if settings_path is None:
+            settings_path = str(Path(__file__).parent / 'config.json')
+        
         self.settings = SettingsManager(settings_path)
         self.logger = Logger()
         self.extractor = FB2AuthorExtractor(settings_path)
@@ -174,6 +178,7 @@ class RegenCSVService:
         """
         # Получить имя файла без расширения и пути
         filename = fb2_path.stem
+        self.logger.log(f"[REGEN] Обработка файла: {fb2_path.name}")
         
         # Извлечь авторов используя FB2AuthorExtractor
         author_result = self.extractor.extract_all_authors(str(fb2_path))
@@ -184,12 +189,16 @@ class RegenCSVService:
             primary = author_result['primary_author']
             proposed_author = primary.get('name', '')
             author_source = primary.get('source', '')
+            self.logger.log(f"[REGEN]   Извлеченный автор: {proposed_author} (источник: {author_source})")
+        else:
+            self.logger.log(f"[REGEN]   Автор не найден в результатах: {author_result}")
         
         # TODO: Добавить извлечение серии когда будет готово
         # series_result = self.series_processor.extract_series_combined(filename, str(fb2_path))
         
         # Извлечь метаданные из FB2: авторов, название, жанр
         metadata_authors, book_title, metadata_genre = self._extract_fb2_metadata(fb2_path)
+        self.logger.log(f"[REGEN]   Метаданные FB2: авторы='{metadata_authors}', название='{book_title}', жанр='{metadata_genre}'")
         
         # Создать запись
         record = BookRecord(
@@ -219,6 +228,7 @@ class RegenCSVService:
         try:
             tree = ET.parse(fb2_path)
             root = tree.getroot()
+            self.logger.log(f"[REGEN]   XML загружен, root tag: {root.tag}")
             
             # Namespace для FB2
             ns = {'fb': 'http://www.gribuser.ru/xml/fictionbook/2.0'}
@@ -226,9 +236,12 @@ class RegenCSVService:
             # Получить авторов
             authors_list = []
             author_elements = root.findall('.//fb:author', ns)
+            self.logger.log(f"[REGEN]   Найдено авторов (с namespace): {len(author_elements)}")
+            
             if not author_elements:
                 # Попробовать без namespace
                 author_elements = root.findall('.//author')
+                self.logger.log(f"[REGEN]   Найдено авторов (без namespace): {len(author_elements)}")
             
             for author_elem in author_elements:
                 first_name = author_elem.findtext('first-name', '')
@@ -241,6 +254,7 @@ class RegenCSVService:
                     authors_list.append(f"{first_name} {last_name}".strip())
             
             authors_str = "; ".join(authors_list) if authors_list else ""
+            self.logger.log(f"[REGEN]   Авторы из метаданных: {authors_str if authors_str else '(пусто)'}")
             
             # Получить название
             title_elem = root.find('.//fb:book-title', ns)
@@ -248,6 +262,7 @@ class RegenCSVService:
                 title_elem = root.find('.//book-title')
             
             title = title_elem.text if title_elem is not None else ""
+            self.logger.log(f"[REGEN]   Название: {title if title else '(пусто)'}")
             
             # Получить жанр
             genre_elem = root.find('.//fb:genre', ns)
@@ -255,11 +270,12 @@ class RegenCSVService:
                 genre_elem = root.find('.//genre')
             
             genre = genre_elem.text if genre_elem is not None else ""
+            self.logger.log(f"[REGEN]   Жанр: {genre if genre else '(пусто)'}")
             
             return authors_str, title or "", genre or ""
         
         except Exception as e:
-            self.logger.log(f"Ошибка при парсинге FB2 метаданных {fb2_path}: {str(e)}")
+            self.logger.log(f"ОШИБКА при парсинге FB2 метаданных {fb2_path}: {str(e)}")
             return "", "", ""
     
     def _save_csv(self, records: List[BookRecord], output_path: str):
@@ -300,5 +316,38 @@ class RegenCSVService:
 
 # Для тестирования
 if __name__ == '__main__':
+    from pathlib import Path
+    
     service = RegenCSVService()
-    print("RegenCSVService инициализирован")
+    
+    # Всегда использовать текущую рабочую папку
+    library_path = str(Path.cwd())
+    generate_csv = service.settings.get_generate_csv()
+    
+    # Определить путь сохранения CSV
+    output_csv_path = None
+    if generate_csv:
+        output_csv_path = str(Path(__file__).parent / 'regen.csv')
+    
+    # Запустить генерацию
+    print(f"Начало генерации CSV (папка: {library_path})...")
+    
+    def progress_callback(current, total, status):
+        print(f"Прогресс: {current}/{total} - {status}")
+    
+    records = service.generate_csv(
+        library_path,
+        output_csv_path=output_csv_path,
+        progress_callback=progress_callback
+    )
+    
+    print(f"Генерация завершена: {len(records)} записей обработано")
+    if output_csv_path:
+        print(f"CSV файл сохранён: {output_csv_path}")
+    else:
+        print("CSV файл не был сохранён (опция отключена)")
+
+
+
+
+
