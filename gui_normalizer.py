@@ -1,6 +1,13 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
+import threading
+
+try:
+    from regen_csv import RegenCSVService
+except ImportError:
+    from .regen_csv import RegenCSVService
+
 
 class CSVNormalizerApp:
     def __init__(self, root):
@@ -11,6 +18,10 @@ class CSVNormalizerApp:
         # Переменные
         self.folder_path = tk.StringVar()
         self.folder_path.set("E:/Users/dmitriy.murov/Downloads/Tribler/Downloads/Test1")
+        
+        # Сервис для генерации CSV
+        self.csv_service = RegenCSVService()
+        self.processing = False
         
         # Создание GUI
         self.create_widgets()
@@ -104,7 +115,89 @@ class CSVNormalizerApp:
             self.folder_path.set(folder)
             
     def create_csv(self):
-        messagebox.showinfo("Информация", "Функция создания CSV")
+        """Создать CSV из FB2 файлов в папке."""
+        folder = self.folder_path.get()
+        
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror("Ошибка", "Укажите корректную папку")
+            return
+        
+        if self.processing:
+            messagebox.showwarning("Внимание", "Обработка уже в процессе")
+            return
+        
+        # Запустить обработку в отдельном потоке
+        self.processing = True
+        thread = threading.Thread(
+            target=self._process_csv_thread,
+            args=(folder,),
+            daemon=True
+        )
+        thread.start()
+    
+    def _process_csv_thread(self, folder_path: str):
+        """Обработка CSV в отдельном потоке."""
+        try:
+            def progress_callback(current, total, status):
+                """Обновить прогресс в UI."""
+                self.root.after(0, lambda: self._update_progress(current, total, status))
+            
+            # Генерировать CSV
+            records = self.csv_service.generate_csv(
+                folder_path,
+                output_csv_path=None,  # Не сохраняем CSV на диск сейчас
+                progress_callback=progress_callback
+            )
+            
+            # Обновить таблицу в UI
+            self.root.after(0, lambda: self._fill_table(records))
+            
+            # Показать результат
+            self.root.after(
+                0,
+                lambda: messagebox.showinfo(
+                    "Готово",
+                    f"Обработано {len(records)} файлов\nТаблица обновлена"
+                )
+            )
+        except Exception as e:
+            self.root.after(
+                0,
+                lambda: messagebox.showerror(
+                    "Ошибка",
+                    f"Ошибка при обработке: {str(e)}"
+                )
+            )
+        finally:
+            self.processing = False
+    
+    def _update_progress(self, current: int, total: int, status: str):
+        """Обновить статус прогресса."""
+        # Обновить лейбл внизу
+        status_label = None
+        for child in self.root.winfo_children():
+            if isinstance(child, ttk.Frame):
+                for widget in child.winfo_children():
+                    if isinstance(widget, ttk.Label) and 'Готово' in widget.cget('text'):
+                        status_label = widget
+                        break
+        
+        if status_label:
+            status_label.config(text=f"{status} ({current}/{total})")
+    
+    def _fill_table(self, records):
+        """Заполнить таблицу записями."""
+        # Очистить таблицу
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Добавить записи
+        for record in records:
+            self.tree.insert(
+                '',
+                tk.END,
+                values=record.to_tuple()
+            )
         
     def cancel(self):
         if messagebox.askyesno("Подтверждение", "Вы уверены, что хотите отменить?"):
