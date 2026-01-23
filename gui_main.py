@@ -497,13 +497,24 @@ class MainWindow(tk.Tk):
         
         # Получить полный путь к папке из дерева
         try:
-            folder_path = self.folder_tree.item(tree_item, 'tags')[0]
+            tags = self.folder_tree.item(tree_item, 'tags')
+            self.logger.log(f"DEBUG: tags type: {type(tags).__name__}, tags: {tags}")
+            
+            if not tags or len(tags) == 0:
+                self.logger.log(f"DEBUG: ОШИБКА - tags пусты!")
+                messagebox.showerror('Ошибка', 'Не удалось получить путь папки')
+                return
+            
+            folder_path = str(tags[0]).strip()
+            
             # Убедиться, что путь абсолютный
             if not os.path.isabs(folder_path):
                 folder_path = os.path.abspath(folder_path)
+            
             self.logger.log(f"DEBUG: Извлеченный путь: {folder_path}")
             self.logger.log(f"DEBUG: Путь абсолютный: {os.path.isabs(folder_path)}")
-        except (IndexError, ValueError) as e:
+            self.logger.log(f"DEBUG: Путь существует: {os.path.isdir(folder_path)}")
+        except (IndexError, ValueError, AttributeError) as e:
             self.logger.log(f"DEBUG: Ошибка при получении пути: {e}")
             messagebox.showerror('Ошибка', 'Не удалось получить путь папки')
             return

@@ -50,6 +50,15 @@ class GenreAssignmentService:
         Returns:
             Количество обработанных файлов
         """
+        # Validate input
+        if not folder_path or not str(folder_path).strip():
+            self.logger.log("ОШИБКА: folder_path не задан или пуст!")
+            return 0
+        
+        if not genre_name or not str(genre_name).strip():
+            self.logger.log("ОШИБКА: genre_name не задан или пуст!")
+            return 0
+        
         folder = Path(folder_path)
         
         self.logger.log(f"GenreAssignmentService.assign_genre_to_folder called")
