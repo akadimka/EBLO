@@ -320,12 +320,44 @@ class MainWindow(tk.Tk):
         """Показать окно логов."""
         win = tk.Toplevel(self)
         win.title('Лог')
+        win.withdraw()  # Скрыть окно изначально
         
+        # Установить дефолтный размер
+        win.geometry('700x400')
+        
+        # Загрузить сохраненную геометрию и состояние
         geometry = self.settings.get_window_geometry('log')
-        if geometry:
-            win.geometry(geometry)
+        
+        # Проверить сохраненное состояние (может быть dict с geometry и state)
+        window_state = 'normal'
+        if geometry and isinstance(geometry, dict):
+            # Если это словарь (новый формат)
+            geometry_str = geometry.get('geometry', '700x400')
+            window_state = geometry.get('state', 'normal')
+        elif geometry and isinstance(geometry, str):
+            # Если это строка (старый формат)
+            geometry_str = geometry
         else:
-            win.geometry('700x400')
+            geometry_str = None
+        
+        # Применить геометрию
+        if geometry_str and 'x' in geometry_str.lower() and '+' in geometry_str:
+            try:
+                win.geometry(geometry_str)
+            except Exception:
+                pass
+        
+        # Показать окно
+        win.deiconify()
+        
+        # Применить состояние (normal/zoomed/maximized)
+        try:
+            if window_state in ['zoomed', 'maximized']:
+                win.state('zoomed')
+            else:
+                win.state('normal')
+        except Exception:
+            pass
             
         frame = ttk.Frame(win)
         frame.pack(fill='both', expand=True, padx=10, pady=10)
@@ -345,8 +377,16 @@ class MainWindow(tk.Tk):
         ttk.Button(btns, text='Закрыть', command=win.destroy).pack(side='left')
         
         def on_closing():
-            geometry = win.geometry()
-            self.settings.set_window_geometry('log', geometry)
+            try:
+                geometry = win.geometry()
+                state = win.state()
+                window_data = {
+                    'geometry': geometry,
+                    'state': state
+                }
+                self.settings.set_window_geometry('log', window_data)
+            except Exception:
+                pass
             win.destroy()
             
         win.protocol("WM_DELETE_WINDOW", on_closing)
@@ -513,10 +553,8 @@ class MainWindow(tk.Tk):
         # Получить полный путь к папке из дерева
         try:
             tags = self.folder_tree.item(tree_item, 'tags')
-            self.logger.log(f"DEBUG: tags type: {type(tags).__name__}, tags: {tags}")
             
             if not tags or len(tags) == 0:
-                self.logger.log(f"DEBUG: ОШИБКА - tags пусты!")
                 messagebox.showerror('Ошибка', 'Не удалось получить путь папки')
                 return
             
@@ -525,12 +563,7 @@ class MainWindow(tk.Tk):
             # Убедиться, что путь абсолютный
             if not os.path.isabs(folder_path):
                 folder_path = os.path.abspath(folder_path)
-            
-            self.logger.log(f"DEBUG: Извлеченный путь: {folder_path}")
-            self.logger.log(f"DEBUG: Путь абсолютный: {os.path.isabs(folder_path)}")
-            self.logger.log(f"DEBUG: Путь существует: {os.path.isdir(folder_path)}")
         except (IndexError, ValueError, AttributeError) as e:
-            self.logger.log(f"DEBUG: Ошибка при получении пути: {e}")
             messagebox.showerror('Ошибка', 'Не удалось получить путь папки')
             return
         
@@ -599,22 +632,15 @@ class MainWindow(tk.Tk):
             
             selected_genre = listbox.get(selection[0])
             
-            # Логировать путь перед обработкой
-            self.logger.log(f"DEBUG: Начинаю присвоение жанра '{selected_genre}' для папки: {folder_path}")
-            self.logger.log(f"DEBUG: Полный путь (abs): {os.path.abspath(folder_path)}")
-            self.logger.log(f"DEBUG: Путь существует: {os.path.isdir(folder_path)}")
-            
             # Создать окно прогресса
             # ВАЖНО: Создаем как child от main window (self), НЕ от dialog!
             # Так оно останется видимым когда мы скроем dialog
-            self.logger.log(f"DEBUG: Создаю окно прогресса...")
             progress_window = tk.Toplevel(self)
             progress_window.title('Присвоение жанра')
             progress_window.geometry('450x120')
             # transient от main window, чтобы было окно на переднем плане
             progress_window.transient(self)
             progress_window.resizable(False, False)
-            self.logger.log(f"DEBUG: Окно прогресса создано: {progress_window}")
             
             # Отключить закрытие окна во время обработки
             def on_closing():
@@ -654,20 +680,14 @@ class MainWindow(tk.Tk):
             y = (progress_window.winfo_screenheight() // 2) - (height // 2)
             progress_window.geometry(f'{width}x{height}+{x}+{y}')
             
-            # Убедиться что окно прогресса показано
-            self.logger.log(f"DEBUG: Показываю окно прогресса...")
+            # Показать окно прогресса
             progress_window.deiconify()
             progress_window.update()
-            self.logger.log(f"DEBUG: Окно прогресса должно быть видимо")
             
-            # Скрыть диалог выбора (но оставить видимым progress_window)
+            # Скрыть диалог выбора
             dialog.withdraw()
-            self.logger.log(f"DEBUG: Диалог скрыт, запускаю обработку...")
             
             # Запустить присвоение жанра в отдельном потоке
-            self.logger.log(f"DEBUG: Вызов assign_genre_threaded с:")
-            self.logger.log(f"  folder_path: {folder_path}")
-            self.logger.log(f"  selected_genre: {selected_genre}")
             
             assign_genre_threaded(
                 folder_path,
