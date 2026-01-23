@@ -329,7 +329,7 @@ class MainWindow(tk.Tk):
             
         frame = ttk.Frame(win)
         frame.pack(fill='both', expand=True, padx=10, pady=10)
-        log_list = tk.Listbox(frame)
+        log_list = tk.Listbox(frame, selectmode='extended')
         log_list.pack(fill='both', expand=True, side='left')
         scroll = ttk.Scrollbar(frame, command=log_list.yview)
         log_list.config(yscrollcommand=scroll.set)
@@ -341,6 +341,7 @@ class MainWindow(tk.Tk):
         btns = ttk.Frame(win)
         btns.pack(fill='x', pady=5)
         ttk.Button(btns, text='Очистить', command=lambda: self._clear_log_and_update(log_list)).pack(side='left', padx=10)
+        ttk.Button(btns, text='Копировать выделенное', command=lambda: self._copy_selected_logs(log_list)).pack(side='left', padx=10)
         ttk.Button(btns, text='Закрыть', command=win.destroy).pack(side='left')
         
         def on_closing():
@@ -355,6 +356,20 @@ class MainWindow(tk.Tk):
         self.logger.clear()
         log_list.delete(0, tk.END)
         self.logger.log('Лог очищен')
+
+    def _copy_selected_logs(self, log_list):
+        """Скопировать выделенные строки логов в буфер обмена."""
+        try:
+            selection = log_list.curselection()
+            if selection:
+                items = [log_list.get(idx) for idx in selection]
+                text = '\n'.join(items)
+                self.clipboard_clear()
+                self.clipboard_append(text)
+                self.update()
+                self.logger.log(f'Скопировано {len(items)} строк в буфер обмена')
+        except Exception as e:
+            self.logger.log(f'Ошибка при копировании: {str(e)}')
 
     def _open_genres_manager(self):
         """Открыть менеджер жанров."""
@@ -545,16 +560,18 @@ class MainWindow(tk.Tk):
         
         # Progress window reference
         progress_window = None
-        progress_label = None
+        filename_label = None
+        counter_label = None
         
         def update_progress(current: int, total: int, filename: str):
             """Обновить прогресс."""
-            nonlocal progress_window, progress_label
+            nonlocal progress_window, filename_label, counter_label
             
-            if progress_window and progress_label:
-                progress_label.config(
-                    text=f'Обработка: {filename}\n({current}/{total})'
-                )
+            if progress_window:
+                if filename_label:
+                    filename_label.config(text=f'{filename}')
+                if counter_label:
+                    counter_label.config(text=f'({current}/{total})')
                 progress_window.update()
         
         def on_completion(count: int):
@@ -569,12 +586,11 @@ class MainWindow(tk.Tk):
             self.progress_var.set(f'Жанр изменен у {count} файлов')
             
             self.logger.log(f'Жанр "{selected_genre}" присвоен {count} файлам в "{path_text}"')
-            messagebox.showinfo('Успех', f'Жанр "{selected_genre}" присвоен {count} файлам')
             
             dialog.destroy()
         
         def confirm():
-            nonlocal progress_window, progress_label, selected_genre
+            nonlocal progress_window, filename_label, counter_label, selected_genre
             
             selection = listbox.curselection()
             if not selection:
@@ -589,11 +605,16 @@ class MainWindow(tk.Tk):
             self.logger.log(f"DEBUG: Путь существует: {os.path.isdir(folder_path)}")
             
             # Создать окно прогресса
-            progress_window = tk.Toplevel(dialog)
+            # ВАЖНО: Создаем как child от main window (self), НЕ от dialog!
+            # Так оно останется видимым когда мы скроем dialog
+            self.logger.log(f"DEBUG: Создаю окно прогресса...")
+            progress_window = tk.Toplevel(self)
             progress_window.title('Присвоение жанра')
-            progress_window.geometry('400x150')
-            progress_window.transient(dialog)
+            progress_window.geometry('450x120')
+            # transient от main window, чтобы было окно на переднем плане
+            progress_window.transient(self)
             progress_window.resizable(False, False)
+            self.logger.log(f"DEBUG: Окно прогресса создано: {progress_window}")
             
             # Отключить закрытие окна во время обработки
             def on_closing():
@@ -604,19 +625,44 @@ class MainWindow(tk.Tk):
             # Информация
             info_label = ttk.Label(
                 progress_window,
-                text=f'Присвоение жанра: {selected_genre}\nПапка: {path_text}'
+                text=f'Присвоение жанра: {selected_genre}',
+                font=('Arial', 9)
             )
-            info_label.pack(padx=10, pady=10)
+            info_label.pack(padx=10, pady=(8, 2))
             
-            # Прогресс
-            progress_label = ttk.Label(
+            # Название файла (первая строка прогресса)
+            filename_label = ttk.Label(
                 progress_window,
-                text='Инициализация...\n(0/0)'
+                text='Инициализация...',
+                font=('Arial', 8)
             )
-            progress_label.pack(padx=10, pady=5)
+            filename_label.pack(padx=10, pady=2)
             
-            # Скрыть диалог выбора
+            # Счетчик (вторая строка прогресса)
+            counter_label = ttk.Label(
+                progress_window,
+                text='(0/0)',
+                font=('Arial', 8)
+            )
+            counter_label.pack(padx=10, pady=(2, 8))
+            
+            # Центрировать окно на экране
+            progress_window.update_idletasks()
+            width = progress_window.winfo_width()
+            height = progress_window.winfo_height()
+            x = (progress_window.winfo_screenwidth() // 2) - (width // 2)
+            y = (progress_window.winfo_screenheight() // 2) - (height // 2)
+            progress_window.geometry(f'{width}x{height}+{x}+{y}')
+            
+            # Убедиться что окно прогресса показано
+            self.logger.log(f"DEBUG: Показываю окно прогресса...")
+            progress_window.deiconify()
+            progress_window.update()
+            self.logger.log(f"DEBUG: Окно прогресса должно быть видимо")
+            
+            # Скрыть диалог выбора (но оставить видимым progress_window)
             dialog.withdraw()
+            self.logger.log(f"DEBUG: Диалог скрыт, запускаю обработку...")
             
             # Запустить присвоение жанра в отдельном потоке
             self.logger.log(f"DEBUG: Вызов assign_genre_threaded с:")

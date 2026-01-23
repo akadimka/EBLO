@@ -8,6 +8,7 @@
 """
 
 import threading
+import re
 from pathlib import Path
 from typing import Optional, Callable, List
 import xml.etree.ElementTree as ET
@@ -126,45 +127,173 @@ class GenreAssignmentService:
             True если успешно, False при ошибке
         """
         try:
-            # Регистрировать namespace
-            ET.register_namespace('', self.FB2_NAMESPACE)
+            # Сначала проверить, не ZIP ли это (FBZ или архивированный FB2)
+            content = None
             
-            # Парсить файл
-            tree = ET.parse(fb2_path)
-            root = tree.getroot()
+            try:
+                import zipfile
+                if zipfile.is_zipfile(fb2_path):
+                    # Это ZIP архив
+                    with zipfile.ZipFile(fb2_path, 'r') as zf:
+                        # Найти XML файл внутри архива
+                        xml_files = [f for f in zf.namelist() if f.endswith('.xml') or f.endswith('.fb2')]
+                        if not xml_files:
+                            self.logger.log(f"ОШИБКА: {fb2_path} - в архиве не найдены XML файлы")
+                            return False
+                        
+                        # Прочитать первый XML файл
+                        with zf.open(xml_files[0]) as f:
+                            content = f.read().decode('utf-8-sig', errors='replace')
+            except (zipfile.BadZipFile, ImportError):
+                pass
             
-            # Найти раздел title-info
-            # Пытаемся с namespace, потом без
-            ns = {'fb': self.FB2_NAMESPACE}
-            title_info = root.find('.//fb:title-info', ns)
+            # Если не ZIP, читаем как обычный текстовый файл
+            if content is None:
+                # Попробовать разные кодировки
+                for encoding in ['utf-8-sig', 'utf-8', 'cp1251', 'latin-1']:
+                    try:
+                        with open(fb2_path, 'r', encoding=encoding, errors='replace') as f:
+                            content = f.read()
+                        if content.strip().startswith('<?xml') or content.strip().startswith('<'):
+                            self.logger.log(f"DEBUG: файл прочитан с кодировкой {encoding}")
+                            break
+                    except Exception:
+                        continue
+                
+                if content is None:
+                    self.logger.log(f"ОШИБКА: {fb2_path} - не удалось прочитать с известными кодировками")
+                    return False
             
-            if title_info is None:
-                # Попробовать без namespace
-                title_info = root.find('.//title-info')
-            
-            if title_info is None:
+            # Проверить, что это валидный XML
+            content_stripped = content.strip()
+            if not content_stripped.startswith('<?xml') and not content_stripped.startswith('<'):
+                lines = content.split('\n')
+                self.logger.log(f"DEBUG: {fb2_path} - первая строка: {repr(lines[0][:100] if lines else 'пусто')}")
+                if len(lines) > 1:
+                    self.logger.log(f"DEBUG: {fb2_path} - вторая строка: {repr(lines[1][:100])}")
+                self.logger.log(f"DEBUG: Всего строк: {len(lines)}, размер файла: {len(content)} байт")
+                self.logger.log(f"ОШИБКА: {fb2_path} - не валидный XML файл")
                 return False
             
-            # Найти и удалить все существующие теги <genre>
-            for genre_elem in list(title_info.findall('genre')):
+            # Парсить XML с помощью ElementTree
+            try:
+                root = ET.fromstring(content)
+            except ET.ParseError as e:
+                self.logger.log(f"DEBUG ET.ParseError: {str(e)}")
+                # Логировать первые несколько строк
+                lines = content.split('\n')
+                for i, line in enumerate(lines[:5]):
+                    self.logger.log(f"DEBUG строка {i}: {repr(line[:120])}")
+                
+                # Проблема может быть в пустых строках - удалим их после XML declaration
+                if lines[0].startswith('<?xml'):
+                    # Оставляем XML declaration и удаляем пустые строки
+                    xml_decl = lines[0]
+                    new_lines = [line for line in lines[1:] if line.strip()]
+                    content = xml_decl + '\n' + '\n'.join(new_lines)
+                    
+                    self.logger.log(f"DEBUG: Удалены пустые строки")
+                    self.logger.log(f"DEBUG: Исходно было {len(lines)} строк, осталось {len(new_lines) + 1}")
+                    self.logger.log(f"DEBUG: Новый размер content: {len(content)} байт")
+                    self.logger.log(f"DEBUG: Новое начало (первые 200 символов): {repr(content[:200])}")
+                    
+                    # Если content слишком маленький, это ошибка
+                    if len(content) < 100:
+                        self.logger.log(f"DEBUG: ВНИМАНИЕ! Content очень маленький, весь файл:")
+                        self.logger.log(f"DEBUG: {repr(content)}")
+                    
+                    self.logger.log(f"DEBUG: Пытаюсь парсить снова")
+                    
+                    try:
+                        root = ET.fromstring(content)
+                    except ET.ParseError as e2:
+                        self.logger.log(f"DEBUG ET.ParseError (попытка 2): {str(e2)}")
+                        self.logger.log(f"ОШИБКА парсинга XML: {fb2_path} - {str(e2)}")
+                        return False
+                else:
+                    self.logger.log(f"ОШИБКА парсинга XML: {fb2_path} - {str(e)}")
+                    return False
+            
+            # Определяем, использует ли файл namespace
+            # Проверяем по наличию {} в root tag - это признак namespace в ElementTree
+            has_namespace = root.tag.startswith('{')
+            
+            self.logger.log(f"DEBUG: root tag: {root.tag}")
+            self.logger.log(f"DEBUG: Файл использует namespace: {has_namespace}")
+            
+            # Поиск title-info в зависимости от наличия namespace
+            if has_namespace:
+                # Поиск с явным указанием namespace в синтаксисе {namespace}tag
+                title_info = root.find('.//{' + self.FB2_NAMESPACE + '}title-info')
+                if title_info is not None:
+                    self.logger.log(f"DEBUG: title-info найден с namespace")
+                else:
+                    self.logger.log(f"DEBUG: title-info не найден в description, ищу в body")
+                    # Проверяем первых нескольких children для отладки
+                    for i, child in enumerate(root):
+                        self.logger.log(f"DEBUG: child[{i}]: {child.tag}")
+                        if i >= 3:
+                            break
+            else:
+                # Для файлов без namespace
+                title_info = root.find('.//title-info')
+                self.logger.log(f"DEBUG: title-info найден без namespace" if title_info is not None else "DEBUG: title-info не найден без namespace")
+            
+            if title_info is None:
+                self.logger.log(f"ОШИБКА: {fb2_path} - не найден раздел <title-info>")
+                return False
+            
+            # Удалить все существующие теги <genre>
+            if has_namespace:
+                genre_tags_to_remove = title_info.findall('{' + self.FB2_NAMESPACE + '}genre')
+            else:
+                genre_tags_to_remove = title_info.findall('genre')
+            
+            for genre_elem in genre_tags_to_remove:
                 title_info.remove(genre_elem)
             
-            # Также попробовать с namespace
-            for genre_elem in list(title_info.findall('fb:genre', ns)):
-                title_info.remove(genre_elem)
+            self.logger.log(f"DEBUG: Удалены {len(genre_tags_to_remove)} существующих тегов <genre>")
             
             # Добавить новый тег <genre>
             new_genre = ET.Element('genre')
             new_genre.text = genre_name
             title_info.append(new_genre)
             
-            # Сохранить файл
-            tree.write(
-                fb2_path,
-                encoding='utf-8',
-                xml_declaration=True,
-                default_namespace=self.FB2_NAMESPACE
-            )
+            self.logger.log(f"DEBUG: Добавлен новый тег <genre> с значением {genre_name}")
+            
+            # Сохранить файл - самый надежный способ: заменяем жанры в оригинальном контенте
+            # используя regex, чтобы не потерять namespace объявления
+            has_bom = content.startswith('\ufeff')
+            
+            # Найти все существующие genre теги с их значениями в title-info и удалить их
+            # Regex ищет <genre ...> ... </genre> с любыми атрибутами и значениями
+            # Это работает независимо от namespace префиксов
+            genre_pattern = r'<(?:fb:)?genre[^>]*>.*?</(?:fb:)?genre>'
+            result_text = re.sub(genre_pattern, '', content, flags=re.DOTALL | re.IGNORECASE)
+            
+            # Найти позицию для вставки нового genre тега
+            # Ищем </title-info> и вставляем перед ней
+            title_info_close = re.search(r'</(?:fb:)?title-info>', result_text)
+            
+            if title_info_close:
+                # Вставляем новый genre тег перед </title-info>
+                insert_pos = title_info_close.start()
+                new_genre_tag = f'<genre>{genre_name}</genre>\n  '
+                result_text = result_text[:insert_pos] + new_genre_tag + result_text[insert_pos:]
+                self.logger.log(f"DEBUG: Новый genre тег добавлен в XML")
+            else:
+                self.logger.log(f"ОШИБКА: не найден </title-info> в {fb2_path}")
+                return False
+            
+            self.logger.log(f"DEBUG: XML подготовлен к сохранению (используется оригинальное форматирование и namespace)")
+            
+            # Сохранить файл с правильной кодировкой
+            # utf-8-sig добавит BOM если кодировка включает sig
+            encoding_to_use = 'utf-8-sig' if has_bom else 'utf-8'
+            with open(fb2_path, 'w', encoding=encoding_to_use, errors='replace') as f:
+                f.write(result_text)
+            
+            self.logger.log(f"DEBUG: Файл сохранен с кодировкой {encoding_to_use}")
             
             return True
         
