@@ -87,7 +87,7 @@ class LogViewerService:
         list_frame = ttk.Frame(main_frame)
         list_frame.pack(fill='both', expand=True)
         
-        log_list = tk.Listbox(list_frame, font=('Courier', 9))
+        log_list = tk.Listbox(list_frame, font=('Courier', 9), selectmode='extended')
         log_list.pack(fill='both', expand=True, side='left')
         
         scrollbar = ttk.Scrollbar(list_frame, command=log_list.yview)
@@ -215,13 +215,16 @@ class LogViewerService:
             print(f"Failed to export log: {e}")
 
     def _copy_to_clipboard(self, log_list: tk.Listbox, parent_window: tk.Widget) -> None:
-        """Copy selected log entry to clipboard."""
+        """Copy selected log entries to clipboard."""
         try:
             selection = log_list.curselection()
             if selection:
-                item = log_list.get(selection[0])
+                # Get all selected items
+                items = [log_list.get(idx) for idx in selection]
+                # Join with newlines
+                text = '\n'.join(items)
                 parent_window.clipboard_clear()
-                parent_window.clipboard_append(item)
+                parent_window.clipboard_append(text)
                 parent_window.update()
         except Exception as e:
             print(f"Failed to copy to clipboard: {e}")
