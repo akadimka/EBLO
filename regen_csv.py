@@ -217,49 +217,68 @@ class RegenCSVService:
             
             self.logger.log(f"[HIERARCHY] Анализируем {folder_obj.name}: {len(files)} файлов")
             
-            # Проверяем авторов в метаданных
-            authors_in_folder = {}
-            for fb2_path in files:
-                try:
-                    # Пропускаем BL
+            # ПЕРВЫЙ ЭТАП: Попытаться извлечь автора из названия папки
+            folder_author = self._extract_author_from_folder_name(folder_obj.name)
+            
+            if folder_author:
+                # Автор найден в названии папки - используем как author_dataset для всех файлов
+                self.logger.log(f"[HIERARCHY] Найден автор в названии папки: '{folder_author}'")
+                
+                # Проверяем мета только для подтверждения (fuzzy matching)
+                all_files_ok = True
+                for fb2_path in files:
                     if self.blacklist and fb2_path.name in self.blacklist:
                         continue
                     
-                    author_meta, _, _ = self._extract_fb2_metadata(fb2_path)
-                    if author_meta not in authors_in_folder:
-                        authors_in_folder[author_meta] = []
-                    authors_in_folder[author_meta].append(fb2_path)
-                except Exception as e:
-                    key = f"ERROR_{fb2_path.name}"
-                    if key not in authors_in_folder:
-                        authors_in_folder[key] = []
-                    authors_in_folder[key].append(fb2_path)
-            
-            # Если авторы РАЗНЫЕ в этой папке
-            if len(authors_in_folder) > 1:
-                self.logger.log(f"[HIERARCHY] Разные авторы в {folder_obj.name}: папка - граница парсинга")
-                # Эта папка - граница парсинга
+                    try:
+                        author_meta, _, _ = self._extract_fb2_metadata(fb2_path)
+                        # Проверяем похожесть meta на папку (для расшифровки сокращений)
+                        if author_meta and not self.extractor._verify_author_against_metadata(folder_author, author_meta):
+                            self.logger.log(f"[HIERARCHY] Внимание: {fb2_path.name} - мета '{author_meta}' не похожа на папку '{folder_author}'")
+                    except:
+                        pass
+                
+                # Все файлы получают автора из папки независимо от meta
                 for fb2_path in files:
                     analysis[str(fb2_path)] = {
-                        'parsing_limit': folder_obj,  # Остановиться здесь
+                        'parsing_limit': None,
                         'folder_for_pattern': folder_obj,
-                        'folder_author': None
+                        'folder_author': folder_author
                     }
             else:
-                # Авторы ОДИНАКОВЫЕ - попытаемся извлечь автора из названия папки
-                self.logger.log(f"[HIERARCHY] Одинаковые авторы в {folder_obj.name}")
-                folder_author = self._extract_author_from_folder_name(folder_obj.name)
+                # Автора нет в названии папки - анализируем meta для определения границы
+                self.logger.log(f"[HIERARCHY] Нет автора в названии папки - анализируем meta")
                 
-                if folder_author:
-                    self.logger.log(f"[HIERARCHY] Найден автор в названии папки: {folder_author}")
+                # Проверяем авторов в метаданных
+                authors_in_folder = {}
+                for fb2_path in files:
+                    try:
+                        # Пропускаем BL
+                        if self.blacklist and fb2_path.name in self.blacklist:
+                            continue
+                        
+                        author_meta, _, _ = self._extract_fb2_metadata(fb2_path)
+                        if author_meta not in authors_in_folder:
+                            authors_in_folder[author_meta] = []
+                        authors_in_folder[author_meta].append(fb2_path)
+                    except Exception as e:
+                        key = f"ERROR_{fb2_path.name}"
+                        if key not in authors_in_folder:
+                            authors_in_folder[key] = []
+                        authors_in_folder[key].append(fb2_path)
+                
+                # Если авторы РАЗНЫЕ в этой папке - она граница парсинга
+                if len(authors_in_folder) > 1:
+                    self.logger.log(f"[HIERARCHY] Разные авторы в {folder_obj.name} - папка является границей парсинга")
                     for fb2_path in files:
                         analysis[str(fb2_path)] = {
-                            'parsing_limit': None,
+                            'parsing_limit': folder_obj,
                             'folder_for_pattern': folder_obj,
-                            'folder_author': folder_author
+                            'folder_author': None
                         }
                 else:
-                    # Паттерн не подошел
+                    # Авторы одинаковые
+                    self.logger.log(f"[HIERARCHY] Одинаковые авторы в {folder_obj.name}")
                     for fb2_path in files:
                         analysis[str(fb2_path)] = {
                             'parsing_limit': None,
