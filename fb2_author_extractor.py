@@ -582,18 +582,20 @@ class FB2AuthorExtractor:
                 # Извлечь компоненты имени
                 first_name_match = re.search(r'<first-name>(.*?)</first-name>', author_text)
                 last_name_match = re.search(r'<last-name>(.*?)</last-name>', author_text)
-                nickname_match = re.search(r'<nickname>(.*?)</nickname>', author_text)
+                middle_name_match = re.search(r'<middle-name>(.*?)</middle-name>', author_text)
                 
                 first_name = first_name_match.group(1) if first_name_match else ''
                 last_name = last_name_match.group(1) if last_name_match else ''
-                nickname = nickname_match.group(1) if nickname_match else ''
+                middle_name = middle_name_match.group(1) if middle_name_match else ''
                 
-                # Составить имя
-                if nickname:
-                    author = nickname
-                elif first_name or last_name:
+                # Составить имя - используем только first-name и last-name
+                # nickname игнорируется полностью
+                if first_name or last_name:
                     author = f"{first_name} {last_name}".strip()
                 else:
+                    return ''
+                
+                if not author:
                     return ''
                 
                 # Проверить черный список

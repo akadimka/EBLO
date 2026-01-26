@@ -247,7 +247,7 @@ class RegenCSVService:
             for author_match in re.finditer(author_pattern, title_info_content, re.DOTALL):
                 author_text = author_match.group(0)
                 
-                # Извлечь первое имя
+                # Извлечь компоненты имени
                 first_name_match = re.search(r'<first-name>(.*?)</first-name>', author_text)
                 first_name = first_name_match.group(1) if first_name_match else ''
                 
@@ -255,14 +255,13 @@ class RegenCSVService:
                 last_name_match = re.search(r'<last-name>(.*?)</last-name>', author_text)
                 last_name = last_name_match.group(1) if last_name_match else ''
                 
-                # Извлечь nickname
-                nickname_match = re.search(r'<nickname>(.*?)</nickname>', author_text)
-                nickname = nickname_match.group(1) if nickname_match else ''
+                # Извлечь отчество (но не используем в имени)
+                middle_name_match = re.search(r'<middle-name>(.*?)</middle-name>', author_text)
+                middle_name = middle_name_match.group(1) if middle_name_match else ''
                 
-                # Составить имя автора
-                if nickname:
-                    authors_list.append(nickname)
-                elif first_name or last_name:
+                # Составить имя автора - используем только first-name и last-name
+                # nickname игнорируется полностью
+                if first_name or last_name:
                     author_name = f"{first_name} {last_name}".strip()
                     if author_name:
                         authors_list.append(author_name)
