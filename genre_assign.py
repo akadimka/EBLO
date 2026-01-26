@@ -19,6 +19,72 @@ except ImportError:
     from .logger import Logger
 
 
+def pretty_print_xml(xml_text: str) -> str:
+    """
+    Форматировать XML текст с красивыми отступами и переносами строк.
+    Сохраняет исходную структуру, добавляя индентацию для улучшения читаемости.
+    
+    Args:
+        xml_text: Исходный XML текст
+    
+    Returns:
+        Отформатированный XML текст с красивыми отступами
+    """
+    # Используем регулярные выражения для форматирования без парсинга
+    # Это позволяет сохранить исходные namespace префиксы
+    
+    # Сохраняем XML declaration если есть
+    xml_declaration = None
+    working_text = xml_text
+    if working_text.strip().startswith('<?xml'):
+        decl_match = re.match(r'<\?xml[^?]*\?>', xml_text)
+        if decl_match:
+            xml_declaration = decl_match.group(0)
+            working_text = xml_text[decl_match.end():]
+    
+    # Добавляем переносы строк после > если их нет
+    # но только если это не последний символ текстового содержимого
+    working_text = re.sub(r'>\s*(?=<)', '>\n', working_text)
+    
+    # Удаляем лишние пробелы в начале строк и форматируем с отступами
+    lines = working_text.split('\n')
+    formatted_lines = []
+    indent_level = 0
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+            
+        # Проверяем, закрывается ли тег на этой строке
+        # если строка начинается с </, то уменьшаем отступ перед добавлением
+        if stripped.startswith('</'):
+            indent_level = max(0, indent_level - 1)
+        
+        # Добавляем отступ (2 пробела на уровень)
+        formatted_lines.append('  ' * indent_level + stripped)
+        
+        # Увеличиваем отступ если открывается новый тег (и не закрывается на той же строке)
+        # но не для самозакрывающихся тегов
+        if stripped.startswith('<') and not stripped.startswith('</') and not stripped.endswith('/>'):
+            # Проверяем, закрывается ли тег на той же строке
+            tag_name = re.match(r'<([a-zA-Z:]+)', stripped)
+            if tag_name:
+                tag = tag_name.group(1)
+                # Если нет закрывающего тега на той же строке, увеличиваем отступ
+                if f'</{tag}' not in stripped and f'</{tag.split(":")[1] if ":" in tag else tag}' not in stripped:
+                    indent_level += 1
+    
+    # Собираем результат
+    result = '\n'.join(formatted_lines)
+    
+    # Если был XML declaration, добавляем его в начало
+    if xml_declaration:
+        result = xml_declaration + '\n' + result
+    
+    return result
+
+
 class GenreAssignmentService:
     """Сервис для присвоения жанра FB2 файлам."""
     
@@ -242,6 +308,9 @@ class GenreAssignmentService:
             else:
                 self.logger.log(f"ОШИБКА: не найден </title-info> в {fb2_path}")
                 return False
+            
+            # Форматировать XML для красивого отображения
+            result_text = pretty_print_xml(result_text)
             
             # Сохранить файл с правильной кодировкой
             # utf-8-sig добавит BOM если кодировка включает sig
