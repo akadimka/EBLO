@@ -317,8 +317,11 @@ if __name__ == '__main__':
     
     service = RegenCSVService()
     
-    # Всегда использовать текущую рабочую папку
-    library_path = str(Path.cwd())
+    # Использовать last_scan_path из конфига
+    library_path = service.settings.get_last_scan_path()
+    if not library_path:
+        library_path = str(Path.cwd())
+    
     generate_csv = service.settings.get_generate_csv()
     
     # Определить путь сохранения CSV

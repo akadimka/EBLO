@@ -85,17 +85,44 @@ class AuthorProcessor:
             Список результатов извлечения (может быть несколько совпадений)
             или None если ничего не найдено
         """
-        # TODO: Реализовать логику извлечения автора из названия файла
-        # - Применить все паттерны file_patterns
-        # - Найти совпадение в названии файла
-        # - Извлечь группу 'author' (если есть)
-        # - Проверить против filename_blacklist (BL)
-        # - Вернуть результаты с уверенностью FILENAME (0.60-0.80)
-        pass
+        if not filename or not self.file_patterns:
+            return None
+        
+        results = []
+        
+        # Применить все паттерны файлов
+        for pattern_index, pattern_tuple in enumerate(self.file_patterns):
+            # pattern_tuple = (pattern_string, compiled_regex, group_names)
+            pattern_str, pattern_regex, group_names = pattern_tuple
+            match = pattern_regex.search(filename)
+            if match:
+                # Попытаться получить группу 'author'
+                try:
+                    author_value = match.group('author')
+                    if author_value:
+                        # Проверить черный список
+                        is_blacklisted, reasons = self._is_blacklisted(author_value)
+                        if not is_blacklisted:
+                            result = ExtractionResult(
+                                value=author_value,
+                                priority=AuthorExtractionPriority.FILENAME,
+                                confidence=0.70,
+                                pattern_used=pattern_str,
+                                pattern_index=pattern_index
+                            )
+                            results.append(result)
+                except (IndexError, AttributeError):
+                    pass
+        
+        return results if results else None
     
     def extract_author_from_filepath(self, filepath: str) -> Optional[List[ExtractionResult]]:
         """
         Извлечь информацию об авторе из пути файла (анализ структуры папок).
+        
+        Логика: идти от папки файла ВВЕРХ на folder_parse_limit уровней.
+        Например, для /home/user/books/Isaac_Asimov/Stories/Foundation.fb2
+        с folder_parse_limit=3 проверяем: Stories -> Isaac_Asimov -> books
         
         Args:
             filepath: Полный путь к файлу
@@ -103,14 +130,74 @@ class AuthorProcessor:
         Returns:
             Список результатов извлечения или None
         """
-        # TODO: Реализовать логику извлечения автора из структуры папок
-        # - Разбить путь на составные части
-        # - Применить паттерны folder_patterns к названиям папок
-        # - Использовать folder_parse_limit для ограничения поиска вверх
-        # - Найти совпадение
-        # - Проверить против filename_blacklist (BL)
-        # - Вернуть результаты с уверенностью FOLDER (0.60-0.80)
-        pass
+        if not filepath or not self.folder_patterns:
+            return None
+        
+        results = []
+        
+        # Получить родительскую папку файла
+        from pathlib import Path
+        file_path = Path(filepath)
+        parent_path = file_path.parent
+        
+        # Идти вверх на folder_parse_limit уровней
+        parse_limit = self.folder_parse_limit or 5
+        current_path = parent_path
+        
+        for level in range(parse_limit):
+            # Получить имя папки
+            folder_name = current_path.name
+            
+            # Пропустить пустые имена и папки "."
+            if not folder_name or folder_name == '.':
+                # Попробовать подняться еще выше
+                if current_path.parent != current_path:  # Не корневая папка
+                    current_path = current_path.parent
+                    continue
+                else:
+                    break  # Достигли корня
+            
+            # Применить все паттерны папок к названию папки
+            for pattern_index, pattern_tuple in enumerate(self.folder_patterns):
+                # pattern_tuple = (pattern_string, compiled_regex, group_names)
+                pattern_str, pattern_regex, group_names = pattern_tuple
+                match = pattern_regex.search(folder_name)
+                if match:
+                    # Попытаться получить группу 'author'
+                    try:
+                        author_value = match.group('author')
+                        if author_value:
+                            # Проверить черный список
+                            is_blacklisted, reasons = self._is_blacklisted(author_value)
+                            if not is_blacklisted:
+                                result = ExtractionResult(
+                                    value=author_value,
+                                    priority=AuthorExtractionPriority.FOLDER_STRUCTURE,
+                                    confidence=0.65,
+                                    pattern_used=pattern_str,
+                                    pattern_index=pattern_index
+                                )
+                                results.append(result)
+                                # Остановиться на первом найденном совпадении в папке
+                                break
+                    except (IndexError, AttributeError):
+                        pass
+            
+            # Если нашли результат, остановиться
+            if results:
+                break
+            
+            # Подняться на уровень выше
+            if current_path.parent != current_path:  # Не корневая папка
+                current_path = current_path.parent
+            else:
+                break  # Достигли корня
+            
+            # Если нашли результат в этой папке, больше не ищем
+            if results:
+                break
+        
+        return results if results else None
     
     def parse_author_name(self, author_string: str) -> Optional[Dict[str, Any]]:
         """
@@ -182,12 +269,33 @@ class AuthorProcessor:
         Returns:
             (is_blacklisted, reasons) - флаг и список причин совпадения
         """
-        # TODO: Реализовать проверку против filename_blacklist
-        # - Получить filename_blacklist из конфигурации
-        # - Проверить точное совпадение
-        # - Проверить совпадение частей слова
-        # - Вернуть результат и причины
-        pass
+        if not value:
+            return False, []
+        
+        try:
+            blacklist = self.settings.get_filename_blacklist()
+            if not blacklist:
+                return False, []
+            
+            value_lower = value.lower()
+            reasons = []
+            
+            for item in blacklist:
+                item_lower = item.lower()
+                
+                # Точное совпадение
+                if value_lower == item_lower:
+                    reasons.append(f"exact_match: {item}")
+                    return True, reasons
+                
+                # Совпадение подстроки (если слово целиком содержится)
+                if item_lower in value_lower:
+                    reasons.append(f"substring_match: {item}")
+                    return True, reasons
+            
+            return False, reasons
+        except Exception:
+            return False, []
     
     def reload_patterns(self):
         """Перезагрузить паттерны из конфигурации."""

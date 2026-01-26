@@ -410,6 +410,6 @@
     "Наталия"
   ],
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
-  "folder_parse_limit": 5,
+  "folder_parse_limit": 3,
   "generate_csv": true
 }

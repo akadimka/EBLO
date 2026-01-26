@@ -85,6 +85,7 @@ class FB2AuthorExtractor:
                 author = self._extract_author_from_folder_structure(fb2_path)
                 if author and self._verify_author_against_metadata(author, metadata_author):
                     author = self._normalize_author_count(author)
+                    author = self._normalize_author_format(author)
                     if author:
                         return author, 'folder'
             except Exception as e:
@@ -95,6 +96,7 @@ class FB2AuthorExtractor:
                 author = self._extract_author_from_filename(fb2_path)
                 if author and self._verify_author_against_metadata(author, metadata_author):
                     author = self._normalize_author_count(author)
+                    author = self._normalize_author_format(author)
                     if author:
                         return author, 'filename'
             except Exception as e:
@@ -103,6 +105,7 @@ class FB2AuthorExtractor:
             # 3. Вернуть автора из метаданных (источник истины)
             if metadata_author:
                 metadata_author = self._normalize_author_count(metadata_author)
+                metadata_author = self._normalize_author_format(metadata_author)
                 if metadata_author:
                     return metadata_author, 'metadata'
             
@@ -111,12 +114,111 @@ class FB2AuthorExtractor:
         except Exception as e:
             return '', ''
     
+    def _normalize_author_format(self, author_string: str) -> str:
+        """
+        Нормализовать формат автора/авторов.
+        
+        Правила:
+        1. Если "Соавторство", оставить как есть
+        2. Если один автор, нормализовать в формат "Фамилия Имя"
+        3. Если два автора, нормализовать каждого и отсортировать по алфавиту
+        
+        Нормализация ФИ:
+        - Взять максимум 2 слова (игнорировать отчество и прочее)
+        - Между ними только один пробел
+        - Дефис допускается в составных именах/фамилиях
+        
+        Args:
+            author_string: Строка с одним или несколькими авторами
+        
+        Returns:
+            Нормализованная строка
+        """
+        if not author_string or author_string == "Соавторство":
+            return author_string
+        
+        try:
+            # Проверить есть ли несколько авторов (разделены ; или ,)
+            authors_list = []
+            separator = None
+            
+            if ';' in author_string:
+                separator = ';'
+                authors_list = [a.strip() for a in author_string.split(';') if a.strip()]
+            elif ',' in author_string:
+                separator = ','
+                authors_list = [a.strip() for a in author_string.split(',') if a.strip()]
+            
+            if not authors_list:
+                # Нет разделителей - один автор
+                authors_list = [author_string.strip()]
+            
+            # Нормализовать каждого автора
+            normalized_authors = []
+            for author in authors_list:
+                normalized = self._normalize_single_author(author)
+                if normalized and normalized != "Соавторство":
+                    normalized_authors.append(normalized)
+                elif normalized == "Соавторство":
+                    return "Соавторство"
+            
+            if not normalized_authors:
+                return ""
+            
+            # Если авторов > 2 после нормализации
+            if len(normalized_authors) > 2:
+                return "Соавторство"
+            
+            # Отсортировать по алфавиту
+            normalized_authors.sort()
+            
+            # Объединить запятой для нескольких авторов
+            if len(normalized_authors) > 1:
+                return ", ".join(normalized_authors)
+            else:
+                return normalized_authors[0]
+        
+        except Exception:
+            return author_string
+    
+    def _normalize_single_author(self, author_name: str) -> str:
+        """
+        Нормализовать одного автора в формат "Фамилия Имя".
+        
+        Args:
+            author_name: Имя автора (может быть в разных форматах)
+        
+        Returns:
+            Нормализованное имя вида "Слово Слово"
+        """
+        if not author_name or author_name == "Соавторство":
+            return author_name
+        
+        try:
+            # Убрать лишние пробелы
+            author_name = " ".join(author_name.split())
+            
+            # Разбить на слова
+            words = author_name.split()
+            
+            if len(words) == 0:
+                return ""
+            elif len(words) == 1:
+                # Одно слово - оставить как есть
+                return words[0]
+            else:
+                # Два или больше слов - взять первые два
+                return f"{words[0]} {words[1]}"
+        
+        except Exception:
+            return author_name
+    
     def _normalize_author_count(self, author_string: str) -> str:
         """
-        Нормализовать количество авторов.
+        Нормализовать количество авторов и формат.
         
         Правило:
-        - Если авторов <= 2: возвращает как есть
+        - Если авторов <= 2: нормализует формат и возвращает
         - Если авторов > 2: возвращает "Соавторство"
         
         Авторы разделены символом ';' или ','
@@ -140,15 +242,15 @@ class FB2AuthorExtractor:
             
             # Если разделителей не найдено - это один автор
             if not authors:
-                return author_string.strip()
+                authors = [author_string.strip()]
             
-            # Применить правило
-            if len(authors) <= 2:
-                # Возвращаем авторов как есть (переформатированных)
-                return '; '.join(authors)
-            else:
-                # Больше 2 авторов - возвращаем "Соавторство"
+            # Если авторов > 2, то "Соавторство"
+            if len(authors) > 2:
                 return "Соавторство"
+            
+            # Нормализовать формат и вернуть
+            return self._normalize_author_format(author_string)
+        
         except Exception:
             return author_string
     
