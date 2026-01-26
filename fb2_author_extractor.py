@@ -553,6 +553,9 @@ class FB2AuthorExtractor:
     def _extract_author_from_metadata(self, fb2_path: Path) -> str:
         """
         Извлечь автора из метаданных FB2 файла.
+        
+        Значение извлекается ТОЛЬКО из тега <title-info>,
+        а не из других разделов (ignoring document-info и т.д.).
         """
         try:
             with open(fb2_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -560,9 +563,18 @@ class FB2AuthorExtractor:
             
             import re
             
-            # Найти первого автора в метаданных
+            # Найти весь <title-info>...</title-info> блок
+            title_info_match = re.search(r'<(?:fb:)?title-info>.*?</(?:fb:)?title-info>', content, re.DOTALL)
+            
+            if not title_info_match:
+                return ''
+            
+            # Работаем только с содержимым title-info
+            title_info_content = title_info_match.group(0)
+            
+            # Найти первого автора ТОЛЬКО в title-info
             author_pattern = r'<author>.*?</author>'
-            match = re.search(author_pattern, content, re.DOTALL)
+            match = re.search(author_pattern, title_info_content, re.DOTALL)
             
             if match:
                 author_text = match.group(0)

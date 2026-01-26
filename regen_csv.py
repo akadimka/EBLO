@@ -213,6 +213,9 @@ class RegenCSVService:
         """
         Извлечь метаданные из FB2 файла.
         
+        Значения извлекаются ТОЛЬКО из тега <title-info>,
+        а не из всего документа (ignoring document-info и прочие разделы).
+        
         Args:
             fb2_path: Путь к FB2 файлу
         
@@ -225,13 +228,23 @@ class RegenCSVService:
             with open(fb2_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             
-            # Извлечем title-info section используя регулярные выражения
+            # Извлечем ТОЛЬКО title-info section
             import re
             
-            # Найти всех авторов в title-info
+            # Найти весь <title-info>...</title-info> блок
+            title_info_match = re.search(r'<(?:fb:)?title-info>.*?</(?:fb:)?title-info>', content, re.DOTALL)
+            
+            if not title_info_match:
+                # Не найден title-info, вернуть пустые значения
+                return "", "", ""
+            
+            # Работаем только с содержимым title-info
+            title_info_content = title_info_match.group(0)
+            
+            # Найти всех авторов ВНУ­ТРИ title-info
             authors_list = []
             author_pattern = r'<author>.*?</author>'
-            for author_match in re.finditer(author_pattern, content, re.DOTALL):
+            for author_match in re.finditer(author_pattern, title_info_content, re.DOTALL):
                 author_text = author_match.group(0)
                 
                 # Извлечь первое имя
@@ -254,20 +267,20 @@ class RegenCSVService:
                     if author_name:
                         authors_list.append(author_name)
             
-            # Найти название книги
-            title_match = re.search(r'<book-title>(.*?)</book-title>', content)
+            # Найти название книги ТОЛЬКО в title-info
+            title_match = re.search(r'<book-title>(.*?)</book-title>', title_info_content)
             title = title_match.group(1) if title_match else ""
             
-            # Найти жанр
-            genre_match = re.search(r'<genre>(.*?)</genre>', content)
+            # Найти жанр ТОЛЬКО в title-info
+            genre_match = re.search(r'<genre>(.*?)</genre>', title_info_content)
             genre = genre_match.group(1) if genre_match else ""
             
             authors_str = "; ".join(authors_list) if authors_list else ""
             
-            self.logger.log(f"[REGEN]   Найдено авторов: {len(authors_list)}")
-            self.logger.log(f"[REGEN]   Название: {title if title else '(пусто)'}")
-            self.logger.log(f"[REGEN]   Жанр: {genre if genre else '(пусто)'}")
-            self.logger.log(f"[REGEN]   Авторы: {authors_str if authors_str else '(пусто)'}")
+            self.logger.log(f"[REGEN]   Найдено авторов в title-info: {len(authors_list)}")
+            self.logger.log(f"[REGEN]   Название в title-info: {title if title else '(пусто)'}")
+            self.logger.log(f"[REGEN]   Жанр в title-info: {genre if genre else '(пусто)'}")
+            self.logger.log(f"[REGEN]   Авторы в title-info: {authors_str if authors_str else '(пусто)'}")
             
             return authors_str, title or "", genre or ""
         
