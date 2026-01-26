@@ -45,6 +45,11 @@ class FB2AuthorExtractor:
         """
         self.settings = SettingsManager(config_path)
         self.author_processor = AuthorProcessor(config_path)
+        
+        # Загрузить списки имен для определения порядка слов
+        self.male_names = set(name.lower() for name in self.settings.get_male_names())
+        self.female_names = set(name.lower() for name in self.settings.get_female_names())
+        self.all_names = self.male_names | self.female_names
     
     def resolve_author_by_priority(
         self,
@@ -185,11 +190,18 @@ class FB2AuthorExtractor:
         """
         Нормализовать одного автора в формат "Фамилия Имя".
         
+        Правила:
+        - Результат должен быть ровно 2 слова (Фамилия Имя)
+        - Каждое слово должно начинаться с большой буквы
+        - Между словами только один пробел
+        - Допускаются дефисы в составных именах/фамилиях
+        - Порядок определяется по списку имен: если одно из слов есть в списке - оно Имя, другое - Фамилия
+        
         Args:
             author_name: Имя автора (может быть в разных форматах)
         
         Returns:
-            Нормализованное имя вида "Слово Слово"
+            Нормализованное имя вида "Фамилия Имя" или пустая строка
         """
         if not author_name or author_name == "Соавторство":
             return author_name
@@ -201,17 +213,55 @@ class FB2AuthorExtractor:
             # Разбить на слова
             words = author_name.split()
             
-            if len(words) == 0:
+            # Нужно ровно 2 слова
+            if len(words) != 2:
                 return ""
-            elif len(words) == 1:
-                # Одно слово - оставить как есть
-                return words[0]
+            
+            # Проверить что каждое слово корректное
+            cleaned_words = []
+            for word in words:
+                # Отбросить цифры и специальные символы в конце
+                # Оставить только буквы, дефисы
+                clean_word = ""
+                for char in word:
+                    if char.isalpha() or char == '-':
+                        clean_word += char
+                    else:
+                        break  # Остановиться при первом некорректном символе
+                
+                if not clean_word:
+                    return ""  # Слово не содержит букв - отбросить
+                
+                # Проверить что начинается с большой буквы
+                if not clean_word[0].isupper():
+                    return ""
+                
+                cleaned_words.append(clean_word)
+            
+            if len(cleaned_words) != 2:
+                return ""
+            
+            # Определить порядок слов на основе списка имен
+            word1_lower = cleaned_words[0].lower()
+            word2_lower = cleaned_words[1].lower()
+            
+            word1_is_name = word1_lower in self.all_names
+            word2_is_name = word2_lower in self.all_names
+            
+            # Если оба или ни один не в списке имен - оставить как есть
+            if word1_is_name and not word2_is_name:
+                # Первое слово - имя, второе - фамилия
+                # Нужно переставить: фамилия имя
+                return f"{cleaned_words[1]} {cleaned_words[0]}"
+            elif not word1_is_name and word2_is_name:
+                # Первое слово - фамилия, второе - имя (уже правильный порядок)
+                return f"{cleaned_words[0]} {cleaned_words[1]}"
             else:
-                # Два или больше слов - взять первые два
-                return f"{words[0]} {words[1]}"
+                # Оба в списке имен или оба не в списке - оставить как есть
+                return f"{cleaned_words[0]} {cleaned_words[1]}"
         
         except Exception:
-            return author_name
+            return ""
     
     def _normalize_author_count(self, author_string: str) -> str:
         """
