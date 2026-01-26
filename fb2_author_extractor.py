@@ -53,7 +53,8 @@ class FB2AuthorExtractor:
     
     def resolve_author_by_priority(
         self,
-        fb2_filepath: str
+        fb2_filepath: str,
+        parsing_folder_limit: Optional[Path] = None
     ) -> Tuple[str, str]:
         """
         Простой метод для получения автора по приоритетам источников.
@@ -74,6 +75,9 @@ class FB2AuthorExtractor:
         
         Args:
             fb2_filepath: Полный путь к FB2 файлу
+            parsing_folder_limit: Граница парсинга папок (Path):
+                - None: полный приоритет (folder → filename → metadata)
+                - Path('...'): парсинг папок останавливается на этой папке
         
         Returns:
             (author_name, source) где source in ['folder', 'filename', 'metadata', '']
@@ -85,16 +89,32 @@ class FB2AuthorExtractor:
             # Получить авторов из метаданных один раз (источник истины)
             metadata_author = self._extract_author_from_metadata(fb2_path)
             
-            # 1. Попытка получить автора из структуры папок
-            try:
-                author = self._extract_author_from_folder_structure(fb2_path)
-                if author and self._verify_author_against_metadata(author, metadata_author):
-                    author = self._normalize_author_count(author)
-                    author = self._normalize_author_format(author)
-                    if author:
-                        return author, 'folder'
-            except Exception as e:
-                pass  # Продолжаем к следующему источнику
+            # 1. Попытка получить автора из структуры папок (проверяем если есть лимит)
+            if parsing_folder_limit is None:
+                # Нет лимита - парсим папки нормально
+                try:
+                    author = self._extract_author_from_folder_structure(fb2_path)
+                    if author and self._verify_author_against_metadata(author, metadata_author):
+                        author = self._normalize_author_count(author)
+                        author = self._normalize_author_format(author)
+                        if author:
+                            return author, 'folder'
+                except Exception as e:
+                    pass  # Продолжаем к следующему источнику
+            else:
+                # Есть лимит - парсим папки до границы
+                try:
+                    author = self._extract_author_from_folder_structure_with_limit(
+                        fb2_path,
+                        parsing_folder_limit
+                    )
+                    if author and self._verify_author_against_metadata(author, metadata_author):
+                        author = self._normalize_author_count(author)
+                        author = self._normalize_author_format(author)
+                        if author:
+                            return author, 'folder'
+                except Exception as e:
+                    pass  # Продолжаем к следующему источнику
             
             # 2. Попытка получить автора из имени файла
             try:
@@ -526,6 +546,40 @@ class FB2AuthorExtractor:
                 author_name = result[0].value if hasattr(result[0], 'value') else str(result[0])
                 if author_name:
                     return author_name
+        except Exception as e:
+            pass
+        
+        return ''
+    
+    def _extract_author_from_folder_structure_with_limit(self, fb2_path: Path, limit_folder: Path) -> str:
+        """
+        Извлечь автора из структуры папок с ограничением до определённой папки.
+        
+        Ищет автора от файла вверх до папки limit_folder, но не включает саму папку.
+        
+        Args:
+            fb2_path: Путь к FB2 файлу
+            limit_folder: Папка, до которой парсить (не включая её)
+        
+        Returns:
+            Имя автора или пустая строка
+        """
+        try:
+            # Получить путь к файлу
+            current_path = fb2_path.parent
+            limit_path = limit_folder
+            
+            # Идем вверх по папкам от файла до лимита
+            while current_path != limit_path and current_path != current_path.parent:
+                # Попытаться извлечь автора из текущей папки
+                result = self.author_processor.extract_author_from_filename(current_path.name)
+                if result:
+                    author_name = result[0].value if hasattr(result[0], 'value') else str(result[0])
+                    if author_name:
+                        return author_name
+                
+                # Поднимаемся на уровень выше
+                current_path = current_path.parent
         except Exception as e:
             pass
         

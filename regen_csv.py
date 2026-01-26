@@ -138,6 +138,12 @@ class RegenCSVService:
         
         self.logger.log(f"Найдено {len(fb2_files)} FB2 файлов")
         
+        # PASS 1: Анализируем иерархию папок
+        self.logger.log("[PASS 1] Анализ иерархии папок...")
+        folder_analysis = self._analyze_folder_hierarchy(fb2_files)
+        
+        # PASS 2: Обрабатываем файлы с учетом иерархии
+        self.logger.log("[PASS 2] Обработка файлов...")
         records = []
         
         for idx, fb2_path in enumerate(fb2_files):
@@ -145,7 +151,7 @@ class RegenCSVService:
                 progress_callback(idx, len(fb2_files), f"Обработка: {fb2_path.name}")
             
             try:
-                record = self._process_fb2_file(fb2_path)
+                record = self._process_fb2_file(fb2_path, folder_analysis)
                 records.append(record)
             except Exception as e:
                 self.logger.log(f"Ошибка обработки {fb2_path}: {str(e)}")
@@ -166,12 +172,142 @@ class RegenCSVService:
         self.logger.log(f"Обработано {len(records)} файлов")
         return records
     
-    def _process_fb2_file(self, fb2_path: Path) -> BookRecord:
+    def _analyze_folder_hierarchy(self, fb2_files: List[Path]) -> dict:
+        """
+        Анализировать иерархию папок.
+        
+        Определяет:
+        1. Папку с разными авторами (граница парсинга)
+        2. Подпапки с одинаковыми авторами (для извлечения автора из названия)
+        
+        Возвращает словарь для каждого файла с информацией об иерархии.
+        
+        Args:
+            fb2_files: Список всех FB2 файлов
+        
+        Returns:
+            Словарь {путь_к_файлу: {
+                'parsing_limit': папка где остановить парсинг,
+                'folder_for_pattern': папка к которой применить паттерн,
+                'folder_author': автор из названия папки (если найден)
+            }}
+        """
+        # Группируем файлы по папкам (ТОЛЬКО прямые файлы)
+        files_by_folder: Dict[str, List[Path]] = {}
+        for fb2_path in fb2_files:
+            folder_key = str(fb2_path.parent)
+            if folder_key not in files_by_folder:
+                files_by_folder[folder_key] = []
+            files_by_folder[folder_key].append(fb2_path)
+        
+        analysis = {}
+        
+        # Анализируем каждую папку
+        for folder_path, files in files_by_folder.items():
+            folder_obj = Path(folder_path)
+            
+            if len(files) == 1:
+                # Один файл в папке - обычный анализ
+                analysis[str(files[0])] = {
+                    'parsing_limit': None,
+                    'folder_for_pattern': folder_obj,
+                    'folder_author': None
+                }
+                continue
+            
+            self.logger.log(f"[HIERARCHY] Анализируем {folder_obj.name}: {len(files)} файлов")
+            
+            # Проверяем авторов в метаданных
+            authors_in_folder = {}
+            for fb2_path in files:
+                try:
+                    # Пропускаем BL
+                    if self.blacklist and fb2_path.name in self.blacklist:
+                        continue
+                    
+                    author_meta, _, _ = self._extract_fb2_metadata(fb2_path)
+                    if author_meta not in authors_in_folder:
+                        authors_in_folder[author_meta] = []
+                    authors_in_folder[author_meta].append(fb2_path)
+                except Exception as e:
+                    key = f"ERROR_{fb2_path.name}"
+                    if key not in authors_in_folder:
+                        authors_in_folder[key] = []
+                    authors_in_folder[key].append(fb2_path)
+            
+            # Если авторы РАЗНЫЕ в этой папке
+            if len(authors_in_folder) > 1:
+                self.logger.log(f"[HIERARCHY] Разные авторы в {folder_obj.name}: папка - граница парсинга")
+                # Эта папка - граница парсинга
+                for fb2_path in files:
+                    analysis[str(fb2_path)] = {
+                        'parsing_limit': folder_obj,  # Остановиться здесь
+                        'folder_for_pattern': folder_obj,
+                        'folder_author': None
+                    }
+            else:
+                # Авторы ОДИНАКОВЫЕ - попытаемся извлечь автора из названия папки
+                self.logger.log(f"[HIERARCHY] Одинаковые авторы в {folder_obj.name}")
+                folder_author = self._extract_author_from_folder_name(folder_obj.name)
+                
+                if folder_author:
+                    self.logger.log(f"[HIERARCHY] Найден автор в названии папки: {folder_author}")
+                    for fb2_path in files:
+                        analysis[str(fb2_path)] = {
+                            'parsing_limit': None,
+                            'folder_for_pattern': folder_obj,
+                            'folder_author': folder_author
+                        }
+                else:
+                    # Паттерн не подошел
+                    for fb2_path in files:
+                        analysis[str(fb2_path)] = {
+                            'parsing_limit': None,
+                            'folder_for_pattern': folder_obj,
+                            'folder_author': None
+                        }
+        
+        return analysis
+    
+    def _extract_author_from_folder_name(self, folder_name: str) -> Optional[str]:
+        """
+        Попытаться извлечь автора из названия папки.
+        
+        Поддерживаемые форматы:
+        - "Series (Author)" → "Author"
+        - "Series - (Author)" → "Author"  
+        - "(Author)" → "Author"
+        - "Number. Title (Author)" → "Author"
+        
+        Args:
+            folder_name: Название папки
+        
+        Returns:
+            Имя автора или None
+        """
+        import re
+        
+        # Ищем паттерн "(Author)" в конце
+        match = re.search(r'\(([^)]+)\)\s*$', folder_name)
+        if not match:
+            return None
+        
+        author_raw = match.group(1).strip()
+        
+        # Проверяем что это выглядит как имя автора (не путаем с серией типа "1941")
+        # Имя должно содержать буквы
+        if not any(c.isalpha() for c in author_raw):
+            return None
+        
+        return author_raw
+    
+    def _process_fb2_file(self, fb2_path: Path, folder_analysis: dict) -> BookRecord:
         """
         Обработать один FB2 файл и вернуть BookRecord.
         
         Args:
             fb2_path: Путь к FB2 файлу
+            folder_analysis: Результат анализа иерархии папок
         
         Returns:
             BookRecord с информацией из файла
@@ -180,12 +316,33 @@ class RegenCSVService:
         filename = fb2_path.stem
         self.logger.log(f"[REGEN] Обработка файла: {fb2_path.name}")
         
-        # Извлечь автора по приоритетам источников (folder → filename → metadata)
-        proposed_author, author_source = self.extractor.resolve_author_by_priority(str(fb2_path))
-        if proposed_author:
-            self.logger.log(f"[REGEN]   Автор по приоритетам: '{proposed_author}' (источник: {author_source})")
-        else:
-            self.logger.log(f"[REGEN]   Автор не найден ни из одного источника")
+        # Получить информацию из анализа иерархии
+        file_info = folder_analysis.get(str(fb2_path), {})
+        parsing_limit = file_info.get('parsing_limit')
+        folder_author = file_info.get('folder_author')
+        
+        # Если найден автор в названии папки - используем его как author_dataset
+        proposed_author = None
+        author_source = None
+        
+        if folder_author:
+            # Нормализуем автора из названия папки
+            author_normalized = self.extractor._normalize_author_format(folder_author)
+            if author_normalized:
+                proposed_author = author_normalized
+                author_source = 'folder_dataset'
+                self.logger.log(f"[REGEN]   Автор из папки (dataset): '{proposed_author}'")
+        
+        # Если автор не найден в папке - используем приоритет
+        if not proposed_author:
+            proposed_author, author_source = self.extractor.resolve_author_by_priority(
+                str(fb2_path),
+                parsing_folder_limit=parsing_limit
+            )
+            if proposed_author:
+                self.logger.log(f"[REGEN]   Автор по приоритетам: '{proposed_author}' (источник: {author_source})")
+            else:
+                self.logger.log(f"[REGEN]   Автор не найден ни из одного источника")
         
         # TODO: Добавить извлечение серии когда будет готово
         # series_result = self.series_processor.extract_series_combined(filename, str(fb2_path))
