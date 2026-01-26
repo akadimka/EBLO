@@ -46,6 +46,168 @@ class FB2AuthorExtractor:
         self.settings = SettingsManager(config_path)
         self.author_processor = AuthorProcessor(config_path)
     
+    def resolve_author_by_priority(
+        self,
+        fb2_filepath: str
+    ) -> Tuple[str, str]:
+        """
+        Простой метод для получения автора по приоритетам источников.
+        
+        Приоритет извлечения:
+        1. Структура папок (FOLDER_STRUCTURE) - priority 1, проверяется через метаданные
+        2. Название файла (FILENAME) - priority 2, проверяется через метаданные
+        3. Метаданные FB2 (FB2_METADATA) - priority 3, источник истины
+        
+        Для источников 1 и 2 используется fuzzy matching для верификации:
+        - Кандидат сравнивается с авторами из метаданных
+        - Если похожесть > 70%, принимается
+        - Если не похож ни на кого в метаданных, отклоняется
+        
+        Правило множественных авторов:
+        - Если авторов <= 2: берем имена
+        - Если авторов > 2: возвращаем "Соавторство"
+        
+        Args:
+            fb2_filepath: Полный путь к FB2 файлу
+        
+        Returns:
+            (author_name, source) где source in ['folder', 'filename', 'metadata', '']
+            Если ничего не найдено, возвращает ('', '')
+        """
+        try:
+            fb2_path = Path(fb2_filepath)
+            
+            # Получить авторов из метаданных один раз (источник истины)
+            metadata_author = self._extract_author_from_metadata(fb2_path)
+            
+            # 1. Попытка получить автора из структуры папок
+            try:
+                author = self._extract_author_from_folder_structure(fb2_path)
+                if author and self._verify_author_against_metadata(author, metadata_author):
+                    author = self._normalize_author_count(author)
+                    if author:
+                        return author, 'folder'
+            except Exception as e:
+                pass  # Продолжаем к следующему источнику
+            
+            # 2. Попытка получить автора из имени файла
+            try:
+                author = self._extract_author_from_filename(fb2_path)
+                if author and self._verify_author_against_metadata(author, metadata_author):
+                    author = self._normalize_author_count(author)
+                    if author:
+                        return author, 'filename'
+            except Exception as e:
+                pass  # Продолжаем к следующему источнику
+            
+            # 3. Вернуть автора из метаданных (источник истины)
+            if metadata_author:
+                metadata_author = self._normalize_author_count(metadata_author)
+                if metadata_author:
+                    return metadata_author, 'metadata'
+            
+            # Ничего не найдено
+            return '', ''
+        except Exception as e:
+            return '', ''
+    
+    def _normalize_author_count(self, author_string: str) -> str:
+        """
+        Нормализовать количество авторов.
+        
+        Правило:
+        - Если авторов <= 2: возвращает как есть
+        - Если авторов > 2: возвращает "Соавторство"
+        
+        Авторы разделены символом ';' или ','
+        
+        Args:
+            author_string: Строка с одним или несколькими авторами
+        
+        Returns:
+            Нормализованная строка или "Соавторство"
+        """
+        if not author_string:
+            return ""
+        
+        try:
+            # Разбить авторов по разделителям
+            authors = []
+            for sep in [';', ',']:
+                if sep in author_string:
+                    authors = [a.strip() for a in author_string.split(sep) if a.strip()]
+                    break
+            
+            # Если разделителей не найдено - это один автор
+            if not authors:
+                return author_string.strip()
+            
+            # Применить правило
+            if len(authors) <= 2:
+                # Возвращаем авторов как есть (переформатированных)
+                return '; '.join(authors)
+            else:
+                # Больше 2 авторов - возвращаем "Соавторство"
+                return "Соавторство"
+        except Exception:
+            return author_string
+    
+    def _verify_author_against_metadata(
+        self, 
+        candidate_author: str, 
+        metadata_author: str
+    ) -> bool:
+        """
+        Проверить, похож ли кандидат на автора из метаданных.
+        
+        Использует несколько стратегий:
+        1. Полное совпадение строк (100%)
+        2. Проверка что хотя бы одно слово из metadata есть в candidate
+        3. Fuzzy matching для похожести (70%)
+        
+        Если метаданные пусты, кандидат отклоняется.
+        
+        Args:
+            candidate_author: Предполагаемый автор из папки/имени файла
+            metadata_author: Автор из метаданных FB2
+        
+        Returns:
+            True если автор подтверждается, False иначе
+        """
+        if not candidate_author or not metadata_author:
+            return False
+        
+        try:
+            from difflib import SequenceMatcher
+            
+            # Нормализовать строки для сравнения
+            cand_lower = candidate_author.lower().strip()
+            meta_lower = metadata_author.lower().strip()
+            
+            # 1. Проверить полное совпадение
+            if cand_lower == meta_lower:
+                return True
+            
+            # 2. Проверить что хотя бы одно слово из metadata есть в candidate
+            # Это помогает при разном порядке слов: "Иван Петров" vs "Петров Иван"
+            meta_words = set(meta_lower.split())
+            cand_words = set(cand_lower.replace(',', ' ').split())  # Убрать запятые (для списков авторов)
+            
+            # Если найдено хотя бы 50% слов из метаданных в кандидате, это хороший знак
+            if meta_words and cand_words:
+                overlap = len(meta_words & cand_words) / len(meta_words)
+                if overlap >= 0.5:  # Хотя бы половина слов совпадает
+                    return True
+            
+            # 3. Fuzzy matching для последней проверки
+            similarity = SequenceMatcher(None, cand_lower, meta_lower).ratio()
+            if similarity >= 0.70:
+                return True
+            
+            return False
+        except Exception:
+            return False
+
     def extract_all_authors(
         self,
         fb2_filepath: str,
@@ -149,22 +311,6 @@ class FB2AuthorExtractor:
         # - Вернуть список ExtractionResult с приоритетом FB2_METADATA
         pass
     
-    def _parse_fb2_xml(self, fb2_filepath: str) -> Optional[ET.Element]:
-        """
-        Прочитать и спарсить FB2 файл.
-        
-        Args:
-            fb2_filepath: Путь к FB2 файлу
-        
-        Returns:
-            Корневой элемент дерева XML или None при ошибке
-        """
-        # TODO: Реализовать парсинг FB2
-        # - Обработать кодировку (обычно UTF-8 или иная)
-        # - Обработать ошибки парсинга
-        # - Вернуть корневой элемент
-        pass
-    
     def merge_results_by_priority(
         self,
         results_by_priority: Dict[int, List[ExtractionResult]]
@@ -210,6 +356,105 @@ class FB2AuthorExtractor:
         # - Проверить совпадение подстроки
         # - Вернуть результат
         pass
+    
+    def _extract_author_from_folder_structure(self, fb2_path: Path) -> str:
+        """
+        Извлечь автора из структуры папок.
+        
+        Ищет имя автора в названии папки (не более folder_parse_limit уровней).
+        """
+        try:
+            # Получить путь к файлу
+            folder_path = str(fb2_path.parent)
+            
+            # Попытаться извлечь автора из пути папки
+            result = self.author_processor.extract_author_from_filepath(folder_path)
+            if result:
+                # Результат - список ExtractionResult, берем первый
+                author_name = result[0].value if hasattr(result[0], 'value') else str(result[0])
+                if author_name:
+                    return author_name
+        except Exception as e:
+            pass
+        
+        return ''
+    
+    def _extract_author_from_filename(self, fb2_path: Path) -> str:
+        """
+        Извлечь автора из названия файла.
+        """
+        try:
+            filename = fb2_path.stem  # Имя без расширения
+            
+            # Попытаться извлечь автора из названия файла
+            result = self.author_processor.extract_author_from_filename(filename)
+            if result:
+                # Результат - список ExtractionResult, берем первый
+                author_name = result[0].value if hasattr(result[0], 'value') else str(result[0])
+                if author_name:
+                    return author_name
+        except Exception as e:
+            pass
+        
+        return ''
+    
+    def _extract_author_from_metadata(self, fb2_path: Path) -> str:
+        """
+        Извлечь автора из метаданных FB2 файла.
+        """
+        try:
+            with open(fb2_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            import re
+            
+            # Найти первого автора в метаданных
+            author_pattern = r'<author>.*?</author>'
+            match = re.search(author_pattern, content, re.DOTALL)
+            
+            if match:
+                author_text = match.group(0)
+                
+                # Извлечь компоненты имени
+                first_name_match = re.search(r'<first-name>(.*?)</first-name>', author_text)
+                last_name_match = re.search(r'<last-name>(.*?)</last-name>', author_text)
+                nickname_match = re.search(r'<nickname>(.*?)</nickname>', author_text)
+                
+                first_name = first_name_match.group(1) if first_name_match else ''
+                last_name = last_name_match.group(1) if last_name_match else ''
+                nickname = nickname_match.group(1) if nickname_match else ''
+                
+                # Составить имя
+                if nickname:
+                    author = nickname
+                elif first_name or last_name:
+                    author = f"{first_name} {last_name}".strip()
+                else:
+                    return ''
+                
+                # Проверить черный список
+                if not self._is_blacklisted(author):
+                    return author
+        except Exception:
+            pass
+        
+        return ''
+    
+    def _is_blacklisted(self, value: str) -> bool:
+        """
+        Проверить, находится ли значение в черном списке.
+        """
+        try:
+            blacklist = self.settings.get_filename_blacklist()
+            value_lower = value.lower()
+            
+            for item in blacklist:
+                if value_lower == item.lower() or item.lower() in value_lower:
+                    return True
+        except Exception:
+            pass
+        
+        return False
     
     def reload_config(self):
         """Перезагрузить конфигурацию и паттерны."""

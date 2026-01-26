@@ -180,18 +180,12 @@ class RegenCSVService:
         filename = fb2_path.stem
         self.logger.log(f"[REGEN] Обработка файла: {fb2_path.name}")
         
-        # Извлечь авторов используя FB2AuthorExtractor
-        author_result = self.extractor.extract_all_authors(str(fb2_path))
-        
-        proposed_author = ""
-        author_source = ""
-        if author_result and author_result.get('primary_author'):
-            primary = author_result['primary_author']
-            proposed_author = primary.get('name', '')
-            author_source = primary.get('source', '')
-            self.logger.log(f"[REGEN]   Извлеченный автор: {proposed_author} (источник: {author_source})")
+        # Извлечь автора по приоритетам источников (folder → filename → metadata)
+        proposed_author, author_source = self.extractor.resolve_author_by_priority(str(fb2_path))
+        if proposed_author:
+            self.logger.log(f"[REGEN]   Автор по приоритетам: '{proposed_author}' (источник: {author_source})")
         else:
-            self.logger.log(f"[REGEN]   Автор не найден в результатах: {author_result}")
+            self.logger.log(f"[REGEN]   Автор не найден ни из одного источника")
         
         # TODO: Добавить извлечение серии когда будет готово
         # series_result = self.series_processor.extract_series_combined(filename, str(fb2_path))
@@ -333,6 +327,12 @@ if __name__ == '__main__':
         output_csv_path = str(Path(__file__).parent / 'regen.csv')
     
     # Запустить генерацию
+    import sys
+    import io
+    # Установить правильную кодировку для вывода
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+    
     print(f"Начало генерации CSV (папка: {library_path})...")
     
     def progress_callback(current, total, status):
