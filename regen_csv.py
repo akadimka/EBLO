@@ -226,51 +226,54 @@ class RegenCSVService:
             (authors_str, title, genre) - метаданные из файла
         """
         try:
-            tree = ET.parse(fb2_path)
-            root = tree.getroot()
-            self.logger.log(f"[REGEN]   XML загружен, root tag: {root.tag}")
+            # Прочитаем файл как текст и используем регулярные выражения
+            # чтобы обойти проблемы с undefined namespace prefixes
+            with open(fb2_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
             
-            # Namespace для FB2
-            ns = {'fb': 'http://www.gribuser.ru/xml/fictionbook/2.0'}
+            # Извлечем title-info section используя регулярные выражения
+            import re
             
-            # Получить авторов
+            # Найти всех авторов в title-info
             authors_list = []
-            author_elements = root.findall('.//fb:author', ns)
-            self.logger.log(f"[REGEN]   Найдено авторов (с namespace): {len(author_elements)}")
-            
-            if not author_elements:
-                # Попробовать без namespace
-                author_elements = root.findall('.//author')
-                self.logger.log(f"[REGEN]   Найдено авторов (без namespace): {len(author_elements)}")
-            
-            for author_elem in author_elements:
-                first_name = author_elem.findtext('first-name', '')
-                last_name = author_elem.findtext('last-name', '')
-                nickname = author_elem.findtext('nickname', '')
+            author_pattern = r'<author>.*?</author>'
+            for author_match in re.finditer(author_pattern, content, re.DOTALL):
+                author_text = author_match.group(0)
                 
+                # Извлечь первое имя
+                first_name_match = re.search(r'<first-name>(.*?)</first-name>', author_text)
+                first_name = first_name_match.group(1) if first_name_match else ''
+                
+                # Извлечь фамилию
+                last_name_match = re.search(r'<last-name>(.*?)</last-name>', author_text)
+                last_name = last_name_match.group(1) if last_name_match else ''
+                
+                # Извлечь nickname
+                nickname_match = re.search(r'<nickname>(.*?)</nickname>', author_text)
+                nickname = nickname_match.group(1) if nickname_match else ''
+                
+                # Составить имя автора
                 if nickname:
                     authors_list.append(nickname)
                 elif first_name or last_name:
-                    authors_list.append(f"{first_name} {last_name}".strip())
+                    author_name = f"{first_name} {last_name}".strip()
+                    if author_name:
+                        authors_list.append(author_name)
+            
+            # Найти название книги
+            title_match = re.search(r'<book-title>(.*?)</book-title>', content)
+            title = title_match.group(1) if title_match else ""
+            
+            # Найти жанр
+            genre_match = re.search(r'<genre>(.*?)</genre>', content)
+            genre = genre_match.group(1) if genre_match else ""
             
             authors_str = "; ".join(authors_list) if authors_list else ""
-            self.logger.log(f"[REGEN]   Авторы из метаданных: {authors_str if authors_str else '(пусто)'}")
             
-            # Получить название
-            title_elem = root.find('.//fb:book-title', ns)
-            if title_elem is None:
-                title_elem = root.find('.//book-title')
-            
-            title = title_elem.text if title_elem is not None else ""
+            self.logger.log(f"[REGEN]   Найдено авторов: {len(authors_list)}")
             self.logger.log(f"[REGEN]   Название: {title if title else '(пусто)'}")
-            
-            # Получить жанр
-            genre_elem = root.find('.//fb:genre', ns)
-            if genre_elem is None:
-                genre_elem = root.find('.//genre')
-            
-            genre = genre_elem.text if genre_elem is not None else ""
             self.logger.log(f"[REGEN]   Жанр: {genre if genre else '(пусто)'}")
+            self.logger.log(f"[REGEN]   Авторы: {authors_str if authors_str else '(пусто)'}")
             
             return authors_str, title or "", genre or ""
         
