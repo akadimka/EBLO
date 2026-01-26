@@ -235,64 +235,19 @@ class GenreAssignmentService:
                 self.logger.log(f"ОШИБКА: {fb2_path} - не валидный XML файл")
                 return False
             
-            # Парсить XML с помощью ElementTree
-            try:
-                root = ET.fromstring(content)
-            except ET.ParseError as e:
-                # Проблема может быть в пустых строках - удалим их после XML declaration
-                lines = content.split('\n')
-                if lines[0].startswith('<?xml'):
-                    # Оставляем XML declaration и удаляем пустые строки
-                    xml_decl = lines[0]
-                    new_lines = [line for line in lines[1:] if line.strip()]
-                    content = xml_decl + '\n' + '\n'.join(new_lines)
-                    
-                    try:
-                        root = ET.fromstring(content)
-                    except ET.ParseError as e2:
-                        self.logger.log(f"ОШИБКА парсинга XML: {fb2_path} - {str(e2)}")
-                        return False
-                else:
-                    self.logger.log(f"ОШИБКА парсинга XML: {fb2_path} - {str(e)}")
-                    return False
+            # Используем чистый regex подход вместо ElementTree, чтобы избежать проблем
+            # с undefined namespace prefixes - это более надежно для malformed FB2 файлов
+            has_bom = content.startswith('\ufeff')
             
-            # Определяем, использует ли файл namespace
-            # Проверяем по наличию {} в root tag - это признак namespace в ElementTree
-            has_namespace = root.tag.startswith('{')
-            
-            # Поиск title-info в зависимости от наличия namespace
-            if has_namespace:
-                # Поиск с явным указанием namespace в синтаксисе {namespace}tag
-                title_info = root.find('.//{' + self.FB2_NAMESPACE + '}title-info')
-            else:
-                # Для файлов без namespace
-                title_info = root.find('.//title-info')
-            
-            if title_info is None:
+            # Проверить наличие title-info раздела
+            if not re.search(r'<(?:fb:)?title-info', content):
                 self.logger.log(f"ОШИБКА: {fb2_path} - не найден раздел <title-info>")
                 return False
-            
-            # Удалить все существующие теги <genre>
-            if has_namespace:
-                genre_tags_to_remove = title_info.findall('{' + self.FB2_NAMESPACE + '}genre')
-            else:
-                genre_tags_to_remove = title_info.findall('genre')
-            
-            for genre_elem in genre_tags_to_remove:
-                title_info.remove(genre_elem)
-            
-            # Добавить новый тег <genre>
-            new_genre = ET.Element('genre')
-            new_genre.text = genre_name
-            title_info.append(new_genre)
-            
-            # Сохранить файл - самый надежный способ: заменяем жанры в оригинальном контенте
-            # используя regex, чтобы не потерять namespace объявления
-            has_bom = content.startswith('\ufeff')
             
             # Найти все существующие genre теги с их значениями в title-info и удалить их
             # Regex ищет <genre ...> ... </genre> с любыми атрибутами и значениями
             # Это работает независимо от namespace префиксов
+
             genre_pattern = r'<(?:fb:)?genre[^>]*>.*?</(?:fb:)?genre>'
             result_text = re.sub(genre_pattern, '', content, flags=re.DOTALL | re.IGNORECASE)
             
