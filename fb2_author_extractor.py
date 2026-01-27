@@ -124,17 +124,36 @@ class FB2AuthorExtractor:
                     # принимаем имя файла БЕЗ проверки против метаданных
                     if parsing_folder_limit is not None:
                         # Полная граница - принимаем имя файла как источник истины
-                        # НО нужно нормализовать если возможно, иначе хранить как есть
+                        # НО нужно нормализовать если возможно, иначе расширить из метаданных
                         normalized = self._normalize_author_count(author)
                         if not normalized:
-                            # Нормализация не сработала (нет полных имён), хранить как есть
-                            normalized = " ".join(author.split())  # Просто очистить пробелы
+                            # Нормализация не сработала (нет полных имён)
+                            # Попытаться расширить фамилии из метаданных
+                            # Получить ВСЕХ авторов для расширения
+                            all_metadata = self._extract_all_authors_from_metadata(fb2_path)
+                            expanded = self._expand_surnames_from_metadata(author, all_metadata if all_metadata else metadata_author)
+                            if expanded:
+                                # Попытаться нормализовать расширенный результат
+                                normalized = self._normalize_author_format(expanded)
+                                if not normalized:
+                                    # Формат не сработал, хранить расширенный как есть
+                                    normalized = expanded
+                            else:
+                                # Расширение не сработало, хранить как есть
+                                normalized = " ".join(author.split())
                         else:
                             # Нормализация сработала, применить полный формат
                             normalized = self._normalize_author_format(normalized)
                             if not normalized:
-                                # Формат нормализации не сработал, вернуться к очищенной версии
-                                normalized = " ".join(author.split())
+                                # Формат нормализации не сработал, попытаться расширить
+                                all_metadata = self._extract_all_authors_from_metadata(fb2_path)
+                                expanded = self._expand_surnames_from_metadata(author, all_metadata if all_metadata else metadata_author)
+                                if expanded:
+                                    normalized = self._normalize_author_format(expanded)
+                                    if not normalized:
+                                        normalized = expanded
+                                else:
+                                    normalized = " ".join(author.split())
                         
                         if normalized:
                             return normalized, 'filename'
@@ -634,14 +653,19 @@ class FB2AuthorExtractor:
                     if author_candidate and not self._is_blacklisted_value(author_candidate):
                         # Если содержит инициалы "А.Фамилия", попробовать расширить из метаданных
                         if re.match(r'^[А-Яа-я]\.[А-Яа-я]', author_candidate):
-                            metadata_author = self._extract_author_from_metadata(fb2_path)
-                            if metadata_author:
+                            # Нужно получить полное имя - используем ALL авторов для лучшего совпадения
+                            all_metadata_authors = self._extract_all_authors_from_metadata(fb2_path)
+                            if all_metadata_authors:
                                 # Попробовать найти совпадение по фамилии
-                                # Если сокращение "А.Михайловский", то в метаданных должно быть что-то с Михайловский
                                 surname = author_candidate.split('.')[-1]  # "Михайловский"
-                                if surname.lower() in metadata_author.lower():
+                                if surname.lower() in all_metadata_authors.lower():
                                     # Нашли соответствие по фамилии - используем полное имя из метаданных
-                                    return metadata_author
+                                    # Найти конкретного автора
+                                    authors_list = all_metadata_authors.split('; ')
+                                    for auth in authors_list:
+                                        if surname.lower() in auth.lower():
+                                            return auth
+                                    return all_metadata_authors
                         return author_candidate
             
             # Если скобки не дали результата, попробовать author_processor
@@ -669,6 +693,7 @@ class FB2AuthorExtractor:
         
         Значение извлекается ТОЛЬКО из тега <title-info>,
         а не из других разделов (ignoring document-info и т.д.).
+        Возвращает ТОЛЬКО ПЕРВОГО АВТОРА для проверки и верификации.
         """
         try:
             with open(fb2_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -719,6 +744,57 @@ class FB2AuthorExtractor:
         
         return ''
     
+    def _extract_all_authors_from_metadata(self, fb2_path: Path) -> str:
+        """
+        Извлечь ВСЕХ авторов из метаданных FB2 файла.
+        
+        Значение извлекается ТОЛЬКО из тега <title-info>,
+        а не из других разделов.
+        Возвращает строку со всеми авторами разделённых '; '
+        """
+        try:
+            with open(fb2_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            import re
+            
+            # Найти весь <title-info>...</title-info> блок
+            title_info_match = re.search(r'<(?:fb:)?title-info>.*?</(?:fb:)?title-info>', content, re.DOTALL)
+            
+            if not title_info_match:
+                return ''
+            
+            # Работаем только с содержимым title-info
+            title_info_content = title_info_match.group(0)
+            
+            # Найти всех авторов в title-info
+            author_pattern = r'<author>.*?</author>'
+            matches = re.finditer(author_pattern, title_info_content, re.DOTALL)
+            
+            authors = []
+            for match in matches:
+                author_text = match.group(0)
+                
+                # Извлечь компоненты имени
+                first_name_match = re.search(r'<first-name>(.*?)</first-name>', author_text)
+                last_name_match = re.search(r'<last-name>(.*?)</last-name>', author_text)
+                
+                first_name = first_name_match.group(1) if first_name_match else ''
+                last_name = last_name_match.group(1) if last_name_match else ''
+                
+                # Составить имя
+                if first_name or last_name:
+                    author = f"{first_name} {last_name}".strip()
+                    if author and not self._is_blacklisted(author):
+                        authors.append(author)
+            
+            if authors:
+                return "; ".join(authors)
+        except Exception:
+            pass
+        
+        return ''
+    
     def _is_blacklisted(self, value: str) -> bool:
         """
         Проверить, находится ли значение в черном списке.
@@ -734,6 +810,72 @@ class FB2AuthorExtractor:
             pass
         
         return False
+    
+    def _expand_surnames_from_metadata(self, surname_string: str, metadata_author: str) -> str:
+        """
+        Расширить фамилии (например "Харников, Дынин") полными именами из метаданных.
+        
+        Алгоритм:
+        1. Разбить surname_string на отдельные фамилии
+        2. Для каждой фамилии найти соответствие в metadata_author
+        3. Если найдено - подставить полное имя
+        4. Вернуть расширенный список в формате "Фамилия Имя"
+        
+        Args:
+            surname_string: "Харников, Дынин" или "Харников; Дынин"
+            metadata_author: "Александр Харников; Максим Дынин" (полные имена)
+        
+        Returns:
+            Расширенная строка типа "Харников Александр; Дынин Максим" или пустая строка
+        """
+        if not surname_string or not metadata_author:
+            return ""
+        
+        try:
+            # Разбить фамилии по разделителям
+            import re
+            surnames = re.split(r'[,;]', surname_string)
+            surnames = [s.strip() for s in surnames if s.strip()]
+            
+            # Разбить метаданные по авторам
+            metadata_authors = re.split(r'[;]', metadata_author)
+            metadata_authors = [a.strip() for a in metadata_authors if a.strip()]
+            
+            expanded = []
+            for surname in surnames:
+                surname_lower = surname.lower()
+                found = False
+                
+                # Поиск в метаданных: проверить каждого автора
+                for meta_author in metadata_authors:
+                    meta_lower = meta_author.lower()
+                    
+                    # Проверка 1: фамилия в конце "Имя Фамилия"
+                    if meta_lower.endswith(surname_lower):
+                        normalized = self._normalize_single_author(meta_author)
+                        if normalized:
+                            expanded.append(normalized)
+                            found = True
+                            break
+                    
+                    # Проверка 2: фамилия где-то в строке "Имя Фамилия"
+                    if ' ' + surname_lower in meta_lower or meta_lower.startswith(surname_lower + ' '):
+                        normalized = self._normalize_single_author(meta_author)
+                        if normalized:
+                            expanded.append(normalized)
+                            found = True
+                            break
+                
+                if not found:
+                    # Фамилия не найдена в метаданных - хранить как есть
+                    expanded.append(surname)
+            
+            if expanded:
+                return "; ".join(expanded)
+        except Exception:
+            pass
+        
+        return ""
     
     def reload_config(self):
         """Перезагрузить конфигурацию и паттерны."""
