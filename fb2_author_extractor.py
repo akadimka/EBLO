@@ -120,17 +120,26 @@ class FB2AuthorExtractor:
             try:
                 author = self._extract_author_from_filename(fb2_path)
                 if author:
-                    # Если есть parsing_folder_limit (граница парсинга - разные авторы),
-                    # то доверяем filename БЕЗ верификации
+                    # Если parsing_folder_limit установлен (папка с разными авторами),
+                    # принимаем имя файла БЕЗ проверки против метаданных
                     if parsing_folder_limit is not None:
-                        # Граница парсинга - доверяем filename
-                        # Нормализуем: количество авторов и формат (ФИ)
-                        author = self._normalize_author_count(author)
-                        author = self._normalize_author_format(author)
-                        if author:
-                            return author, 'filename'
+                        # Полная граница - принимаем имя файла как источник истины
+                        # НО нужно нормализовать если возможно, иначе хранить как есть
+                        normalized = self._normalize_author_count(author)
+                        if not normalized:
+                            # Нормализация не сработала (нет полных имён), хранить как есть
+                            normalized = " ".join(author.split())  # Просто очистить пробелы
+                        else:
+                            # Нормализация сработала, применить полный формат
+                            normalized = self._normalize_author_format(normalized)
+                            if not normalized:
+                                # Формат нормализации не сработал, вернуться к очищенной версии
+                                normalized = " ".join(author.split())
+                        
+                        if normalized:
+                            return normalized, 'filename'
                     else:
-                        # Нет границы - проверяем на совпадение с metadata и нормализуем
+                        # Без граничного лимита - проверяем против метаданных
                         if self._verify_author_against_metadata(author, metadata_author):
                             author = self._normalize_author_count(author)
                             author = self._normalize_author_format(author)
@@ -141,8 +150,6 @@ class FB2AuthorExtractor:
             
             # 3. Вернуть автора из метаданных (источник истины)
             if metadata_author:
-                # Автор из метаданных уже в формате "Имя Фамилия" из FB2
-                # Нормализуем в "Фамилия Имя"
                 metadata_author = self._normalize_author_count(metadata_author)
                 metadata_author = self._normalize_author_format(metadata_author)
                 if metadata_author:
@@ -282,6 +289,7 @@ class FB2AuthorExtractor:
             word1_is_name = word1_lower in self.all_names
             word2_is_name = word2_lower in self.all_names
             
+            # Если оба или ни один не в списке имен - оставить как есть
             if word1_is_name and not word2_is_name:
                 # Первое слово - имя, второе - фамилия
                 # Нужно переставить: фамилия имя
@@ -289,15 +297,9 @@ class FB2AuthorExtractor:
             elif not word1_is_name and word2_is_name:
                 # Первое слово - фамилия, второе - имя (уже правильный порядок)
                 return f"{cleaned_words[0]} {cleaned_words[1]}"
-            elif word1_is_name and word2_is_name:
-                # Оба в списке имен - первое это обычно имя, второе отчество/второе имя
-                # Оставляем как есть (редкий случай, обычно это просто фамилия+имя где обе слова совпадают с именами)
-                return f"{cleaned_words[0]} {cleaned_words[1]}"
             else:
-                # Оба НЕ в списке имен - используем эвристику
-                # В русских филеймах обычно порядок "Имя Фамилия" при парсинге
-                # Но нам нужно "Фамилия Имя", поэтому переворачиваем
-                return f"{cleaned_words[1]} {cleaned_words[0]}"
+                # Оба в списке имен или оба не в списке - оставить как есть
+                return f"{cleaned_words[0]} {cleaned_words[1]}"
         
         except Exception:
             return ""
@@ -607,50 +609,59 @@ class FB2AuthorExtractor:
     def _extract_author_from_filename(self, fb2_path: Path) -> str:
         """
         Извлечь автора из названия файла.
-        
-        Если функция extract_author_from_filename возвращает несколько результатов,
-        выбираем тот, который выглядит как имя автора (а не название книги).
+        Поддерживает паттерны:
+        - "Title (Author).fb2"
+        - "(Author) Title.fb2"
+        - "Title - Author.fb2"
+        - "А.Фамилия" (инициалы)
         """
         try:
             filename = fb2_path.stem  # Имя без расширения
             
-            # Попытаться извлечь автора из названия файла
-            results = self.author_processor.extract_author_from_filename(filename)
-            if not results:
-                return ''
+            # Прямой парсинг скобок: "Title (Author)" или "(Author) Title"
+            import re
             
-            # Если несколько результатов - выбираем наиболее подходящий
-            # Предпочитаем результаты с паттерном "Title (Author)" или "(Author) - Title"
-            best_result = None
-            best_score = -1
+            # Паттерн 1: "(Author)" где Author может быть "А.Фамилия" или "Имя Фамилия"
+            bracket_patterns = [
+                r'\(([^)]+)\)(?:\s*$|\s+[-–])',  # В конце или перед дефисом: (Author) - или (Author)
+                r'(?:^|\s+)(?:[-–]\s+)?\(([^)]+)\)',  # В начале или после дефиса: - (Author)
+            ]
             
-            for item in results:
-                author_name = item.value if hasattr(item, 'value') else str(item)
-                pattern_used = item.pattern_used if hasattr(item, 'pattern_used') else ''
-                
-                # Паттерны, которые явно указывают на автора
-                if pattern_used in ['Title (Author)', '(Author) - Title', 'Title - (Author)']:
-                    score = 100  # Высший приоритет
-                elif pattern_used in ['Author - Title', 'Author. Title']:
-                    score = 50   # Средний приоритет
-                else:
-                    score = 0    # Низший приоритет
-                
-                if score > best_score:
-                    best_score = score
-                    best_result = author_name
+            for pattern in bracket_patterns:
+                match = re.search(pattern, filename)
+                if match:
+                    author_candidate = match.group(1).strip()
+                    if author_candidate and not self._is_blacklisted_value(author_candidate):
+                        # Если содержит инициалы "А.Фамилия", попробовать расширить из метаданных
+                        if re.match(r'^[А-Яа-я]\.[А-Яа-я]', author_candidate):
+                            metadata_author = self._extract_author_from_metadata(fb2_path)
+                            if metadata_author:
+                                # Попробовать найти совпадение по фамилии
+                                # Если сокращение "А.Михайловский", то в метаданных должно быть что-то с Михайловский
+                                surname = author_candidate.split('.')[-1]  # "Михайловский"
+                                if surname.lower() in metadata_author.lower():
+                                    # Нашли соответствие по фамилии - используем полное имя из метаданных
+                                    return metadata_author
+                        return author_candidate
             
-            if best_result:
-                return best_result
-            
-            # Fallback: возвращаем первый результат, если ничего не выбрали
-            author_name = results[0].value if hasattr(results[0], 'value') else str(results[0])
-            return author_name if author_name else ''
-            
+            # Если скобки не дали результата, попробовать author_processor
+            result = self.author_processor.extract_author_from_filename(filename)
+            if result:
+                # Результат - список ExtractionResult, берем первый
+                author_name = result[0].value if hasattr(result[0], 'value') else str(result[0])
+                if author_name:
+                    return author_name
         except Exception as e:
             pass
         
         return ''
+    
+    def _is_blacklisted_value(self, value: str) -> bool:
+        """Проверить, есть ли значение в чёрном списке."""
+        blacklist = ['том', 'часть', 'выпуск', 'сборник', 'антология', 
+                     'book', 'vol', 'volume', 'part', 'выпуск']
+        value_lower = value.lower()
+        return any(bl in value_lower for bl in blacklist)
     
     def _extract_author_from_metadata(self, fb2_path: Path) -> str:
         """
