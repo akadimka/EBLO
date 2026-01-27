@@ -50,6 +50,15 @@ class FB2AuthorExtractor:
         self.male_names = set(name.lower() for name in self.settings.get_male_names())
         self.female_names = set(name.lower() for name in self.settings.get_female_names())
         self.all_names = self.male_names | self.female_names
+        
+        # Маркеры сборников/антологий
+        self.anthology_markers = [
+            'сборник', 'антология', 'коллекция', 'хиты', 'лучшее', 'избранное',
+            'сборник рассказов', 'сборник повестей', 'сборник произведений',
+            'best of', 'anthology', 'collection', 'digest',
+            'сборник военной', 'сборник научной', 'сборник фантастики',
+            'избранные произведения', 'лучшие рассказы', 'лучшие повести'
+        ]
     
     def resolve_author_by_priority(
         self,
@@ -876,6 +885,41 @@ class FB2AuthorExtractor:
             pass
         
         return ""
+    
+    def is_anthology(self, filename: str, author_count: int = 0) -> bool:
+        """
+        Определить, является ли файл сборником/антологией.
+        
+        Критерии:
+        1. Имя файла содержит маркеры сборника (сборник, антология, хиты и т.д.)
+        2. И авторов > 2 (что указывает на множество авторов)
+        
+        Args:
+            filename: Имя файла без расширения
+            author_count: Количество авторов из метаданных (опционально)
+        
+        Returns:
+            True если файл признан сборником
+        """
+        try:
+            filename_lower = filename.lower()
+            
+            # Проверить маркеры сборников в имени файла
+            for marker in self.anthology_markers:
+                if marker in filename_lower:
+                    # Если есть маркер сборника и авторов > 2, это точно сборник
+                    if author_count > 2:
+                        return True
+                    # Даже без явного маркера количества авторов, наличие маркера сборника = сборник
+                    return True
+            
+            # Если авторов > 4, это скорее всего сборник даже без явных маркеров
+            if author_count > 4:
+                return True
+        except Exception:
+            pass
+        
+        return False
     
     def reload_config(self):
         """Перезагрузить конфигурацию и паттерны."""

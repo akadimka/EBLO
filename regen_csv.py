@@ -370,6 +370,16 @@ class RegenCSVService:
         metadata_authors, book_title, metadata_genre = self._extract_fb2_metadata(fb2_path)
         self.logger.log(f"[REGEN]   Метаданные FB2: авторы='{metadata_authors}', название='{book_title}', жанр='{metadata_genre}'")
         
+        # Проверить, является ли это сборником
+        author_count = len([a.strip() for a in metadata_authors.split(';') if a.strip()])
+        is_anthology = self.extractor.is_anthology(filename, author_count)
+        
+        if is_anthology:
+            # Это сборник - переопределить proposed_author
+            proposed_author = "Сборник"
+            author_source = "metadata"  # Источник - метаданные (множество авторов)
+            self.logger.log(f"[REGEN]   Обнаружен сборник ({author_count} авторов)")
+        
         # Создать запись
         record = BookRecord(
             file_path=str(fb2_path),
