@@ -103,11 +103,24 @@ class FB2AuthorExtractor:
                 # Нет лимита - парсим папки нормально
                 try:
                     author = self._extract_author_from_folder_structure(fb2_path)
-                    if author and self._verify_author_against_metadata(author, metadata_author):
-                        author = self._normalize_author_count(author)
-                        author = self._normalize_author_format(author)
-                        if author:
-                            return author, 'folder'
+                    if author:
+                        # Проверить: если в папке указано несколько авторов (запятая), не проверять против метаданных
+                        # Если это список авторов, мы ему доверяем  
+                        if ',' in author or ';' in author:
+                            # Это список авторов из папки - принимаем как есть без верификации
+                            author = self._normalize_author_count(author)
+                            author = self._normalize_author_format(author) if author else ""
+                            if not author:
+                                # Если нормализация не сработала, доверяем исходному списку
+                                author = " ".join(self._extract_author_from_folder_structure(fb2_path).split())
+                            if author:
+                                return author, 'folder'
+                        elif self._verify_author_against_metadata(author, metadata_author):
+                            # Одиночный автор - проверяем против метаданных
+                            author = self._normalize_author_count(author)
+                            author = self._normalize_author_format(author)
+                            if author:
+                                return author, 'folder'
                 except Exception as e:
                     pass  # Продолжаем к следующему источнику
             else:
@@ -265,6 +278,7 @@ class FB2AuthorExtractor:
         - Между словами только один пробел
         - Допускаются дефисы в составных именах/фамилиях
         - Порядок определяется по списку имен: если одно из слов есть в списке - оно Имя, другое - Фамилия
+        - Обработка аббревиатур типа "А.Фамилия" (оставить как есть)
         
         Args:
             author_name: Имя автора (может быть в разных форматах)
@@ -278,6 +292,14 @@ class FB2AuthorExtractor:
         try:
             # Убрать лишние пробелы
             author_name = " ".join(author_name.split())
+            
+            # Проверить: если это аббревиатура типа "А.Фамилия", оставить как есть
+            if '.' in author_name:
+                # Это может быть аббревиатура - проверим
+                parts = author_name.split()
+                if len(parts) == 2 and parts[0].endswith('.') and len(parts[0]) <= 3:
+                    # Формат "А.Фамилия" или "А.B.Фамилия"
+                    return author_name
             
             # Разбить на слова
             words = author_name.split()
@@ -367,7 +389,26 @@ class FB2AuthorExtractor:
             if len(authors) > 2:
                 return "Соавторство"
             
-            # Нормализовать формат и вернуть
+            # Если авторов > 1, нужно нормализовать каждого
+            if len(authors) > 1:
+                normalized_authors = []
+                for author in authors:
+                    normalized = self._normalize_author_format(author)
+                    if not normalized and author:
+                        # Если формальная нормализация не сработала,
+                        # но автор содержит точку (вероятно аббревиатура),
+                        # оставляем как есть
+                        normalized = author.strip()
+                    if normalized:
+                        normalized_authors.append(normalized)
+                
+                if normalized_authors:
+                    return ", ".join(normalized_authors)
+                else:
+                    # Если ничего не нормализовалось, оставляем исходное
+                    return author_string
+            
+            # Один автор - нормализовать и вернуть
             return self._normalize_author_format(author_string)
         
         except Exception:
@@ -588,7 +629,24 @@ class FB2AuthorExtractor:
             # Получить путь к файлу
             folder_path = str(fb2_path.parent)
             
-            # Попытаться извлечь автора из пути папки
+            # Сначала попытаться прямого парсинга скобок в названии папки
+            import re
+            folder_name = fb2_path.parent.name
+            
+            # Паттерн 1: "(Author)" где может быть несколько авторов
+            bracket_patterns = [
+                r'\(([^)]+)\)(?:\s*$|\s+[-–])',  # В конце или перед дефисом: (Author) - или (Author)
+                r'(?:^|\s+)(?:[-–]\s+)?\(([^)]+)\)',  # В начале или после дефиса: - (Author)
+            ]
+            
+            for pattern in bracket_patterns:
+                match = re.search(pattern, folder_name)
+                if match:
+                    author_candidate = match.group(1).strip()
+                    if author_candidate and not self._is_blacklisted_value(author_candidate):
+                        return author_candidate
+            
+            # Если прямой парсинг скобок не дал результата, использовать author_processor
             result = self.author_processor.extract_author_from_filepath(folder_path)
             if result:
                 # Результат - список ExtractionResult, берем первый
@@ -614,14 +672,31 @@ class FB2AuthorExtractor:
             Имя автора или пустая строка
         """
         try:
+            import re
             # Получить путь к файлу
             current_path = fb2_path.parent
             limit_path = limit_folder
             
             # Идем вверх по папкам от файла до лимита
             while current_path != limit_path and current_path != current_path.parent:
-                # Попытаться извлечь автора из текущей папки
-                result = self.author_processor.extract_author_from_filename(current_path.name)
+                folder_name = current_path.name
+                
+                # Попытаться прямого парсинга скобок в названии папки
+                bracket_patterns = [
+                    r'\(([^)]+)\)(?:\s*$|\s+[-–])',  # В конце или перед дефисом
+                    r'(?:^|\s+)(?:[-–]\s+)?\(([^)]+)\)',  # В начале или после дефиса
+                ]
+                
+                author_found = False
+                for pattern in bracket_patterns:
+                    match = re.search(pattern, folder_name)
+                    if match:
+                        author_candidate = match.group(1).strip()
+                        if author_candidate and not self._is_blacklisted_value(author_candidate):
+                            return author_candidate
+                
+                # Если прямой парсинг не дал результата, использовать author_processor
+                result = self.author_processor.extract_author_from_filename(folder_name)
                 if result:
                     author_name = result[0].value if hasattr(result[0], 'value') else str(result[0])
                     if author_name:
