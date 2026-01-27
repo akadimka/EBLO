@@ -267,9 +267,18 @@ class RegenCSVService:
                             continue
                         
                         author_meta, _, _ = self._extract_fb2_metadata(fb2_path)
-                        if author_meta not in authors_in_folder:
-                            authors_in_folder[author_meta] = []
-                        authors_in_folder[author_meta].append(fb2_path)
+                        # Нормализовать авторов: сортировать список авторов для сравнения
+                        # Это нужно чтобы "А; Б" и "Б; А" считались одинаковыми
+                        if author_meta:
+                            author_parts = [a.strip() for a in author_meta.split(';')]
+                            author_parts.sort()  # Сортируем для консистентного сравнения
+                            author_normalized = '; '.join(author_parts)
+                        else:
+                            author_normalized = author_meta
+                        
+                        if author_normalized not in authors_in_folder:
+                            authors_in_folder[author_normalized] = []
+                        authors_in_folder[author_normalized].append(fb2_path)
                     except Exception as e:
                         key = f"ERROR_{fb2_path.name}"
                         if key not in authors_in_folder:

@@ -101,17 +101,18 @@ class FB2AuthorExtractor:
             if folder_parse_limit > 0:
                 # folder_parse_limit > 0: парсим папки на N уровней (систематическая структура - folder_dataset)
                 try:
-                    author = self._extract_author_from_folder_structure(fb2_path)
+                    author = self._extract_author_from_folder_structure(fb2_path, folder_parse_limit)
                     if author:
                         # Проверить: если в папке указано несколько авторов (запятая), не проверять против метаданных
                         # Если это список авторов, мы ему доверяем  
                         if ',' in author or ';' in author:
                             # Это список авторов из папки - принимаем как есть без верификации
+                            # (Расширение аббревиатур произойдёт позже в RegenCSVService._expand_abbreviated_authors)
                             author = self._normalize_author_count(author)
                             author = self._normalize_author_format(author) if author else ""
                             if not author:
                                 # Если нормализация не сработала, доверяем исходному списку
-                                author = " ".join(self._extract_author_from_folder_structure(fb2_path).split())
+                                author = " ".join(self._extract_author_from_folder_structure(fb2_path, folder_parse_limit).split())
                             if author:
                                 return author, 'folder_dataset'  # ИСПРАВЛЕНО: folder_dataset вместо folder
                         elif self._verify_author_against_metadata(author, metadata_author):
@@ -604,34 +605,42 @@ class FB2AuthorExtractor:
         # - Вернуть результат
         pass
     
-    def _extract_author_from_folder_structure(self, fb2_path: Path) -> str:
+    def _extract_author_from_folder_structure(self, fb2_path: Path, folder_parse_limit: int = 3) -> str:
         """
         Извлечь автора из структуры папок.
         
-        Ищет имя автора в названии папки (не более folder_parse_limit уровней).
+        Ищет имя автора в названии папки, поднимаясь вверх на folder_parse_limit уровней.
+        Останавливается на первой папке, где найдены авторы.
         """
         try:
-            # Получить путь к файлу
+            # Поднимаемся вверх по folder_parse_limit уровней, ищем авторов в названиях папок
+            current_path = fb2_path.parent
+            for level in range(folder_parse_limit):
+                if current_path.parts:
+                    folder_name = current_path.name
+                    
+                    # Паттерн: "(Author)" где может быть несколько авторов
+                    import re
+                    bracket_patterns = [
+                        r'\(([^)]+)\)(?:\s*$|\s+[-–])',  # В конце или перед дефисом: (Author) - или (Author)
+                        r'(?:^|\s+)(?:[-–]\s+)?\(([^)]+)\)',  # В начале или после дефиса: - (Author)
+                    ]
+                    
+                    for pattern in bracket_patterns:
+                        match = re.search(pattern, folder_name)
+                        if match:
+                            author_candidate = match.group(1).strip()
+                            if author_candidate and not self._is_blacklisted_value(author_candidate):
+                                return author_candidate
+                    
+                    # Поднимаемся на один уровень вверх
+                    parent = current_path.parent
+                    if parent == current_path:  # Достигли корня
+                        break
+                    current_path = parent
+            
+            # Если парсинг скобок в папках не сработал, использовать author_processor
             folder_path = str(fb2_path.parent)
-            
-            # Сначала попытаться прямого парсинга скобок в названии папки
-            import re
-            folder_name = fb2_path.parent.name
-            
-            # Паттерн 1: "(Author)" где может быть несколько авторов
-            bracket_patterns = [
-                r'\(([^)]+)\)(?:\s*$|\s+[-–])',  # В конце или перед дефисом: (Author) - или (Author)
-                r'(?:^|\s+)(?:[-–]\s+)?\(([^)]+)\)',  # В начале или после дефиса: - (Author)
-            ]
-            
-            for pattern in bracket_patterns:
-                match = re.search(pattern, folder_name)
-                if match:
-                    author_candidate = match.group(1).strip()
-                    if author_candidate and not self._is_blacklisted_value(author_candidate):
-                        return author_candidate
-            
-            # Если прямой парсинг скобок не дал результата, использовать author_processor
             result = self.author_processor.extract_author_from_filepath(folder_path)
             if result:
                 # Результат - список ExtractionResult, берем первый
