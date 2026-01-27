@@ -162,6 +162,12 @@ class RegenCSVService:
                     proposed_author="ERROR"
                 ))
         
+        # PASS 3: Раскрыть сокращённых авторов (А.Фамилия)
+        if progress_callback:
+            progress_callback(len(fb2_files), len(fb2_files), "Раскрытие аббревиатур авторов...")
+        self.logger.log("[PASS 3] Раскрытие аббревиатур авторов...")
+        records = self._expand_abbreviated_authors(records)
+        
         # Сохранить CSV если путь указан
         if output_csv_path:
             self._save_csv(records, output_csv_path)
@@ -472,6 +478,125 @@ class RegenCSVService:
         except Exception as e:
             self.logger.log(f"ОШИБКА при парсинге FB2 метаданных {fb2_path}: {str(e)}")
             return "", "", ""
+    
+    def _build_authors_map(self, records: List[BookRecord]) -> Dict[str, str]:
+        """
+        Построить словарь фамилия -> полное имя из всех предложенных авторов.
+        
+        Args:
+            records: Список BookRecord
+        
+        Returns:
+            Словарь {фамилия.lower(): полное_имя}
+        """
+        authors_map = {}
+        
+        for record in records:
+            if not record.proposed_author or record.proposed_author == "Соавторство":
+                continue
+            
+            # Парсить полные имена (не аббревиатуры)
+            if '.' in record.proposed_author:
+                # Пропустить аббревиатуры типа "А.Фамилия"
+                continue
+            
+            # Для каждого автора из proposed_author
+            for author_part in record.proposed_author.split(','):
+                author_part = author_part.strip()
+                if not author_part:
+                    continue
+                
+                # Парсить "Фамилия Имя"
+                parts = author_part.split()
+                if len(parts) >= 2:
+                    surname = parts[0].lower()
+                    # Сохранить полное имя
+                    authors_map[surname] = author_part
+        
+        # Также собрать из metadata_authors (формат "Имя Фамилия")
+        for record in records:
+            if not record.metadata_authors:
+                continue
+            
+            for author_part in record.metadata_authors.split(';'):
+                author_part = author_part.strip()
+                if not author_part or '.' in author_part:
+                    continue
+                
+                # Парсить "Имя Фамилия" и преобразовать в "Фамилия Имя"
+                parts = author_part.split()
+                if len(parts) >= 2:
+                    # В metadata_authors: Имя Фамилия
+                    # Преобразовать в: Фамилия Имя
+                    first_name = parts[0]
+                    surname = parts[-1]
+                    
+                    surname_lower = surname.lower()
+                    
+                    # Если фамилия уже есть, не перезаписываем (proposed_author имеет приоритет)
+                    if surname_lower not in authors_map:
+                        # Попробовать собрать как "Фамилия Имя"
+                        full_name = f"{surname} {first_name}"
+                        authors_map[surname_lower] = full_name
+        
+        self.logger.log(f"Построен словарь из {len(authors_map)} авторов: {list(authors_map.keys())[:5]}...")
+        return authors_map
+    
+    def _expand_abbreviated_authors(self, records: List[BookRecord]) -> List[BookRecord]:
+        """
+        Раскрыть сокращённых авторов типа "А.Фамилия" до полных имён.
+        
+        Стратегия:
+        1. Собрать словарь полных имён из proposed_author и metadata_authors
+        2. Для каждого сокращённого автора поискать в словаре
+        3. Заменить на полное имя если найдено
+        
+        Args:
+            records: Список BookRecord
+        
+        Returns:
+            Обновленный список с раскрытыми авторами
+        """
+        # Построить словарь полных имён
+        authors_map = self._build_authors_map(records)
+        
+        if not authors_map:
+            self.logger.log("Словарь полных имён пуст, раскрытие невозможно")
+            return records
+        
+        self.logger.log(f"Построен словарь из {len(authors_map)} авторов для раскрытия")
+        
+        # Раскрыть аббревиатуры в каждой записи
+        expanded_count = 0
+        for record in records:
+            if not record.proposed_author or ',' not in record.proposed_author:
+                continue
+            
+            # Проверить содержит ли вообще аббревиатуры
+            if '.' not in record.proposed_author:
+                continue
+            
+            # Раскрыть каждого автора в списке
+            authors_list = record.proposed_author.split(',')
+            expanded_authors = []
+            
+            for author in authors_list:
+                author = author.strip()
+                
+                # Если это аббревиатура (содержит точку), раскрыть
+                if '.' in author:
+                    expanded = self.extractor.expand_abbreviated_author(author, authors_map)
+                    if expanded != author:
+                        expanded_count += 1
+                    expanded_authors.append(expanded)
+                else:
+                    expanded_authors.append(author)
+            
+            # Обновить proposed_author
+            record.proposed_author = ", ".join(expanded_authors)
+        
+        self.logger.log(f"Раскрыто аббревиатур: {expanded_count}")
+        return records
     
     def _save_csv(self, records: List[BookRecord], output_path: str):
         """

@@ -996,6 +996,82 @@ class FB2AuthorExtractor:
         
         return False
     
+    def expand_abbreviated_author(self, abbreviated_author: str, all_authors_map: Dict[str, str]) -> str:
+        """
+        Раскрыть сокращённого автора (А.Фамилия) до полного имени.
+        
+        Стратегия:
+        1. Парсить "А.Фамилия" - может быть как "А. Фамилия" так и "А.Фамилия"
+        2. Извлечь букву инициала и фамилию
+        3. Поискать в all_authors_map по фамилии как ключу
+        4. Если найдено и инициал совпадает - вернуть полное имя
+        5. Если нет - оставить как было
+        
+        Args:
+            abbreviated_author: Сокращённое имя типа "А.Фамилия" или "А. Фамилия"
+            all_authors_map: Словарь {фамилия.lower(): полное_имя (Фамилия Имя)}
+        
+        Returns:
+            Полное имя если найдено, иначе исходное
+        """
+        if not abbreviated_author or '.' not in abbreviated_author:
+            return abbreviated_author
+        
+        try:
+            # Парсить "А.Фамилия" или "А. Фамилия"
+            # Сначала попробуем с пробелом (А. Фамилия)
+            parts = abbreviated_author.split()
+            if len(parts) == 2:
+                # Формат "А. Фамилия"
+                init_part = parts[0]
+                surname = parts[1]
+            elif len(parts) == 1:
+                # Формат "А.Фамилия" (без пробела)
+                # Нужно парсить вручную
+                s = abbreviated_author
+                
+                # Найти позицию точки
+                dot_pos = s.find('.')
+                if dot_pos == -1:
+                    return abbreviated_author
+                
+                init_part = s[:dot_pos+1]  # "А."
+                surname = s[dot_pos+1:].lstrip()  # "Фамилия"
+                
+                if not surname:
+                    return abbreviated_author
+            else:
+                return abbreviated_author
+            
+            # Проверить что первая часть заканчивается точкой
+            if not init_part.endswith('.'):
+                return abbreviated_author
+            
+            # Получить первую букву инициала
+            first_letter = init_part[0].upper()
+            
+            # Поискать в словаре по фамилии как ключу
+            surname_lower = surname.lower()
+            
+            # Попытка 1: найти точное совпадение фамилии в словаре (ключи - фамилии)
+            if surname_lower in all_authors_map:
+                full_name = all_authors_map[surname_lower]
+                
+                # Парсить полное имя "Фамилия Имя"
+                full_parts = full_name.split()
+                if len(full_parts) >= 2:
+                    first_name = full_parts[1]  # Второе слово - имя
+                    
+                    # Проверить совпадение первой буквы имени с инициалом
+                    if first_name and first_name[0].upper() == first_letter:
+                        return full_name
+            
+            # Если не найдено - вернуть как было
+            return abbreviated_author
+        
+        except Exception:
+            return abbreviated_author
+    
     def reload_config(self):
         """Перезагрузить конфигурацию и паттерны."""
         self.settings.load()
