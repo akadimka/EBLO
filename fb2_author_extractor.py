@@ -100,7 +100,7 @@ class FB2AuthorExtractor:
             
             # 1. Попытка получить автора из структуры папок (проверяем если есть лимит)
             if parsing_folder_limit is None:
-                # Нет лимита - парсим папки нормально
+                # Нет лимита - парсим папки нормально (систематическая структура - folder_dataset)
                 try:
                     author = self._extract_author_from_folder_structure(fb2_path)
                     if author:
@@ -114,17 +114,17 @@ class FB2AuthorExtractor:
                                 # Если нормализация не сработала, доверяем исходному списку
                                 author = " ".join(self._extract_author_from_folder_structure(fb2_path).split())
                             if author:
-                                return author, 'folder'
+                                return author, 'folder_dataset'  # ИСПРАВЛЕНО: folder_dataset вместо folder
                         elif self._verify_author_against_metadata(author, metadata_author):
                             # Одиночный автор - проверяем против метаданных
                             author = self._normalize_author_count(author)
                             author = self._normalize_author_format(author)
                             if author:
-                                return author, 'folder'
+                                return author, 'folder_dataset'  # ИСПРАВЛЕНО: folder_dataset вместо folder
                 except Exception as e:
                     pass  # Продолжаем к следующему источнику
             else:
-                # Есть лимит - парсим папки до границы
+                # Есть лимит - парсим папки до границы (папка с разными авторами - folder)
                 try:
                     author = self._extract_author_from_folder_structure_with_limit(
                         fb2_path,
@@ -134,7 +134,7 @@ class FB2AuthorExtractor:
                         author = self._normalize_author_count(author)
                         author = self._normalize_author_format(author)
                         if author:
-                            return author, 'folder'
+                            return author, 'folder'  # folder для папок с лимитом (многоавторские)
                 except Exception as e:
                     pass  # Продолжаем к следующему источнику
             
