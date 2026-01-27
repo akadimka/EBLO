@@ -20,6 +20,7 @@ import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Callable, Any
 import xml.etree.ElementTree as ET
+import re
 
 try:
     from fb2_author_extractor import FB2AuthorExtractor
@@ -270,6 +271,9 @@ class RegenCSVService:
                         # Нормализовать авторов: сортировать список авторов для сравнения
                         # Это нужно чтобы "А; Б" и "Б; А" считались одинаковыми
                         if author_meta:
+                            # Сначала нормализовать пробелы (сжать множественные в один)
+                            author_meta = re.sub(r'\s+', ' ', author_meta.strip())
+                            
                             author_parts = [a.strip() for a in author_meta.split(';')]
                             author_parts.sort()  # Сортируем для консистентного сравнения
                             author_normalized = '; '.join(author_parts)
