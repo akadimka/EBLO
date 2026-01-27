@@ -63,15 +63,15 @@ class FB2AuthorExtractor:
     def resolve_author_by_priority(
         self,
         fb2_filepath: str,
+        folder_parse_limit: int = 3,
         parsing_folder_limit: Optional[Path] = None
     ) -> Tuple[str, str]:
         """
         Простой метод для получения автора по приоритетам источников.
         
-        Приоритет извлечения:
-        1. Структура папок (FOLDER_STRUCTURE) - priority 1, проверяется через метаданные
-        2. Название файла (FILENAME) - priority 2, проверяется через метаданные
-        3. Метаданные FB2 (FB2_METADATA) - priority 3, источник истины
+        Приоритет извлечения в зависимости от folder_parse_limit:
+        - folder_parse_limit > 0: папка → файл → метаданные (структурированное хранилище)
+        - folder_parse_limit == 0: файл → метаданные (неструктурированное, разные авторы в папке)
         
         Для источников 1 и 2 используется fuzzy matching для верификации:
         - Кандидат сравнивается с авторами из метаданных
@@ -84,12 +84,13 @@ class FB2AuthorExtractor:
         
         Args:
             fb2_filepath: Полный путь к FB2 файлу
-            parsing_folder_limit: Граница парсинга папок (Path):
-                - None: полный приоритет (folder → filename → metadata)
-                - Path('...'): парсинг папок останавливается на этой папке
+            folder_parse_limit: Глубина парсинга папок (int):
+                - 0: не парсим папки вообще (приоритет: файл → метаданные)
+                - N>0: парсим максимум N уровней вверх (приоритет: папка → файл → метаданные)
+            parsing_folder_limit: (Deprecated) Граница парсинга папок для обратной совместимости
         
         Returns:
-            (author_name, source) где source in ['folder', 'filename', 'metadata', '']
+            (author_name, source) где source in ['folder_dataset', 'folder', 'filename', 'metadata', '']
             Если ничего не найдено, возвращает ('', '')
         """
         try:
@@ -98,9 +99,10 @@ class FB2AuthorExtractor:
             # Получить авторов из метаданных один раз (источник истины)
             metadata_author = self._extract_author_from_metadata(fb2_path)
             
-            # 1. Попытка получить автора из структуры папок (проверяем если есть лимит)
-            if parsing_folder_limit is None:
-                # Нет лимита - парсим папки нормально (систематическая структура - folder_dataset)
+            # 1. Попытка получить автора из структуры папок (если folder_parse_limit > 0)
+            if folder_parse_limit > 0 or parsing_folder_limit is None:
+                # folder_parse_limit > 0: парсим папки на N уровней (систематическая структура - folder_dataset)
+                # parsing_folder_limit == None (legacy): полный приоритет папок (folder_dataset)
                 try:
                     author = self._extract_author_from_folder_structure(fb2_path)
                     if author:
@@ -123,8 +125,8 @@ class FB2AuthorExtractor:
                                 return author, 'folder_dataset'  # ИСПРАВЛЕНО: folder_dataset вместо folder
                 except Exception as e:
                     pass  # Продолжаем к следующему источнику
-            else:
-                # Есть лимит - парсим папки до границы (папка с разными авторами - folder)
+            elif parsing_folder_limit is not None:
+                # Legacy: Есть лимит Path - парсим папки до границы (папка с разными авторами - folder)
                 try:
                     author = self._extract_author_from_folder_structure_with_limit(
                         fb2_path,
@@ -142,9 +144,9 @@ class FB2AuthorExtractor:
             try:
                 author = self._extract_author_from_filename(fb2_path)
                 if author:
-                    # Если parsing_folder_limit установлен (папка с разными авторами),
+                    # Если folder_parse_limit == 0 (папка с разными авторами),
                     # принимаем имя файла БЕЗ проверки против метаданных
-                    if parsing_folder_limit is not None:
+                    if folder_parse_limit == 0 or parsing_folder_limit is not None:
                         # Полная граница - принимаем имя файла как источник истины
                         # НО нужно нормализовать если возможно, иначе расширить из метаданных
                         normalized = self._normalize_author_count(author)

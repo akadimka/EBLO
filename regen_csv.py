@@ -104,6 +104,9 @@ class RegenCSVService:
         self.logger = Logger()
         self.extractor = FB2AuthorExtractor(settings_path)
         self.blacklist = self.settings.get_filename_blacklist()
+        
+        # Загрузить настройку глубины парсинга папок
+        self.folder_parse_limit = self.settings.get_folder_parse_limit()
     
     def generate_csv(
         self,
@@ -278,7 +281,7 @@ class RegenCSVService:
                     self.logger.log(f"[HIERARCHY] Разные авторы в {folder_obj.name} - папка является границей парсинга")
                     for fb2_path in files:
                         analysis[str(fb2_path)] = {
-                            'parsing_limit': folder_obj,
+                            'folder_parse_limit': 0,  # Полная граница - не парсим папки вверх
                             'folder_for_pattern': folder_obj,
                             'folder_author': None
                         }
@@ -287,7 +290,7 @@ class RegenCSVService:
                     self.logger.log(f"[HIERARCHY] Одинаковые авторы в {folder_obj.name}")
                     for fb2_path in files:
                         analysis[str(fb2_path)] = {
-                            'parsing_limit': None,
+                            'folder_parse_limit': self.folder_parse_limit,  # Используем настройку из config
                             'folder_for_pattern': folder_obj,
                             'folder_author': None
                         }
@@ -343,7 +346,7 @@ class RegenCSVService:
         
         # Получить информацию из анализа иерархии
         file_info = folder_analysis.get(str(fb2_path), {})
-        parsing_limit = file_info.get('parsing_limit')
+        folder_parse_limit = file_info.get('folder_parse_limit', self.folder_parse_limit)
         folder_author = file_info.get('folder_author')
         
         # Если найден автор в названии папки - используем его как author_dataset
@@ -362,7 +365,7 @@ class RegenCSVService:
         if not proposed_author:
             proposed_author, author_source = self.extractor.resolve_author_by_priority(
                 str(fb2_path),
-                parsing_folder_limit=parsing_limit
+                folder_parse_limit=folder_parse_limit
             )
             if proposed_author:
                 self.logger.log(f"[REGEN]   Автор по приоритетам: '{proposed_author}' (источник: {author_source})")
