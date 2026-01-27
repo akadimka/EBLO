@@ -172,6 +172,12 @@ class RegenCSVService:
         self.logger.log("[PASS 3] Раскрытие аббревиатур авторов...")
         records = self._expand_abbreviated_authors(records)
         
+        # PASS 4: Применить консенсус авторов
+        if progress_callback:
+            progress_callback(len(fb2_files), len(fb2_files), "Применение консенсуса авторов...")
+        self.logger.log("[PASS 4] Применение консенсуса авторов...")
+        records = self._apply_author_consensus(records)
+        
         # Сохранить CSV если путь указан
         if output_csv_path:
             self._save_csv(records, output_csv_path)
@@ -635,6 +641,90 @@ class RegenCSVService:
             record.proposed_author = ", ".join(expanded_authors)
         
         self.logger.log(f"Раскрыто аббревиатур: {expanded_count}")
+        return records
+    
+    def _apply_author_consensus(self, records: List[BookRecord]) -> List[BookRecord]:
+        """
+        Применить консенсус при расхождениях авторов.
+        
+        Для каждой группы записей с одинаковыми metadata_authors:
+        1. Подсчитать количество вхождений каждого proposed_author
+        2. Выбрать наиболее частый вариант (консенсус)
+        3. Если author отличался от консенсуса - добавить суффикс "_cons" к source
+        4. Если author уже совпадал - оставить source без изменений
+        
+        Args:
+            records: Список BookRecord
+        
+        Returns:
+            Обновленный список с применённым консенсусом
+        """
+        # Группировать по metadata_authors
+        groups = {}
+        for record in records:
+            key = record.metadata_authors
+            if key not in groups:
+                groups[key] = []
+            groups[key].append(record)
+        
+        consensus_count = 0
+        
+        # Для каждой группы найти консенсус
+        for metadata_key, group_records in groups.items():
+            if not metadata_key or len(group_records) == 1:
+                # Пропустить единичные записи или пустые metadata
+                continue
+            
+            # ВАЖНО: folder_dataset имеет приоритет над консенсусом
+            # Если хотя бы один файл получил автора из folder_dataset, консенсус не применяется
+            # Отфильтровать файлы БЕЗ folder_dataset (к ним применяется консенсус)
+            # folder_dataset имеет приоритет и не должен изменяться
+            non_folder_records = [
+                r for r in group_records 
+                if not r.author_source.startswith("folder_dataset")
+            ]
+            
+            if not non_folder_records or len(non_folder_records) == 1:
+                # Нет файлов без folder_dataset или только один файл - консенсус не применяется
+                if not non_folder_records:
+                    self.logger.log(f"[CONSENSUS] metadata='{metadata_key}': все файлы имеют folder_dataset источник - пропускаем")
+                continue
+            
+            # Подсчитать вхождения proposed_author в группе БЕЗ folder_dataset файлов
+            author_counts = {}
+            for record in non_folder_records:
+                author = record.proposed_author or ""
+                if author not in author_counts:
+                    author_counts[author] = 0
+                author_counts[author] += 1
+            
+            if len(author_counts) <= 1:
+                # Все авторы одинаковые - консенсус уже достигнут
+                self.logger.log(f"[CONSENSUS] metadata='{metadata_key}': все файлы без folder_dataset имеют одинакового автора ({author_counts}) - пропускаем")
+                continue
+            
+            # Найти наиболее частый вариант (консенсус)
+            consensus_author = max(author_counts.items(), key=lambda x: x[1])[0]
+            consensus_count_value = author_counts[consensus_author]
+            
+            # Вычислить процент согласия
+            total_non_folder = len(non_folder_records)
+            agreement_percent = (consensus_count_value / total_non_folder) * 100
+            
+            self.logger.log(f"[CONSENSUS] metadata='{metadata_key}': {author_counts} -> consensus='{consensus_author}' ({consensus_count_value}/{total_non_folder}, {agreement_percent:.0f}%)")
+            
+            # Применить консенсус ТОЛЬКО к файлам БЕЗ folder_dataset источника
+            for record in non_folder_records:
+                if record.proposed_author != consensus_author:
+                    # Автор отличался от консенсуса - добавить суффикс
+                    old_author = record.proposed_author
+                    record.author_source = f"{record.author_source}_cons"
+                    record.proposed_author = consensus_author
+                    self.logger.log(f"  [CHANGED] '{old_author}' -> '{consensus_author}' (source: {record.author_source})")
+                    consensus_count += 1
+                # Если совпадает - НИЧ ЕГО не меняем (ни автора, ни source)
+        
+        self.logger.log(f"Применен консенсус: {consensus_count} записей исправлено")
         return records
     
     def _save_csv(self, records: List[BookRecord], output_path: str):
