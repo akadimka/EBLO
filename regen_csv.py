@@ -415,10 +415,33 @@ class RegenCSVService:
             (authors_str, title, genre) - метаданные из файла
         """
         try:
-            # Прочитаем файл как текст и используем регулярные выражения
-            # чтобы обойти проблемы с undefined namespace prefixes
-            with open(fb2_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
+            # Прочитаем файл, пытаясь разные кодировки
+            content = None
+            
+            # Попробуем разные кодировки в порядке приоритета
+            encodings_to_try = [
+                ('cp1251', 'strict'),     # Русская кодировка (cp1251) - часто встречается в старых FB2
+                ('utf-8', 'strict'),      # UTF-8 без ошибок
+                ('cp1251', 'replace'),    # Русская кодировка с заменой
+                ('utf-8', 'replace'),     # UTF-8 с заменой невалидных
+                ('latin-1', 'replace'),   # Fallback - latin-1 всегда работает
+            ]
+            
+            for encoding, errors in encodings_to_try:
+                try:
+                    with open(fb2_path, 'r', encoding=encoding, errors=errors) as f:
+                        test_content = f.read(200)  # Прочитаем начало
+                        # Проверим, есть ли XML declaration
+                        if '<?xml' in test_content or '<FictionBook' in test_content:
+                            # Похоже на валидный FB2, прочитаем весь файл
+                            with open(fb2_path, 'r', encoding=encoding, errors=errors) as f:
+                                content = f.read()
+                            break
+                except Exception:
+                    continue
+            
+            if not content:
+                return "", "", ""
             
             # Извлечем ТОЛЬКО title-info section
             import re
@@ -608,7 +631,8 @@ class RegenCSVService:
         """
         try:
             import csv
-            with open(output_path, 'w', encoding='utf-8-sig', newline='') as f:
+            # Используем UTF-8 без BOM для совместимости
+            with open(output_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 
                 # Заголовки
