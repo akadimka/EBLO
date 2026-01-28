@@ -337,6 +337,18 @@ class RegenCSVService:
                         return author_normalized
                     else:
                         self.logger.log(f"[HIERARCHY] Уровень {depth}: Паттерн найден но не валиден '{author_raw}' (не в all_names)")
+                else:
+                    # Нет паттерна - проверить если это простой формат "Фамилия Имя"
+                    # Попробовать использовать имя папки как есть если оно валидно
+                    if self._validate_author_name(folder_name):
+                        self.logger.log(f"[HIERARCHY] Уровень {depth}: Папка '{folder_name}' валидна как имя автора")
+                        
+                        # Применить нормализацию
+                        author_normalized = self.extractor._normalize_author_format(folder_name)
+                        self.logger.log(f"[HIERARCHY] Уровень {depth}: Нормализация '{folder_name}' → '{author_normalized}'")
+                        return author_normalized
+                    else:
+                        self.logger.log(f"[HIERARCHY] Уровень {depth}: Папка '{folder_name}' не валидна как имя автора")
             
             # Поднять на уровень выше
             parent = current_folder.parent
@@ -497,14 +509,19 @@ class RegenCSVService:
         self.logger.log(f"[REGEN]   Метаданные FB2: авторы='{metadata_authors}', название='{book_title}', жанр='{metadata_genre}'")
         
         # Проверить, является ли это сборником
+        # ВАЖНО: Если автор из folder_dataset, игнорировать правило сборника
+        # (сборник применяется только для метаданных и других источников)
         author_count = len([a.strip() for a in metadata_authors.split(';') if a.strip()])
         is_anthology = self.extractor.is_anthology(filename, author_count)
         
-        if is_anthology:
-            # Это сборник - переопределить proposed_author
+        if is_anthology and author_source != "folder_dataset":
+            # Это сборник И автор не из датасета - переопределить proposed_author
             proposed_author = "Сборник"
             author_source = "metadata"  # Источник - метаданные (множество авторов)
             self.logger.log(f"[REGEN]   Обнаружен сборник ({author_count} авторов)")
+        elif is_anthology and author_source == "folder_dataset":
+            # Это сборник, НО автор из датасета - сохранить датасет
+            self.logger.log(f"[REGEN]   Обнаружен сборник ({author_count} авторов), но author_source=folder_dataset - сохраняем датасет")
         
         # Применить конвертации фамилий если необходимо
         if proposed_author and proposed_author != "Сборник" and self.surname_conversions:
