@@ -1426,10 +1426,11 @@ class FB2AuthorExtractor:
             else:
                 # Нет точек - просто слово(а)
                 if len(parts) >= 2:
-                    # "Фамилия Имя" - ищем второе слово (имя или первое слово if инициал)
-                    search_words = [p for p in parts if len(p) > 1]  # Исключить односимвольные
-                    if not search_words:
-                        search_words = parts  # Если все односимвольные, брать все
+                    # "Фамилия Имя" - ищем по первому слову (фамилия), затем по остальным
+                    # Приоритет: первое слово (скорее всего фамилия) > остальные
+                    search_words = [parts[0]]  # ВСЕГДА первое слово (фамилия)
+                    # Добавить остальные слова как альтернативы (только если > 1 символа)
+                    search_words.extend([p for p in parts[1:] if len(p) > 2])  # Остальные, но не инициалы
                 else:
                     search_words = [partial_name]
             
@@ -1437,17 +1438,33 @@ class FB2AuthorExtractor:
                 return ""
             
             # Поискать во всех авторах metadata
-            matching_authors = []
+            # ВАЖНО: приоритизируем ПЕРВОЕ слово (фамилия) перед остальными
+            matching_authors_primary = []  # Содержат первое слово
+            matching_authors_secondary = []  # Содержат другие слова
+            
+            primary_word = search_words[0].lower()
+            secondary_words = [w.lower() for w in search_words[1:]] if len(search_words) > 1 else []
             
             for meta_author in metadata_authors:
                 meta_lower = meta_author.lower()
                 
-                # Проверить, содержит ли этот автор хотя бы одно из ключевых слов
-                for word in search_words:
-                    word_lower = word.lower()
-                    if word_lower in meta_lower:
-                        matching_authors.append(meta_author)
-                        break
+                # Проверить первое слово (приоритет)
+                if primary_word in meta_lower:
+                    matching_authors_primary.append(meta_author)
+                # Иначе проверить остальные слова
+                elif secondary_words:
+                    for word in secondary_words:
+                        if word in meta_lower:
+                            matching_authors_secondary.append(meta_author)
+                            break
+            
+            # Использовать primary если есть, иначе secondary
+            if matching_authors_primary:
+                matching_authors = matching_authors_primary
+            elif matching_authors_secondary:
+                matching_authors = matching_authors_secondary
+            else:
+                matching_authors = []
             
             if not matching_authors:
                 return ""
