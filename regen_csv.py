@@ -191,131 +191,232 @@ class RegenCSVService:
     
     def _analyze_folder_hierarchy(self, fb2_files: List[Path]) -> dict:
         """
-        Анализировать иерархию папок.
+        Анализировать иерархию папок для извлечения автора.
         
-        Определяет:
-        1. Папку с разными авторами (граница парсинга)
-        2. Подпапки с одинаковыми авторами (для извлечения автора из названия)
-        
-        Возвращает словарь для каждого файла с информацией об иерархии.
+        Алгоритм:
+        1. Найти БЛИЖАЙШУЮ общую папку для всех файлов
+        2. Начиная с этой папки подняться вверх на folder_parse_limit уровней
+        3. На каждом уровне проверить папку на паттерн (Author)
+        4. Если автор найден и валиден → он датасет для всех файлов
+        5. Если нет → перейти на уровень выше
         
         Args:
             fb2_files: Список всех FB2 файлов
         
         Returns:
-            Словарь {путь_к_файлу: {
-                'parsing_limit': папка где остановить парсинг,
-                'folder_for_pattern': папка к которой применить паттерн,
-                'folder_author': автор из названия папки (если найден)
-            }}
+            Словарь {путь_к_файлу: {'folder_author': автор или None}}
         """
-        # Группируем файлы по папкам (ТОЛЬКО прямые файлы)
-        files_by_folder: Dict[str, List[Path]] = {}
-        for fb2_path in fb2_files:
-            folder_key = str(fb2_path.parent)
-            if folder_key not in files_by_folder:
-                files_by_folder[folder_key] = []
-            files_by_folder[folder_key].append(fb2_path)
-        
         analysis = {}
         
-        # Анализируем каждую папку
-        for folder_path, files in files_by_folder.items():
-            folder_obj = Path(folder_path)
-            
-            if len(files) == 1:
-                # Один файл в папке - обычный анализ
-                analysis[str(files[0])] = {
-                    'parsing_limit': None,
-                    'folder_for_pattern': folder_obj,
-                    'folder_author': None
-                }
-                continue
-            
-            self.logger.log(f"[HIERARCHY] Анализируем {folder_obj.name}: {len(files)} файлов")
-            
-            # ПЕРВЫЙ ЭТАП: Попытаться извлечь автора из названия папки
-            folder_author = self._extract_author_from_folder_name(folder_obj.name)
-            
+        if not fb2_files:
+            return analysis
+        
+        # Найти общую папку для всех файлов
+        common_folder = self._find_common_folder(fb2_files)
+        
+        if not common_folder:
+            self.logger.log("[HIERARCHY] Не удалось найти общую папку")
+            for fb2_path in fb2_files:
+                analysis[str(fb2_path)] = {'folder_author': None}
+            return analysis
+        
+        self.logger.log(f"[HIERARCHY] Общая папка: {common_folder.name}")
+        
+        # Найти автора в иерархии начиная с общей папки
+        folder_author = self._find_dataset_author_in_hierarchy(common_folder)
+        
+        if folder_author:
+            self.logger.log(f"[HIERARCHY] Найден автор: '{folder_author}'")
+        else:
+            self.logger.log(f"[HIERARCHY] Автор не найден")
+        
+        # Все файлы получают одинаковый автор из иерархии
+        for fb2_path in fb2_files:
+            analysis[str(fb2_path)] = {'folder_author': folder_author}
             if folder_author:
-                # Автор найден в названии папки - используем как author_dataset для всех файлов
-                self.logger.log(f"[HIERARCHY] Найден автор в названии папки: '{folder_author}'")
-                
-                # Проверяем мета только для подтверждения (fuzzy matching)
-                all_files_ok = True
-                for fb2_path in files:
-                    if self.blacklist and fb2_path.name in self.blacklist:
-                        continue
-                    
-                    try:
-                        author_meta, _, _ = self._extract_fb2_metadata(fb2_path)
-                        # Проверяем похожесть meta на папку (для расшифровки сокращений)
-                        if author_meta and not self.extractor._verify_author_against_metadata(folder_author, author_meta):
-                            self.logger.log(f"[HIERARCHY] Внимание: {fb2_path.name} - мета '{author_meta}' не похожа на папку '{folder_author}'")
-                    except:
-                        pass
-                
-                # Все файлы получают автора из папки независимо от meta
-                for fb2_path in files:
-                    analysis[str(fb2_path)] = {
-                        'parsing_limit': None,
-                        'folder_for_pattern': folder_obj,
-                        'folder_author': folder_author
-                    }
-            else:
-                # Автора нет в названии папки - анализируем meta для определения границы
-                self.logger.log(f"[HIERARCHY] Нет автора в названии папки - анализируем meta")
-                
-                # Проверяем авторов в метаданных
-                authors_in_folder = {}
-                for fb2_path in files:
-                    try:
-                        # Пропускаем BL
-                        if self.blacklist and fb2_path.name in self.blacklist:
-                            continue
-                        
-                        author_meta, _, _ = self._extract_fb2_metadata(fb2_path)
-                        # Нормализовать авторов: сортировать список авторов для сравнения
-                        # Это нужно чтобы "А; Б" и "Б; А" считались одинаковыми
-                        if author_meta:
-                            # Сначала нормализовать пробелы (сжать множественные в один)
-                            author_meta = re.sub(r'\s+', ' ', author_meta.strip())
-                            
-                            author_parts = [a.strip() for a in author_meta.split(';')]
-                            author_parts.sort()  # Сортируем для консистентного сравнения
-                            author_normalized = '; '.join(author_parts)
-                        else:
-                            author_normalized = author_meta
-                        
-                        if author_normalized not in authors_in_folder:
-                            authors_in_folder[author_normalized] = []
-                        authors_in_folder[author_normalized].append(fb2_path)
-                    except Exception as e:
-                        key = f"ERROR_{fb2_path.name}"
-                        if key not in authors_in_folder:
-                            authors_in_folder[key] = []
-                        authors_in_folder[key].append(fb2_path)
-                
-                # Если авторы РАЗНЫЕ в этой папке - она граница парсинга
-                if len(authors_in_folder) > 1:
-                    self.logger.log(f"[HIERARCHY] Разные авторы в {folder_obj.name} - папка является границей парсинга")
-                    for fb2_path in files:
-                        analysis[str(fb2_path)] = {
-                            'folder_parse_limit': 0,  # Полная граница - не парсим папки вверх
-                            'folder_for_pattern': folder_obj,
-                            'folder_author': None
-                        }
-                else:
-                    # Авторы одинаковые
-                    self.logger.log(f"[HIERARCHY] Одинаковые авторы в {folder_obj.name}")
-                    for fb2_path in files:
-                        analysis[str(fb2_path)] = {
-                            'folder_parse_limit': self.folder_parse_limit,  # Используем настройку из config
-                            'folder_for_pattern': folder_obj,
-                            'folder_author': None
-                        }
+                self.logger.log(f"[HIERARCHY]   {fb2_path.name} -> '{folder_author}'")
         
         return analysis
+    
+    def _find_common_folder(self, paths: List[Path]) -> Optional[Path]:
+        """
+        Найти БЛИЖАЙШУЮ общую папку для всех путей (Lowest Common Ancestor).
+        Ищет от файлов ВВЕРХ, не от корня диска.
+        
+        Args:
+            paths: Список путей файлов
+        
+        Returns:
+            Ближайшая общая папка или None
+        """
+        if not paths:
+            return None
+        
+        if len(paths) == 1:
+            return paths[0].parent
+        
+        # Получить цепи папок от каждого файла вверх
+        parent_chains = []
+        for p in paths:
+            chain = []
+            current = p.parent
+            while current != current.parent:  # До корня диска
+                chain.append(current)
+                current = current.parent
+            parent_chains.append(chain)
+        
+        if not parent_chains:
+            return None
+        
+        # Найти общую часть - начиная с ближайшей папки (начало каждой цепи)
+        # Все цепи отсортированы от файла вверх к корню
+        common = None
+        for candidate in parent_chains[0]:  # Проверяем каждую папку первого файла
+            # Проверить есть ли эта папка у всех остальных файлов
+            if all(candidate in chain for chain in parent_chains):
+                # Найдена общая папка - это самая близкая
+                common = candidate
+                break  # Первая найденная - ближайшая
+        
+        return common
+    
+    def _find_dataset_author_in_hierarchy(self, start_folder: Path) -> Optional[str]:
+        """
+        Подняться вверх от папки и найти автора в паттерне (Author).
+        
+        Алгоритм:
+        1. Начать с start_folder
+        2. Проверить папку на паттерн (Author)
+        3. Если найден → применить конвертацию для ЦЕЛОГО значения (с скобками)
+        4. Проверить валидность (в all_names)
+        5. Если валиден → вернуть и нормализовать
+        6. Если нет → поднять на уровень выше
+        7. Повторить не более folder_parse_limit раз
+        
+        Args:
+            start_folder: Папка откуда начать поиск
+        
+        Returns:
+            Имя автора или None
+        """
+        current_folder = start_folder
+        depth = 0
+        max_depth = self.folder_parse_limit
+        
+        while depth < max_depth:
+            folder_name = current_folder.name
+            
+            # Попытаться применить точную конвертацию для ЦЕЛОГО названия папки
+            author_converted = self._apply_surname_conversions(folder_name)
+            
+            if author_converted != folder_name:
+                # Точная конвертация сработала, например "Гоблин (MeXXanik)" → "Гоблин MeXXanik"
+                self.logger.log(f"[HIERARCHY] Уровень {depth}: Точная конвертация '{folder_name}' → '{author_converted}'")
+                
+                # Проверить валидность преобразованного значения
+                if self._validate_author_name(author_converted):
+                    # Применить нормализацию
+                    author_normalized = self.extractor._normalize_author_format(author_converted)
+                    self.logger.log(f"[HIERARCHY] Уровень {depth}: Валид '{author_converted}' → '{author_normalized}' (нормализация)")
+                    return author_normalized
+                else:
+                    self.logger.log(f"[HIERARCHY] Уровень {depth}: Преобразовано но не валидно '{author_converted}' (не в all_names)")
+            else:
+                # Нет точной конвертации - попытаться извлечь паттерн (Author)
+                author_raw = self._extract_author_from_folder_name(folder_name)
+                
+                if author_raw:
+                    # Найден паттерн (Author) - например "MeXXanik" из "Гоблин (MeXXanik)"
+                    self.logger.log(f"[HIERARCHY] Уровень {depth}: Найден паттерн '{author_raw}' из '{folder_name}'")
+                    
+                    # Проверить валидность
+                    if self._validate_author_name(author_raw):
+                        # Применить нормализацию
+                        author_normalized = self.extractor._normalize_author_format(author_raw)
+                        self.logger.log(f"[HIERARCHY] Уровень {depth}: Валид '{author_raw}' → '{author_normalized}' (нормализация)")
+                        return author_normalized
+                    else:
+                        self.logger.log(f"[HIERARCHY] Уровень {depth}: Паттерн найден но не валиден '{author_raw}' (не в all_names)")
+            
+            # Поднять на уровень выше
+            parent = current_folder.parent
+            if parent == current_folder:  # Достигли корня диска
+                break
+            
+            current_folder = parent
+            depth += 1
+        
+        return None
+    
+    def _validate_author_name(self, author_name: str) -> bool:
+        """
+        Проверить валидность имени автора.
+        
+        Автор считается валидным если:
+        1. Это не просто число/год
+        2. Он есть в all_names (список известных авторов)
+           - Может быть конвертирован через конвертацию сурнейма перед проверкой
+           - Для формата "Фамилия Имя" - проверяет второе слово (имя)
+        
+        Args:
+            author_name: Имя автора для проверки
+        
+        Returns:
+            True если автор валиден, False иначе
+        """
+        # Проверить что не пустое
+        if not author_name or not author_name.strip():
+            return False
+        
+        # Проверить что содержит буквы (не только цифры/год)
+        if not any(c.isalpha() for c in author_name):
+            return False
+        
+        # Проверить в all_names
+        all_names = self.extractor.all_names if hasattr(self.extractor, 'all_names') else set()
+        
+        # Разбить на слова (формат может быть "Фамилия Имя")
+        words = author_name.split()
+        
+        # Для проверки берем:
+        # - если 2 слова: второе слово (имя)
+        # - иначе: всё значение
+        check_name = words[-1] if len(words) == 2 else author_name
+        check_name_lower = check_name.lower()
+        
+        # Проверить оригинальное имя (после преобразования в нижний регистр)
+        if check_name_lower in all_names:
+            return True
+        
+        # Нормализовать и проверить
+        author_normalized = self.extractor._normalize_author_format(author_name)
+        if author_normalized:
+            normalized_words = author_normalized.split()
+            normalized_check = normalized_words[-1] if len(normalized_words) == 2 else author_normalized
+            normalized_check_lower = normalized_check.lower()
+            if normalized_check_lower in all_names:
+                return True
+        
+        # Также проверить конвертированный вариант
+        if self.surname_conversions:
+            author_converted = self._apply_surname_conversions(author_name)
+            if author_converted != author_name:
+                # Попробовать конвертированный вариант (второе слово если 2 слова)
+                converted_words = author_converted.split()
+                converted_check = converted_words[-1] if len(converted_words) == 2 else author_converted
+                converted_check_lower = converted_check.lower()
+                if converted_check_lower in all_names:
+                    return True
+                # Нормализовать конвертированный вариант
+                author_converted_normalized = self.extractor._normalize_author_format(author_converted)
+                if author_converted_normalized:
+                    converted_norm_words = author_converted_normalized.split()
+                    converted_norm_check = converted_norm_words[-1] if len(converted_norm_words) == 2 else author_converted_normalized
+                    converted_norm_check_lower = converted_norm_check.lower()
+                    if converted_norm_check_lower in all_names:
+                        return True
+        
+        return False
     
     def _extract_author_from_folder_name(self, folder_name: str) -> Optional[str]:
         """
@@ -366,26 +467,22 @@ class RegenCSVService:
         
         # Получить информацию из анализа иерархии
         file_info = folder_analysis.get(str(fb2_path), {})
-        folder_parse_limit = file_info.get('folder_parse_limit', self.folder_parse_limit)
         folder_author = file_info.get('folder_author')
         
-        # Если найден автор в названии папки - используем его как author_dataset
+        # Если найден автор в иерархии папок - используем его как author_dataset
         proposed_author = None
         author_source = None
         
         if folder_author:
-            # Нормализуем автора из названия папки
-            author_normalized = self.extractor._normalize_author_format(folder_author)
-            if author_normalized:
-                proposed_author = author_normalized
-                author_source = 'folder_dataset'
-                self.logger.log(f"[REGEN]   Автор из папки (dataset): '{proposed_author}'")
+            proposed_author = folder_author
+            author_source = 'folder_dataset'
+            self.logger.log(f"[REGEN]   Автор из иерархии папок (dataset): '{proposed_author}'")
         
-        # Если автор не найден в папке - используем приоритет
+        # Если автор не найден в иерархии папок - используем приоритет
         if not proposed_author:
             proposed_author, author_source = self.extractor.resolve_author_by_priority(
                 str(fb2_path),
-                folder_parse_limit=folder_parse_limit
+                folder_parse_limit=self.folder_parse_limit
             )
             if proposed_author:
                 self.logger.log(f"[REGEN]   Автор по приоритетам: '{proposed_author}' (источник: {author_source})")
@@ -541,6 +638,10 @@ class RegenCSVService:
         """
         Применить конвертации фамилий к строке авторов.
         
+        Приоритет:
+        1. Точное совпадение целой строки (например "Гоблин (MeXXanik)" -> "Гоблин MeXXanik")
+        2. Затем разбор по авторам и поиск фамилий для конвертации
+        
         Args:
             authors_str: Строка авторов в формате "Имя Фамилия; Имя2 Фамилия2"
         
@@ -550,7 +651,11 @@ class RegenCSVService:
         if not authors_str or not self.surname_conversions:
             return authors_str
         
-        # Разделить авторов
+        # ПРИОРИТЕТ 1: Проверить точное совпадение целой строки
+        if authors_str in self.surname_conversions:
+            return self.surname_conversions[authors_str]
+        
+        # ПРИОРИТЕТ 2: Разделить авторов и искать фамилии
         authors = authors_str.split(';')
         converted_authors = []
         
