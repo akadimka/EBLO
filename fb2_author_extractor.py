@@ -290,7 +290,19 @@ class FB2AuthorExtractor:
                             return normalized, 'filename'
                     else:
                         # С граничным лимитом - проверяем против метаданных
-                        if self._verify_author_against_metadata(author, metadata_author):
+                        # СПЕЦИАЛЬНЫЙ СЛУЧАЙ: если метаданные пусты, принимаем filename как-есть (без верификации)
+                        if not metadata_author:
+                            # Метаданные пусты - доверяем имени файла
+                            author_normalized = self._normalize_author_count(author)
+                            if author_normalized:
+                                result = self._normalize_author_format(author_normalized)
+                                if result:
+                                    return result, 'filename'
+                                else:
+                                    return " ".join(author_normalized.split()), 'filename'
+                            else:
+                                return author, 'filename'
+                        elif self._verify_author_against_metadata(author, metadata_author):
                             # Верификация пройдена - используем filename источник
                             # Попытаться расширить из метаданных
                             expanded_author = ""
@@ -890,6 +902,10 @@ class FB2AuthorExtractor:
         5. Fallback на author_processor
         """
         try:
+            # Убедиться, что fb2_path это Path объект (может быть передана строка)
+            if isinstance(fb2_path, str):
+                fb2_path = Path(fb2_path)
+            
             filename = fb2_path.stem  # Имя без расширения
             
             # ПОПЫТКА 1: Использовать динамический pattern matching
