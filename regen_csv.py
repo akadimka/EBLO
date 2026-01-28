@@ -105,6 +105,7 @@ class RegenCSVService:
         self.logger = Logger()
         self.extractor = FB2AuthorExtractor(settings_path)
         self.blacklist = self.settings.get_filename_blacklist()
+        self.surname_conversions = self.settings.get_author_surname_conversions()
         
         # Загрузить настройку глубины парсинга папок
         self.folder_parse_limit = self.settings.get_folder_parse_limit()
@@ -176,7 +177,7 @@ class RegenCSVService:
         if progress_callback:
             progress_callback(len(fb2_files), len(fb2_files), "Применение консенсуса авторов...")
         self.logger.log("[PASS 4] Применение консенсуса авторов...")
-        records = self._apply_author_consensus(records)
+        # records = self._apply_author_consensus(records)
         
         # Сохранить CSV если путь указан
         if output_csv_path:
@@ -408,6 +409,13 @@ class RegenCSVService:
             author_source = "metadata"  # Источник - метаданные (множество авторов)
             self.logger.log(f"[REGEN]   Обнаружен сборник ({author_count} авторов)")
         
+        # Применить конвертации фамилий если необходимо
+        if proposed_author and proposed_author != "Сборник" and self.surname_conversions:
+            original_author = proposed_author
+            proposed_author = self._apply_surname_conversions(proposed_author)
+            if original_author != proposed_author:
+                self.logger.log(f"[REGEN]   После конвертации фамилий: '{original_author}' -> '{proposed_author}'")
+        
         # Создать запись
         record = BookRecord(
             file_path=str(fb2_path),
@@ -518,11 +526,74 @@ class RegenCSVService:
             self.logger.log(f"[REGEN]   Жанр в title-info: {genre if genre else '(пусто)'}")
             self.logger.log(f"[REGEN]   Авторы в title-info: {authors_str if authors_str else '(пусто)'}")
             
+            # Применить конвертации фамилий если необходимо
+            if authors_str and self.surname_conversions:
+                authors_str = self._apply_surname_conversions(authors_str)
+                self.logger.log(f"[REGEN]   После конвертации фамилий: {authors_str}")
+            
             return authors_str, title or "", genre or ""
         
         except Exception as e:
             self.logger.log(f"ОШИБКА при парсинге FB2 метаданных {fb2_path}: {str(e)}")
             return "", "", ""
+    
+    def _apply_surname_conversions(self, authors_str: str) -> str:
+        """
+        Применить конвертации фамилий к строке авторов.
+        
+        Args:
+            authors_str: Строка авторов в формате "Имя Фамилия; Имя2 Фамилия2"
+        
+        Returns:
+            Строка авторов с применёнными конвертациями фамилий
+        """
+        if not authors_str or not self.surname_conversions:
+            return authors_str
+        
+        # Разделить авторов
+        authors = authors_str.split(';')
+        converted_authors = []
+        
+        for author in authors:
+            author = author.strip()
+            if not author:
+                continue
+            
+            # Попытаться найти фамилию для конвертации
+            # Предполагаем формат "Имя Фамилия" или "Фамилия Имя"
+            parts = author.split()
+            if len(parts) >= 2:
+                # Проверить оба варианта: первый и последний элемент могут быть фамилией
+                # Сначала проверим последний элемент (обычно фамилия в "Имя Фамилия")
+                potential_surname_last = parts[-1]
+                # Потом проверим первый элемент (может быть фамилия в "Фамилия Имя")
+                potential_surname_first = parts[0]
+                
+                converted = False
+                
+                # Проверить последний элемент
+                if potential_surname_last in self.surname_conversions:
+                    converted_surname = self.surname_conversions[potential_surname_last]
+                    converted_author = ' '.join(parts[:-1] + [converted_surname])
+                    converted_authors.append(converted_author)
+                    converted = True
+                # Проверить первый элемент
+                elif potential_surname_first in self.surname_conversions:
+                    converted_surname = self.surname_conversions[potential_surname_first]
+                    converted_author = ' '.join([converted_surname] + parts[1:])
+                    converted_authors.append(converted_author)
+                    converted = True
+                
+                if not converted:
+                    converted_authors.append(author)
+            else:
+                # Если только одно слово, проверим его как фамилию
+                if author in self.surname_conversions:
+                    converted_authors.append(self.surname_conversions[author])
+                else:
+                    converted_authors.append(author)
+        
+        return "; ".join(converted_authors)
     
     def _build_authors_map(self, records: List[BookRecord]) -> Dict[str, str]:
         """
