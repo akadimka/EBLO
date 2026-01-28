@@ -752,22 +752,37 @@ class FB2AuthorExtractor:
     def _extract_author_from_filename(self, fb2_path: Path) -> str:
         """
         Извлечь автора из названия файла.
-        Поддерживает паттерны:
-        - "Title (Author).fb2"
-        - "(Author) Title.fb2"
-        - "Title - Author.fb2"
-        - "А.Фамилия" (инициалы)
+        Использует динамический выбор паттерна из конфигурации.
         """
         try:
             filename = fb2_path.stem  # Имя без расширения
             
-            # Прямой парсинг скобок: "Title (Author)" или "(Author) Title"
-            import re
+            # Использовать динамический pattern matching
+            pattern_dict = self._select_best_pattern(filename, pattern_type='files')
             
-            # Паттерн 1: "(Author)" где Author может быть "А.Фамилия" или "Имя Фамилия"
+            if pattern_dict:
+                # Найден подходящий паттерн - извлечь автора
+                author = self._extract_author_from_filename_with_pattern(filename, pattern_dict)
+                if author:
+                    # Если содержит инициалы "А.Фамилия", попробовать расширить из метаданных
+                    if re.match(r'^[А-Яа-я]\.[А-Яа-я]', author):
+                        all_metadata_authors = self._extract_all_authors_from_metadata(fb2_path)
+                        if all_metadata_authors:
+                            # Попробовать найти совпадение по фамилии
+                            surname = author.split('.')[-1]
+                            if surname.lower() in all_metadata_authors.lower():
+                                # Нашли соответствие по фамилии
+                                authors_list = all_metadata_authors.split('; ')
+                                for auth in authors_list:
+                                    if surname.lower() in auth.lower():
+                                        return auth
+                                return all_metadata_authors
+                    return author
+            
+            # Если динамический matching не сработал, попробовать fallback на прямой парсинг скобок
             bracket_patterns = [
-                r'\(([^)]+)\)(?:\s*$|\s+[-–])',  # В конце или перед дефисом: (Author) - или (Author)
-                r'(?:^|\s+)(?:[-–]\s+)?\(([^)]+)\)',  # В начале или после дефиса: - (Author)
+                r'\(([^)]+)\)(?:\s*$|\s+[-–])',  # В конце или перед дефисом
+                r'(?:^|\s+)(?:[-–]\s+)?\(([^)]+)\)',  # В начале или после дефиса
             ]
             
             for pattern in bracket_patterns:
@@ -775,27 +790,11 @@ class FB2AuthorExtractor:
                 if match:
                     author_candidate = match.group(1).strip()
                     if author_candidate and not self._is_blacklisted_value(author_candidate):
-                        # Если содержит инициалы "А.Фамилия", попробовать расширить из метаданных
-                        if re.match(r'^[А-Яа-я]\.[А-Яа-я]', author_candidate):
-                            # Нужно получить полное имя - используем ALL авторов для лучшего совпадения
-                            all_metadata_authors = self._extract_all_authors_from_metadata(fb2_path)
-                            if all_metadata_authors:
-                                # Попробовать найти совпадение по фамилии
-                                surname = author_candidate.split('.')[-1]  # "Михайловский"
-                                if surname.lower() in all_metadata_authors.lower():
-                                    # Нашли соответствие по фамилии - используем полное имя из метаданных
-                                    # Найти конкретного автора
-                                    authors_list = all_metadata_authors.split('; ')
-                                    for auth in authors_list:
-                                        if surname.lower() in auth.lower():
-                                            return auth
-                                    return all_metadata_authors
                         return author_candidate
             
-            # Если скобки не дали результата, попробовать author_processor
+            # Финальный fallback на author_processor
             result = self.author_processor.extract_author_from_filename(filename)
             if result:
-                # Результат - список ExtractionResult, берем первый
                 author_name = result[0].value if hasattr(result[0], 'value') else str(result[0])
                 if author_name:
                     return author_name
@@ -803,6 +802,159 @@ class FB2AuthorExtractor:
             pass
         
         return ''
+    
+    def _select_best_pattern(self, filename: str, pattern_type: str = 'files') -> Optional[Dict[str, str]]:
+        """
+        Выбрать оптимальный паттерн извлечения автора на основе названия файла.
+        
+        Сначала пытается простые паттерны с дефисом, потом более сложные.
+        
+        Args:
+            filename: Имя файла без расширения
+            pattern_type: 'files' или 'folders'
+        
+        Returns:
+            Dict с ключами: 'pattern', 'example', 'regex' (compiled pattern)
+            или None если ничего не подходит
+        """
+        try:
+            # Получить паттерны из конфигурации
+            if pattern_type == 'files':
+                config_patterns = self.settings.get_author_series_patterns_in_files()
+            elif pattern_type == 'folders':
+                config_patterns = self.settings.get_author_series_patterns_in_folders()
+            else:
+                return None
+            
+            if not config_patterns:
+                return None
+            
+            # Порядок попытки (более точные первыми)
+            # Приоритет: дефис-паттерны > точка-паттерны > скобки-паттерны
+            pattern_priority = [
+                "Author - Title (Series. service_words)",
+                "Author. Title (Series. service_words)",
+                "Author - Series.Title",
+                "Author. Series. Title",
+                "Author - Title",
+                "Author. Title",
+                "Title (Author)",
+                "Title - (Author)",
+                "(Author) - Title",
+            ]
+            
+            for priority_pattern in pattern_priority:
+                for config_pattern in config_patterns:
+                    if config_pattern.get('pattern') == priority_pattern:
+                        regex = self._compile_pattern_regex(config_pattern['pattern'])
+                        if regex:
+                            match = regex.search(filename)
+                            if match:
+                                # Вернуть найденный паттерн с compiled regex
+                                result = dict(config_pattern)
+                                result['regex'] = regex
+                                result['match'] = match
+                                return result
+            
+            # Если приоритетные не подошли, попробовать остальные
+            for config_pattern in config_patterns:
+                if config_pattern.get('pattern') not in pattern_priority:
+                    regex = self._compile_pattern_regex(config_pattern['pattern'])
+                    if regex:
+                        match = regex.search(filename)
+                        if match:
+                            result = dict(config_pattern)
+                            result['regex'] = regex
+                            result['match'] = match
+                            return result
+            
+            return None
+        except Exception as e:
+            return None
+    
+    def _compile_pattern_regex(self, pattern_str: str) -> Optional:
+        r"""
+        Скомпилировать паттерн в regex для извлечения авторов.
+        
+        Паттерны:
+        - "Author - Title" → ^(.+?)\s+-\s+(.+)$
+        - "Author. Title" → ^(.+?)\.\s+(.+)$
+        - "Title (Author)" → (.+?)\s+\(([^)]+)\)$
+        - "Author - Title (Series)" → ^(.+?)\s+-\s+(.+?)\s+\(([^)]+)\)$
+        - и т.д.
+        
+        Args:
+            pattern_str: Строка с описанием паттерна
+        
+        Returns:
+            Скомпилированный regex или None
+        """
+        try:
+            # Маппинг описаний паттернов на regex
+            patterns_map = {
+                "Author - Title (Series. service_words)": r"^(.+?)\s+-\s+(.+?)\s+\((.+)\)$",
+                "Author. Title (Series. service_words)": r"^(.+?)\.\s+(.+?)\s+\((.+)\)$",
+                "Author - Series.Title": r"^(.+?)\s+-\s+(.+)$",
+                "Author. Series. Title": r"^(.+?)\.\s+(.+)$",
+                "Author - Title": r"^(.+?)\s+-\s+(.+)$",
+                "Author. Title": r"^(.+?)\.\s+(.+)$",
+                "Title (Author)": r"(.+?)\s+\(([^)]+)\)$",
+                "Title - (Author)": r"(.+?)\s+-\s+\(([^)]+)\)$",
+                "(Author) - Title": r"^\(([^)]+)\)\s+-\s+(.+)$",
+            }
+            
+            if pattern_str in patterns_map:
+                regex_str = patterns_map[pattern_str]
+                return re.compile(regex_str, re.IGNORECASE | re.UNICODE)
+            
+            return None
+        except Exception:
+            return None
+    
+    def _extract_author_from_filename_with_pattern(self, filename: str, pattern_dict: Dict) -> str:
+        """
+        Извлечь автора из имени файла, используя найденный паттерн.
+        
+        Args:
+            filename: Имя файла без расширения
+            pattern_dict: Результат _select_best_pattern() с 'pattern', 'regex', 'match'
+        
+        Returns:
+            Извлечённый автор или пустая строка
+        """
+        try:
+            if not pattern_dict or 'match' not in pattern_dict:
+                return ''
+            
+            match = pattern_dict['match']
+            pattern_str = pattern_dict.get('pattern', '')
+            
+            # В зависимости от типа паттерна, автор находится в разной группе
+            author_group_map = {
+                "Author - Title (Series. service_words)": 1,
+                "Author. Title (Series. service_words)": 1,
+                "Author - Series.Title": 1,
+                "Author. Series. Title": 1,
+                "Author - Title": 1,
+                "Author. Title": 1,
+                "Title (Author)": 2,
+                "Title - (Author)": 2,
+                "(Author) - Title": 1,
+            }
+            
+            author_group = author_group_map.get(pattern_str, 1)
+            
+            if match.groups():
+                author = match.group(author_group) if author_group <= len(match.groups()) else ''
+                author = author.strip() if author else ''
+                
+                # Проверить не в чёрном списке
+                if author and not self._is_blacklisted_value(author):
+                    return author
+            
+            return ''
+        except Exception:
+            return ''
     
     def _is_blacklisted_value(self, value: str) -> bool:
         """Проверить, есть ли значение в чёрном списке."""
