@@ -194,11 +194,13 @@ class RegenCSVService:
         Анализировать иерархию папок для извлечения автора.
         
         Алгоритм:
-        1. Найти БЛИЖАЙШУЮ общую папку для всех файлов
-        2. Начиная с этой папки подняться вверх на folder_parse_limit уровней
-        3. На каждом уровне проверить папку на паттерн (Author)
-        4. Если автор найден и валиден → он датасет для всех файлов
-        5. Если нет → перейти на уровень выше
+        1. Сгруппировать файлы по папкам АВТОРОВ (папкам на уровне автора)
+        2. Для каждой группы файлов найти общую папку
+        3. Проверить эту папку на паттерн (Author) и извлечь автора
+        4. Все файлы в группе получают одного автора
+        
+        Папка автора - это первая папка вверх от файлов, имя которой похоже на имя автора
+        (т.е. содержит мало слов и выглядит как "Фамилия Имя" или "Имя - Описание")
         
         Args:
             fb2_files: Список всех FB2 файлов
@@ -211,32 +213,100 @@ class RegenCSVService:
         if not fb2_files:
             return analysis
         
-        # Найти общую папку для всех файлов
-        common_folder = self._find_common_folder(fb2_files)
+        # Сгруппировать файлы по папкам авторов
+        author_folders = self._group_files_by_author_folder(fb2_files)
         
-        if not common_folder:
-            self.logger.log("[HIERARCHY] Не удалось найти общую папку")
-            for fb2_path in fb2_files:
-                analysis[str(fb2_path)] = {'folder_author': None}
-            return analysis
+        self.logger.log(f"[HIERARCHY] Найдено {len(author_folders)} папок авторов")
         
-        self.logger.log(f"[HIERARCHY] Общая папка: {common_folder.name}")
-        
-        # Найти автора в иерархии начиная с общей папки
-        folder_author = self._find_dataset_author_in_hierarchy(common_folder)
-        
-        if folder_author:
-            self.logger.log(f"[HIERARCHY] Найден автор: '{folder_author}'")
-        else:
-            self.logger.log(f"[HIERARCHY] Автор не найден")
-        
-        # Все файлы получают одинаковый автор из иерархии
-        for fb2_path in fb2_files:
-            analysis[str(fb2_path)] = {'folder_author': folder_author}
+        # Обработать каждую группу файлов
+        for author_folder_path, group_files in author_folders.items():
+            self.logger.log(f"[HIERARCHY] Группа: {author_folder_path.name} ({len(group_files)} файлов)")
+            
+            # Для этой группы найти общую папку
+            common_folder = self._find_common_folder(group_files)
+            
+            if not common_folder:
+                self.logger.log(f"[HIERARCHY]   Не удалось найти общую папку")
+                for fb2_path in group_files:
+                    analysis[str(fb2_path)] = {'folder_author': None}
+                continue
+            
+            # Найти автора в иерархии начиная с общей папки
+            folder_author = self._find_dataset_author_in_hierarchy(common_folder)
+            
             if folder_author:
-                self.logger.log(f"[HIERARCHY]   {fb2_path.name} -> '{folder_author}'")
+                self.logger.log(f"[HIERARCHY]   Найден автор: '{folder_author}'")
+            else:
+                self.logger.log(f"[HIERARCHY]   Автор не найден")
+            
+            # Все файлы в группе получают одинаковый автор
+            for fb2_path in group_files:
+                analysis[str(fb2_path)] = {'folder_author': folder_author}
+                if folder_author:
+                    self.logger.log(f"[HIERARCHY]     {fb2_path.name} -> '{folder_author}'")
         
         return analysis
+    
+    def _group_files_by_author_folder(self, fb2_files: List[Path]) -> dict:
+        """
+        Сгруппировать файлы по папкам авторов.
+        
+        Папка автора определяется так:
+        - Идти вверх от файла к корню
+        - Найти первую папку, которая выглядит как имя автора
+        - Это папка с простым названием (2-3 слова max) без описаний
+        
+        Args:
+            fb2_files: Список всех FB2 файлов
+        
+        Returns:
+            Словарь {Path папки автора: [список файлов в этой группе]}
+        """
+        groups = {}
+        
+        for fb2_path in fb2_files:
+            # Идти вверх от файла к корню
+            current = fb2_path.parent
+            author_folder = None
+            
+            # Идем вверх максимум на 5 уровней
+            for _ in range(5):
+                parent = current.parent
+                
+                # Если дошли до корня или Test1, остановиться
+                if current == parent or current.name == 'Test1':
+                    break
+                
+                # Проверить является ли эта папка "папкой автора"
+                # Папка автора - это папка с простым именем (похожим на "Фамилия Имя" или "Имя - Описание")
+                folder_name = current.name
+                words = folder_name.split()
+                
+                # Если папка содержит 2-4 слова И начинается с заглавной буквы - это вероятная папка автора
+                if 2 <= len(words) <= 4 and folder_name[0].isupper():
+                    # Дополнительная проверка: не содержит ли много цифр или нестандартных слов
+                    digit_count = sum(1 for w in words if w.isdigit())
+                    if digit_count == 0:
+                        author_folder = current
+                        break
+                
+                current = parent
+            
+            if author_folder:
+                if author_folder not in groups:
+                    groups[author_folder] = []
+                groups[author_folder].append(fb2_path)
+            else:
+                # Если не найдена папка автора, группировать по Test1
+                # (это не должно происходить в нормальной структуре)
+                test1_parent = fb2_path.parent
+                while test1_parent.name != 'Test1' and test1_parent != test1_parent.parent:
+                    test1_parent = test1_parent.parent
+                if test1_parent not in groups:
+                    groups[test1_parent] = []
+                groups[test1_parent].append(fb2_path)
+        
+        return groups
     
     def _find_common_folder(self, paths: List[Path]) -> Optional[Path]:
         """
