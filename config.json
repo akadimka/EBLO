@@ -1,7 +1,8 @@
 {
   "library_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/EBook Library",
-  "genre_association_method": "context_menu",
   "last_scan_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
+  "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
+  "genre_association_method": "context_menu",
   "window_sizes": {
     "settings": "792x511+-2164+-2",
     "main": {
@@ -22,6 +23,7 @@
       "state": "normal"
     }
   },
+  "generate_csv": true,
   "genre_tree_state": {
     "expanded_nodes": [
       "Фантастика"
@@ -278,7 +280,8 @@
   "author_surname_conversions": {
     "Гоблин (MeXXanik)": "Гоблин MeXXanik",
     "Айзенберг": "Берг",
-    "Старец": "Старицын"
+    "Старец": "Старицын",
+    "Роберт Дж. Сойер": "Сойер Роберт"
   },
   "genre_category_words": [
     "фантастический",
@@ -422,7 +425,5 @@
     "Ясмина",
     "Наталия"
   ],
-  "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
-  "folder_parse_limit": 3,
-  "generate_csv": true
+  "folder_parse_limit": 3
 }
