@@ -1619,14 +1619,22 @@ class FB2AuthorExtractor:
             
             for meta_author in metadata_authors:
                 meta_lower = meta_author.lower()
+                meta_words = meta_lower.split()
                 
                 # Проверить первое слово (приоритет)
-                if primary_word in meta_lower:
+                # ВАЖНО: требуем точное совпадение ЦЕЛОГО слова, а не substring!
+                # "Мах" должен совпадать с "Мах Макс" но НЕ с "Махров Алексей"
+                if any(w.startswith(primary_word) and len(w) == len(primary_word) for w in meta_words):
+                    # Точное совпадение целого слова
                     matching_authors_primary.append(meta_author)
+                elif any(w.startswith(primary_word) for w in meta_words):
+                    # Слово НАЧИНАЕТСЯ с искомого (например "Мах" совпадает с "Махров" - но это слабое совпадение)
+                    # Добавляем как secondary, не primary
+                    matching_authors_secondary.append(meta_author)
                 # Иначе проверить остальные слова
                 elif secondary_words:
                     for word in secondary_words:
-                        if word in meta_lower:
+                        if any(w.startswith(word) for w in meta_words):
                             matching_authors_secondary.append(meta_author)
                             break
             

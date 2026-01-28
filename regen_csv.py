@@ -170,6 +170,13 @@ class RegenCSVService:
         records = []
         
         for idx, fb2_path in enumerate(fb2_files):
+            # DEBUG: Track Мах files
+            if "Мах" in fb2_path.name and "Пилот ракетоносца" in fb2_path.name:
+                print(f"[DEBUG] Processing Мах file at idx={idx}")
+                print(f"[DEBUG] all_series_authors_str has {len(all_series_authors_str)} chars")
+                if "Махров" in all_series_authors_str:
+                    print(f"[DEBUG] WARNING: 'Махров' is already in all_series_authors_str!")
+            
             if progress_callback:
                 progress_callback(idx, len(fb2_files), f"Обработка: {fb2_path.name}")
             
@@ -595,6 +602,10 @@ class RegenCSVService:
         """
         # Получить имя файла без расширения и пути
         filename = fb2_path.stem
+        # DEBUG: Track Мах files
+        is_mah_file = "Мах" in fb2_path.name
+        if is_mah_file:
+            self.logger.log(f"[REGEN] *** TRACK MAH FILE: {fb2_path.name}")
         self.logger.log(f"[REGEN] Обработка файла: {fb2_path.name}")
         
         # Получить информацию из анализа иерархии
@@ -612,11 +623,13 @@ class RegenCSVService:
         
         # Если автор не найден в иерархии папок - используем приоритет
         if not proposed_author:
+            self.logger.log(f"[REGEN]   DEBUG: folder_author is empty, calling resolve_author_by_priority...")
             proposed_author, author_source = self.extractor.resolve_author_by_priority(
                 str(fb2_path),
                 folder_parse_limit=self.folder_parse_limit,
                 all_series_authors_str=all_series_authors_str
             )
+            self.logger.log(f"[REGEN]   DEBUG: resolve_author_by_priority returned: proposed_author={repr(proposed_author)}, author_source={repr(author_source)}")
             if proposed_author:
                 self.logger.log(f"[REGEN]   Автор по приоритетам: '{proposed_author}' (источник: {author_source})")
             else:
@@ -658,6 +671,9 @@ class RegenCSVService:
                 self.logger.log(f"[REGEN]   После конвертации фамилий: '{original_author}' -> '{proposed_author}'")
         
         # Создать запись
+        self.logger.log(f"[REGEN]   DEBUG: About to create BookRecord with proposed_author={repr(proposed_author)}, author_source={repr(author_source)}")
+        if is_mah_file:
+            self.logger.log(f"[REGEN]   *** MAH FILE RECORD: proposed_author={repr(proposed_author)}, author_source={repr(author_source)}")
         record = BookRecord(
             file_path=str(fb2_path),
             metadata_authors=metadata_authors,
@@ -922,6 +938,11 @@ class RegenCSVService:
         Returns:
             Обновленный список с раскрытыми авторами
         """
+        # Track Мах files
+        for record in records:
+            if "Мах" in record.file_path and "Пилот ракетоносца" in record.file_path:
+                self.logger.log(f"[EXPAND] *** Before expand: {record.proposed_author}")
+        
         # Построить словарь полных имён
         authors_map = self._build_authors_map(records)
         
@@ -959,6 +980,11 @@ class RegenCSVService:
             
             # Обновить proposed_author
             record.proposed_author = ", ".join(expanded_authors)
+        
+        # Track Мах files after
+        for record in records:
+            if "Мах" in record.file_path and "Пилот ракетоносца" in record.file_path:
+                self.logger.log(f"[EXPAND] *** After expand: {record.proposed_author}")
         
         self.logger.log(f"Раскрыто аббревиатур: {expanded_count}")
         return records
