@@ -289,61 +289,50 @@ class FB2AuthorExtractor:
                         if normalized:
                             return normalized, 'filename'
                     else:
-                        # С граничным лимитом - проверяем против метаданных
-                        # СПЕЦИАЛЬНЫЙ СЛУЧАЙ: если метаданные пусты, принимаем filename как-есть (без верификации)
-                        if not metadata_author:
-                            # Метаданные пусты - доверяем имени файла
-                            author_normalized = self._normalize_author_count(author)
-                            if author_normalized:
-                                result = self._normalize_author_format(author_normalized)
-                                if result:
-                                    return result, 'filename'
-                                else:
-                                    return " ".join(author_normalized.split()), 'filename'
+                        # С граничным лимитом - КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: ВСЕГДА доверяем имени файла
+                        # Если автор явно указан в имени файла, это верный источник информации
+                        # даже если метаданные содержат что-то другое (метаданные могут быть неправильные)
+                        
+                        # Попытаться расширить из метаданных (если это сокращение)
+                        expanded_author = ""
+                        
+                        # Попытка 1: новый метод поиска по частичному имени - СНАЧАЛА ищем во всей серии
+                        if all_series_authors_str:
+                            expanded_author = self._find_author_by_partial_name(author, all_series_authors_str)
+                        
+                        # Попытка 2: ищем в metadata этого файла
+                        if not expanded_author and all_metadata_authors:
+                            expanded_author = self._find_author_by_partial_name(author, all_metadata_authors)
+                        
+                        # Попытка 3: старый метод расширения фамилий в metadata серии
+                        if not expanded_author and all_series_authors_str:
+                            expanded_author = self._expand_surnames_from_metadata(author, all_series_authors_str)
+                        
+                        # Попытка 4: старый метод расширения фамилий в metadata этого файла
+                        if not expanded_author and all_metadata_authors:
+                            expanded_author = self._expand_surnames_from_metadata(author, all_metadata_authors)
+                        
+                        # Попытка 5: старый метод с одиночным metadata автором
+                        if not expanded_author and metadata_author:
+                            expanded_author = self._expand_surnames_from_metadata(author, metadata_author)
+                        
+                        if expanded_author:
+                            normalized = self._normalize_author_format(expanded_author)
+                            if normalized:
+                                return normalized, 'filename'
+                            elif expanded_author:
+                                return expanded_author, 'filename'
+                        
+                        # Если расширение не сработало, использовать исходный автор
+                        author = self._normalize_author_count(author)
+                        if author:
+                            normalized_author = self._normalize_author_format(author)
+                            if normalized_author:
+                                return normalized_author, 'filename'
                             else:
-                                return author, 'filename'
-                        elif self._verify_author_against_metadata(author, metadata_author):
-                            # Верификация пройдена - используем filename источник
-                            # Попытаться расширить из метаданных
-                            expanded_author = ""
-                            
-                            # Попытка 1: новый метод поиска по частичному имени - СНАЧАЛА ищем во всей серии
-                            if all_series_authors_str:
-                                expanded_author = self._find_author_by_partial_name(author, all_series_authors_str)
-                            
-                            # Попытка 2: ищем в metadata этого файла
-                            if not expanded_author and all_metadata_authors:
-                                expanded_author = self._find_author_by_partial_name(author, all_metadata_authors)
-                            
-                            # Попытка 3: старый метод расширения фамилий в metadata серии
-                            if not expanded_author and all_series_authors_str:
-                                expanded_author = self._expand_surnames_from_metadata(author, all_series_authors_str)
-                            
-                            # Попытка 4: старый метод расширения фамилий в metadata этого файла
-                            if not expanded_author and all_metadata_authors:
-                                expanded_author = self._expand_surnames_from_metadata(author, all_metadata_authors)
-                            
-                            # Попытка 5: старый метод с одиночным metadata автором
-                            if not expanded_author and metadata_author:
-                                expanded_author = self._expand_surnames_from_metadata(author, metadata_author)
-                            
-                            if expanded_author:
-                                normalized = self._normalize_author_format(expanded_author)
-                                if normalized:
-                                    return normalized, 'filename'
-                                elif expanded_author:
-                                    return expanded_author, 'filename'
-                            
-                            # Если расширение не сработало, использовать исходный автор
-                            author = self._normalize_author_count(author)
-                            if author:
-                                normalized_author = self._normalize_author_format(author)
-                                if normalized_author:
-                                    return normalized_author, 'filename'
-                                else:
-                                    return " ".join(author.split()), 'filename'
-                            else:
-                                return author, 'filename'
+                                return " ".join(author.split()), 'filename'
+                        else:
+                            return author, 'filename'
             except Exception as e:
                 pass  # Продолжаем к следующему источнику
             

@@ -1043,7 +1043,13 @@ class RegenCSVService:
                 self.logger.log(f"[CONSENSUS] metadata='{metadata_key}': используем автора из folder_dataset: '{consensus_author}'")
                 
                 # Применить consensus ко всем файлам БЕЗ folder_dataset
+                # НО: НЕ перезаписываем, если автор из filename или folder (высокий приоритет)
                 for record in non_folder_records:
+                    # Защитить filename и folder источники
+                    if record.author_source in ['filename', 'folder']:
+                        self.logger.log(f"  [PROTECTED] '{record.proposed_author}' защищён (source: {record.author_source})")
+                        continue
+                    
                     if record.proposed_author != consensus_author:
                         old_author = record.proposed_author
                         record.author_source = f"{record.author_source}_cons"
@@ -1081,6 +1087,11 @@ class RegenCSVService:
                 
                 # Применить консенсус к файлам, которые отличаются от консенсуса
                 for record in non_folder_records:
+                    # Защитить filename и folder источники
+                    if record.author_source in ['filename', 'folder']:
+                        self.logger.log(f"  [PROTECTED] '{record.proposed_author}' защищён (source: {record.author_source})")
+                        continue
+                    
                     if record.proposed_author != consensus_author:
                         # Автор отличался от консенсуса - добавить суффикс
                         old_author = record.proposed_author
