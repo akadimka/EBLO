@@ -147,6 +147,24 @@ class RegenCSVService:
         self.logger.log("[PASS 1] Анализ иерархии папок...")
         folder_analysis = self._analyze_folder_hierarchy(fb2_files)
         
+        # PASS 1.5: Собрать всех авторов из всех FB2 файлов в папке (для расширения)
+        self.logger.log("[PASS 1.5] Сбор авторов из метаданных всех файлов...")
+        all_series_authors = set()
+        for fb2_path in fb2_files:
+            try:
+                metadata_authors, _, _ = self._extract_fb2_metadata(fb2_path)
+                if metadata_authors:
+                    # Добавить каждого автора отдельно
+                    for author in metadata_authors.split(';'):
+                        author_clean = author.strip()
+                        if author_clean:
+                            all_series_authors.add(author_clean)
+            except Exception:
+                pass
+        all_series_authors_str = "; ".join(sorted(all_series_authors)) if all_series_authors else ""
+        if all_series_authors_str:
+            self.logger.log(f"[PASS 1.5] Найдено {len(all_series_authors)} уникальных авторов: {all_series_authors_str[:100]}...")
+        
         # PASS 2: Обрабатываем файлы с учетом иерархии
         self.logger.log("[PASS 2] Обработка файлов...")
         records = []
@@ -156,7 +174,7 @@ class RegenCSVService:
                 progress_callback(idx, len(fb2_files), f"Обработка: {fb2_path.name}")
             
             try:
-                record = self._process_fb2_file(fb2_path, folder_analysis)
+                record = self._process_fb2_file(fb2_path, folder_analysis, all_series_authors_str)
                 records.append(record)
             except Exception as e:
                 self.logger.log(f"Ошибка обработки {fb2_path}: {str(e)}")
@@ -561,13 +579,14 @@ class RegenCSVService:
         
         return None
     
-    def _process_fb2_file(self, fb2_path: Path, folder_analysis: dict) -> BookRecord:
+    def _process_fb2_file(self, fb2_path: Path, folder_analysis: dict, all_series_authors_str: str = "") -> BookRecord:
         """
         Обработать один FB2 файл и вернуть BookRecord.
         
         Args:
             fb2_path: Путь к FB2 файлу
             folder_analysis: Результат анализа иерархии папок
+            all_series_authors_str: Строка со всеми авторами из всех файлов серии (для расширения)
         
         Returns:
             BookRecord с информацией из файла
@@ -593,7 +612,8 @@ class RegenCSVService:
         if not proposed_author:
             proposed_author, author_source = self.extractor.resolve_author_by_priority(
                 str(fb2_path),
-                folder_parse_limit=self.folder_parse_limit
+                folder_parse_limit=self.folder_parse_limit,
+                all_series_authors_str=all_series_authors_str
             )
             if proposed_author:
                 self.logger.log(f"[REGEN]   Автор по приоритетам: '{proposed_author}' (источник: {author_source})")
