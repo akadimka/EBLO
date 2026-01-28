@@ -608,19 +608,25 @@ class RegenCSVService:
         self.logger.log(f"[REGEN]   Метаданные FB2: авторы='{metadata_authors}', название='{book_title}', жанр='{metadata_genre}'")
         
         # Проверить, является ли это сборником
-        # ВАЖНО: Если автор из folder_dataset, игнорировать правило сборника
-        # (сборник применяется только для метаданных и других источников)
+        # ВАЖНО: Правило сборника НЕ применяется если:
+        # 1. Автор из folder_dataset (иерархия папок)
+        # 2. Автор успешно извлечен из filename (filename или folder)
+        # Сборник = "Сборник" только если авторов > 2 в метаданных и нет явного автора в имени файла
         author_count = len([a.strip() for a in metadata_authors.split(';') if a.strip()])
         is_anthology = self.extractor.is_anthology(filename, author_count)
         
-        if is_anthology and author_source != "folder_dataset":
-            # Это сборник И автор не из датасета - переопределить proposed_author
+        # Проверить: есть ли явный автор в названии файла?
+        # Если filename/folder source найден, это не истинная антология
+        has_explicit_author_in_filename = author_source in ['filename', 'folder', 'folder_dataset']
+        
+        if is_anthology and not has_explicit_author_in_filename and author_count > 2:
+            # Это истинная антология: есть маркер сборника И нет явного автора И много авторов
             proposed_author = "Сборник"
             author_source = "metadata"  # Источник - метаданные (множество авторов)
-            self.logger.log(f"[REGEN]   Обнаружен сборник ({author_count} авторов)")
-        elif is_anthology and author_source == "folder_dataset":
-            # Это сборник, НО автор из датасета - сохранить датасет
-            self.logger.log(f"[REGEN]   Обнаружен сборник ({author_count} авторов), но author_source=folder_dataset - сохраняем датасет")
+            self.logger.log(f"[REGEN]   Обнаружена истинная антология ({author_count} авторов)")
+        elif is_anthology and has_explicit_author_in_filename:
+            # Маркер сборника найден, НО есть явный автор - это сборник одного автора, сохранить его
+            self.logger.log(f"[REGEN]   Слово 'сборник' в названии, но автор явно указан ({author_source}): '{proposed_author}'")
         
         # Применить конвертации фамилий если необходимо
         if proposed_author and proposed_author != "Сборник" and self.surname_conversions:
