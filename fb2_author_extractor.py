@@ -10,6 +10,7 @@
 """
 
 import xml.etree.ElementTree as ET
+import re
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -128,6 +129,29 @@ class FB2AuthorExtractor:
             try:
                 author = self._extract_author_from_filename(fb2_path)
                 if author:
+                    # КЛЮЧЕВОЕ ПРАВИЛО: Если автор ЯВНО указан в скобках "(Автор)" в имени файла,
+                    # это ВСЕГДА берется как истина - не нужна верификация против метаданных!
+                    # Скобки - это явная аннотация автора, которая имеет приоритет над метаданными.
+                    has_explicit_pattern = self._has_explicit_author_in_parentheses(fb2_path)
+                    
+                    if has_explicit_pattern:
+                        # Автор явно в скобках - используем как filename source БЕЗ верификации
+                        # НО: Metadata используется для расширения фамилий до полного формата "ФИ"
+                        # Получить ВСЕ авторов из метаданных для расширения
+                        all_metadata_authors = self._extract_all_authors_from_metadata(fb2_path)
+                        expanded_author = self._expand_surnames_from_metadata(author, all_metadata_authors if all_metadata_authors else metadata_author)
+                        if expanded_author:
+                            # Успешно расширили фамилии - используем расширённую версию
+                            normalized = self._normalize_author_format(expanded_author)
+                            if normalized:
+                                return normalized, 'filename'
+                            else:
+                                # Нормализация не сработала, но расширение есть
+                                return expanded_author, 'filename'
+                        else:
+                            # Расширение не сработало - возвращаем как есть
+                            return author, 'filename'
+                    
                     # Если folder_parse_limit == 0 (папка с разными авторами),
                     # принимаем имя файла БЕЗ проверки против метаданных
                     if folder_parse_limit == 0:
@@ -166,11 +190,21 @@ class FB2AuthorExtractor:
                         if normalized:
                             return normalized, 'filename'
                     else:
-                        # Без граничного лимита - проверяем против метаданных
+                        # С граничным лимитом - проверяем против метаданных
                         if self._verify_author_against_metadata(author, metadata_author):
+                            # Верификация пройдена - используем filename источник
+                            # Попытаться нормализовать, но если не получится - все равно используем filename
                             author = self._normalize_author_count(author)
-                            author = self._normalize_author_format(author)
                             if author:
+                                normalized_author = self._normalize_author_format(author)
+                                # Если нормализация сработала, используем её, иначе используем как есть
+                                if normalized_author:
+                                    return normalized_author, 'filename'
+                                else:
+                                    # Нормализация не сработала, но верификация прошла - все равно используем
+                                    return " ".join(author.split()), 'filename'
+                            else:
+                                # normalize_author_count не сработала, используем исходный
                                 return author, 'filename'
             except Exception as e:
                 pass  # Продолжаем к следующему источнику
@@ -776,6 +810,30 @@ class FB2AuthorExtractor:
                      'book', 'vol', 'volume', 'part', 'выпуск']
         value_lower = value.lower()
         return any(bl in value_lower for bl in blacklist)
+    
+    def _has_explicit_author_in_parentheses(self, fb2_path: Path) -> bool:
+        """
+        Проверить, есть ли явно указанный автор в скобках в конце имени файла.
+        
+        Паттерн: "название (Автор).fb2"
+        
+        Args:
+            fb2_path: Path к FB2 файлу
+        
+        Returns:
+            True если автор явно указан в скобках в конце, False иначе
+        """
+        filename = fb2_path.stem
+        pattern = r'\(([^()]+)\)\s*$'  # Скобки только в конце
+        match = re.search(pattern, filename)
+        if match:
+            author_candidate = match.group(1).strip()
+            # Проверить что это не чёрный список и похоже на имя автора
+            if author_candidate and not self._is_blacklisted_value(author_candidate):
+                # Простая проверка: содержит буквы и не выглядит как год/номер
+                if any(c.isalpha() for c in author_candidate):
+                    return True
+        return False
     
     def _extract_author_from_metadata(self, fb2_path: Path) -> str:
         """

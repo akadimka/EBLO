@@ -232,7 +232,9 @@ class RegenCSVService:
                 continue
             
             # Найти автора в иерархии начиная с общей папки
-            folder_author = self._find_dataset_author_in_hierarchy(common_folder)
+            # force_dataset=True: если папка явно называет автора, применить без доп. валидации
+            # Это гарантирует, что ВСЕ файлы в папке получат одного автора
+            folder_author = self._find_dataset_author_in_hierarchy(common_folder, force_dataset=True)
             
             if folder_author:
                 self.logger.log(f"[HIERARCHY]   Найден автор: '{folder_author}'")
@@ -254,7 +256,8 @@ class RegenCSVService:
         Папка автора определяется так:
         - Идти вверх от файла к корню
         - Найти первую папку, которая выглядит как имя автора
-        - Это папка с простым названием (2-3 слова max) без описаний
+        - Это папка с простым названием (2-4 слова) без описаний
+        - Или папка с явно указанным автором в скобках: "Название (Автор)" - но только если один автор
         
         Args:
             fb2_files: Список всех FB2 файлов
@@ -278,12 +281,18 @@ class RegenCSVService:
                     break
                 
                 # Проверить является ли эта папка "папкой автора"
-                # Папка автора - это папка с простым именем (похожим на "Фамилия Имя" или "Имя - Описание")
                 folder_name = current.name
                 words = folder_name.split()
                 
-                # Если папка содержит 2-4 слова И начинается с заглавной буквы - это вероятная папка автора
-                if 2 <= len(words) <= 4 and folder_name[0].isupper():
+                # Вариант 1: Папка с явно указанным одним автором: "Название (Автор)" - без запятых
+                # (запятые указывают на несколько авторов - это не папка одного автора)
+                if '(' in folder_name and ')' in folder_name and ',' not in folder_name:
+                    # Это может быть папка автора
+                    author_folder = current
+                    break
+                
+                # Вариант 2: Папка авто - это папка с простым именем (2-4 слова, начинается с заглавной буквы)
+                if 2 <= len(words) <= 4 and folder_name[0].isupper() and '(' not in folder_name:
                     # Дополнительная проверка: не содержит ли много цифр или нестандартных слов
                     digit_count = sum(1 for w in words if w.isdigit())
                     if digit_count == 0:
@@ -350,7 +359,7 @@ class RegenCSVService:
         
         return common
     
-    def _find_dataset_author_in_hierarchy(self, start_folder: Path) -> Optional[str]:
+    def _find_dataset_author_in_hierarchy(self, start_folder: Path, force_dataset: bool = False) -> Optional[str]:
         """
         Подняться вверх от папки и найти автора в паттерне (Author).
         
@@ -365,6 +374,7 @@ class RegenCSVService:
         
         Args:
             start_folder: Папка откуда начать поиск
+            force_dataset: Если True, применить автора БЕЗ проверки валидности
         
         Returns:
             Имя автора или None
@@ -383,6 +393,12 @@ class RegenCSVService:
                 # Точная конвертация сработала, например "Гоблин (MeXXanik)" → "Гоблин MeXXanik"
                 self.logger.log(f"[HIERARCHY] Уровень {depth}: Точная конвертация '{folder_name}' → '{author_converted}'")
                 
+                # Если force_dataset, применить БЕЗ проверки
+                if force_dataset:
+                    author_normalized = self.extractor._normalize_author_format(author_converted)
+                    self.logger.log(f"[HIERARCHY] Уровень {depth}: force_dataset=True, применяем '{author_converted}' → '{author_normalized}' без проверки")
+                    return author_normalized
+                
                 # Проверить валидность преобразованного значения
                 if self._validate_author_name(author_converted):
                     # Применить нормализацию
@@ -398,6 +414,12 @@ class RegenCSVService:
                 if author_raw:
                     # Найден паттерн (Author) - например "MeXXanik" из "Гоблин (MeXXanik)"
                     self.logger.log(f"[HIERARCHY] Уровень {depth}: Найден паттерн '{author_raw}' из '{folder_name}'")
+                    
+                    # Если force_dataset, применить БЕЗ проверки
+                    if force_dataset:
+                        author_normalized = self.extractor._normalize_author_format(author_raw)
+                        self.logger.log(f"[HIERARCHY] Уровень {depth}: force_dataset=True, применяем паттерн '{author_raw}' → '{author_normalized}' без проверки")
+                        return author_normalized
                     
                     # Проверить валидность
                     if self._validate_author_name(author_raw):
@@ -428,6 +450,7 @@ class RegenCSVService:
             current_folder = parent
             depth += 1
         
+        return None
         return None
     
     def _validate_author_name(self, author_name: str) -> bool:
