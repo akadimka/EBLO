@@ -1188,10 +1188,30 @@ class FB2AuthorExtractor:
         Возвращает ТОЛЬКО ПЕРВОГО АВТОРА для проверки и верификации.
         """
         try:
-            with open(fb2_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
             import re
+            
+            content = None
+            
+            # Попробуем разные кодировки в порядке приоритета
+            # FB2 файлы часто в cp1251 (старые русские), так что пробуем её первой
+            encodings_to_try = [
+                ('cp1251', 'strict'),     # Русская кодировка - часто встречается в старых FB2
+                ('utf-8', 'strict'),      # UTF-8 без ошибок
+                ('cp1251', 'replace'),    # Русская кодировка с заменой
+                ('utf-8', 'replace'),     # UTF-8 с заменой
+                ('latin-1', 'replace'),   # Fallback - всегда работает
+            ]
+            
+            for encoding, errors in encodings_to_try:
+                try:
+                    with open(fb2_path, 'r', encoding=encoding, errors=errors) as f:
+                        content = f.read()
+                    break
+                except Exception:
+                    continue
+            
+            if not content:
+                return ''
             
             # Найти весь <title-info>...</title-info> блок
             title_info_match = re.search(r'<(?:fb:)?title-info>.*?</(?:fb:)?title-info>', content, re.DOTALL)
@@ -1245,10 +1265,29 @@ class FB2AuthorExtractor:
         Возвращает строку со всеми авторами разделённых '; '
         """
         try:
-            with open(fb2_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
             import re
+            
+            content = None
+            
+            # Попробуем разные кодировки в порядке приоритета
+            encodings_to_try = [
+                ('cp1251', 'strict'),     # Русская кодировка - часто встречается в старых FB2
+                ('utf-8', 'strict'),      # UTF-8 без ошибок
+                ('cp1251', 'replace'),    # Русская кодировка с заменой
+                ('utf-8', 'replace'),     # UTF-8 с заменой
+                ('latin-1', 'replace'),   # Fallback - всегда работает
+            ]
+            
+            for encoding, errors in encodings_to_try:
+                try:
+                    with open(fb2_path, 'r', encoding=encoding, errors=errors) as f:
+                        content = f.read()
+                    break
+                except Exception:
+                    continue
+            
+            if not content:
+                return ''
             
             # Найти весь <title-info>...</title-info> блок
             title_info_match = re.search(r'<(?:fb:)?title-info>.*?</(?:fb:)?title-info>', content, re.DOTALL)
