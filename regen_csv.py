@@ -310,9 +310,11 @@ class RegenCSVService:
                     break
                 
                 # Вариант 2: Папка авто - это папка с простым именем (2-4 слова, начинается с заглавной буквы)
-                if 2 <= len(words) <= 4 and folder_name[0].isupper() and '(' not in folder_name:
+                # ВАЖНО: считаем слова без дефисов (дефис - это просто разделитель, не слово)
+                words_no_dashes = [w for w in words if w and w != '-']
+                if 2 <= len(words_no_dashes) <= 4 and folder_name[0].isupper() and '(' not in folder_name:
                     # Дополнительная проверка: не содержит ли много цифр или нестандартных слов
-                    digit_count = sum(1 for w in words if w.isdigit())
+                    digit_count = sum(1 for w in words_no_dashes if w.isdigit())
                     if digit_count == 0:
                         author_folder = current
                         break
