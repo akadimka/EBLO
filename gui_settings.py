@@ -58,6 +58,11 @@ class SettingsWindow(tk.Toplevel):
         self.notebook.add(self.tab_lists, text='Списки')
         self._create_lists_tab()
 
+        # Author conversions tab
+        self.tab_conversions = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_conversions, text='Конвертация авторов')
+        self._create_conversions_tab()
+
         # Buttons frame
         btns = ttk.Frame(self)
         btns.pack(side='bottom', fill='x', padx=10, pady=10)
@@ -227,6 +232,108 @@ class SettingsWindow(tk.Toplevel):
             self.list_key_var.set(keys[0])
             self._load_list_items()
 
+    def _create_conversions_tab(self):
+        """Create Author surname conversions tab."""
+        # Main container
+        main_frame = ttk.Frame(self.tab_conversions)
+        main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        main_frame.rowconfigure(2, weight=1)
+
+        # Title
+        ttk.Label(main_frame, text='Конвертация фамилий авторов:', font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 10))
+        ttk.Label(main_frame, text='Оригинальная фамилия -> Конвертированная фамилия').grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 5))
+
+        # Input fields
+        input_frame = ttk.Frame(main_frame)
+        input_frame.grid(row=2, column=0, columnspan=3, sticky='ew', pady=(0, 10))
+        input_frame.columnconfigure(0, weight=1)
+        input_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(input_frame, text='Из:').grid(row=0, column=0, sticky='w', padx=(0, 5))
+        self.conv_from_var = tk.StringVar()
+        ttk.Entry(input_frame, textvariable=self.conv_from_var).grid(row=0, column=0, sticky='ew', padx=(30, 5))
+
+        ttk.Label(input_frame, text='В:').grid(row=0, column=1, sticky='w', padx=(0, 5))
+        self.conv_to_var = tk.StringVar()
+        ttk.Entry(input_frame, textvariable=self.conv_to_var).grid(row=0, column=1, sticky='ew', padx=(15, 5))
+
+        ttk.Button(input_frame, text='Добавить', command=self._add_conversion).grid(row=0, column=2, padx=(5, 0))
+
+        # Conversions list
+        list_frame = ttk.Frame(main_frame)
+        list_frame.grid(row=3, column=0, columnspan=3, sticky='nsew', pady=(0, 10))
+        list_frame.rowconfigure(0, weight=1)
+        list_frame.columnconfigure(0, weight=1)
+
+        # Treeview for key-value pairs
+        columns = ('from', 'to')
+        self.conv_tree = ttk.Treeview(list_frame, columns=columns, height=10, show='headings')
+        self.conv_tree.column('from', width=150, anchor='w')
+        self.conv_tree.column('to', width=150, anchor='w')
+        self.conv_tree.heading('from', text='Оригинальная')
+        self.conv_tree.heading('to', text='Конвертированная')
+        self.conv_tree.grid(row=0, column=0, sticky='nsew')
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=self.conv_tree.yview)
+        scrollbar.grid(row=0, column=1, sticky='ns')
+        self.conv_tree.config(yscrollcommand=scrollbar.set)
+
+        # Buttons
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=4, column=0, columnspan=3, sticky='ew')
+        ttk.Button(btn_frame, text='Удалить выбранное', command=self._remove_selected_conversion).pack(side='left', padx=(0, 5))
+
+        # Load conversions
+        self._load_conversions()
+
+    def _load_conversions(self):
+        """Load conversions from settings into treeview."""
+        self.conv_tree.delete(*self.conv_tree.get_children())
+        conversions = self.settings_manager.get_author_surname_conversions()
+        for from_name, to_name in conversions.items():
+            self.conv_tree.insert('', 'end', values=(from_name, to_name))
+
+    def _add_conversion(self):
+        """Add new conversion."""
+        from_name = (self.conv_from_var.get() or '').strip()
+        to_name = (self.conv_to_var.get() or '').strip()
+        
+        if not from_name or not to_name:
+            messagebox.showwarning('Ошибка', 'Заполните оба поля (От и В)')
+            return
+        
+        if from_name == to_name:
+            messagebox.showwarning('Ошибка', 'Оригинальная и конвертированная фамилии должны отличаться')
+            return
+        
+        # Check if already exists
+        conversions = self.settings_manager.get_author_surname_conversions()
+        if from_name in conversions:
+            if messagebox.askyesno('Подтверждение', f'Конвертация для "{from_name}" уже существует. Заменить?'):
+                self.settings_manager.remove_author_surname_conversion(from_name)
+            else:
+                return
+        
+        self.settings_manager.add_author_surname_conversion(from_name, to_name)
+        self.conv_from_var.set('')
+        self.conv_to_var.set('')
+        self._load_conversions()
+
+    def _remove_selected_conversion(self):
+        """Remove selected conversion."""
+        selection = self.conv_tree.selection()
+        if not selection:
+            messagebox.showinfo('Информация', 'Выберите запись для удаления')
+            return
+        
+        for item in selection:
+            values = self.conv_tree.item(item)['values']
+            from_name = values[0]
+            self.settings_manager.remove_author_surname_conversion(from_name)
+        
+        self._load_conversions()
+
     def _choose_folder(self):
         folder = filedialog.askdirectory()
         if folder:
@@ -287,6 +394,13 @@ class SettingsWindow(tk.Toplevel):
             # Invalid - restore previous value
             self.folder_limit_var.set(str(self.settings_manager.get_folder_parse_limit()))
 
+    def _save_current_list(self):
+        """Save currently displayed list."""
+        key = self.list_key_var.get()
+        if key:
+            ls_items = [self.ls_listbox.get(i) for i in range(self.ls_listbox.size())]
+            self.settings_manager.set_list(key, ls_items)
+
     def _save(self):
         """Save all settings and close."""
         # General
@@ -295,10 +409,7 @@ class SettingsWindow(tk.Toplevel):
         self.settings_manager.set_generate_csv(self.generate_csv_var.get())
             
         # Lists panel: persist current list
-        key = self.list_key_var.get()
-        if key:
-            ls_items = [self.ls_listbox.get(i) for i in range(self.ls_listbox.size())]
-            self.settings_manager.set_list(key, ls_items)
+        self._save_current_list()
         
         self.destroy()
 

@@ -502,3 +502,34 @@ class SettingsManager:
             self.settings['author_name_patterns'] = list(lst)
         self.save()
 
+    # --- Author surname conversions helpers ---
+    def get_author_surname_conversions(self):
+        """Возвращает словарь конвертаций фамилий авторов (оригинальная -> конвертированная)."""
+        d = self.settings.get('author_surname_conversions')
+        if d is None:
+            return {}
+        if isinstance(d, dict):
+            return dict(d)
+        return {}
+
+    def set_author_surname_conversions(self, d):
+        """Устанавливает словарь конвертаций фамилий авторов и сохраняет конфиг."""
+        if d is None:
+            self.settings.pop('author_surname_conversions', None)
+        else:
+            self.settings['author_surname_conversions'] = dict(d)
+        self.save()
+
+    def add_author_surname_conversion(self, from_surname, to_surname):
+        """Добавляет конвертацию фамилии."""
+        conversions = self.get_author_surname_conversions()
+        if from_surname and to_surname:
+            conversions[from_surname] = to_surname
+            self.set_author_surname_conversions(conversions)
+
+    def remove_author_surname_conversion(self, from_surname):
+        """Удаляет конвертацию фамилии."""
+        conversions = self.get_author_surname_conversions()
+        if from_surname in conversions:
+            del conversions[from_surname]
+            self.set_author_surname_conversions(conversions)
