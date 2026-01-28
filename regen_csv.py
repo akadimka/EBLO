@@ -434,11 +434,10 @@ class RegenCSVService:
         """
         Попытаться извлечь автора из названия папки.
         
-        Поддерживаемые форматы:
-        - "Series (Author)" → "Author"
-        - "Series - (Author)" → "Author"  
-        - "(Author)" → "Author"
-        - "Number. Title (Author)" → "Author"
+        Поддерживаемые форматы (в порядке приоритета):
+        1. "(Author)" - например "Гоблин (MeXXanik)" → "MeXXanik"
+        2. "Author - Description" - например "Максим Шаттам - Собрание сочинений" → "Максим Шаттам"
+        3. Иные случаи возвращают None
         
         Args:
             folder_name: Название папки
@@ -448,19 +447,26 @@ class RegenCSVService:
         """
         import re
         
-        # Ищем паттерн "(Author)" в конце
+        # Приоритет 1: Ищем паттерн "(Author)" в конце
         match = re.search(r'\(([^)]+)\)\s*$', folder_name)
-        if not match:
-            return None
+        if match:
+            author_raw = match.group(1).strip()
+            # Проверяем что это выглядит как имя автора (содержит буквы)
+            if any(c.isalpha() for c in author_raw):
+                return author_raw
         
-        author_raw = match.group(1).strip()
+        # Приоритет 2: Ищем паттерн "Author - Description" (тире с пробелами)
+        # Это для случаев типа "Максим Шаттам - Собрание сочинений"
+        match = re.match(r'^([^-]+?)\s*-\s*(.+)$', folder_name)
+        if match:
+            author_raw = match.group(1).strip()
+            # Проверяем что часть ДО тире выглядит как имя автора
+            # Должна содержать буквы и обычно быть относительно короткой (не длинное описание)
+            words = author_raw.split()
+            if len(words) <= 3 and any(c.isalpha() for c in author_raw):
+                return author_raw
         
-        # Проверяем что это выглядит как имя автора (не путаем с серией типа "1941")
-        # Имя должно содержать буквы
-        if not any(c.isalpha() for c in author_raw):
-            return None
-        
-        return author_raw
+        return None
     
     def _process_fb2_file(self, fb2_path: Path, folder_analysis: dict) -> BookRecord:
         """
