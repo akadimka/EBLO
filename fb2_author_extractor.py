@@ -141,7 +141,74 @@ class FB2AuthorExtractor:
                     
                     if has_explicit_pattern:
                         # Автор явно в скобках - используем как filename source БЕЗ верификации
-                        # НО: Metadata используется для расширения фамилий до полного формата "ФИ"
+                        
+                        # КЛЮЧЕВАЯ ПРОВЕРКА: Если есть несколько авторов (разделены запятой или точкой с запятой)
+                        # каждого нужно расширить отдельно
+                        if ',' in author or ';' in author:
+                            # Несколько авторов - обработать каждого
+                            separator = ',' if ',' in author else ';'
+                            authors_list = [a.strip() for a in author.split(separator) if a.strip()]
+                            expanded_authors = []
+                            
+                            for single_author in authors_list:
+                                # Для каждого автора: проверить если это полное имя или попробовать расширить
+                                words = single_author.split()
+                                is_full_name = len(words) >= 2 and all(word.replace('.', '').replace('-', '').replace('ё', 'е').replace('Ё', 'Е').isalpha() for word in words)
+                                
+                                if is_full_name:
+                                    # Полное имя - нормализуем
+                                    normalized = self._normalize_author_format(single_author)
+                                    if normalized:
+                                        expanded_authors.append(normalized)
+                                    else:
+                                        expanded_authors.append(single_author)
+                                else:
+                                    # Сокращение или одно слово - пытаемся расширить
+                                    expanded_single = ""
+                                    
+                                    # Попытка 1: поиск по частичному имени в серии
+                                    if all_series_authors_str:
+                                        expanded_single = self._find_author_by_partial_name(single_author, all_series_authors_str)
+                                    
+                                    # Попытка 2: поиск в метаданных файла
+                                    if not expanded_single and all_metadata_authors:
+                                        expanded_single = self._find_author_by_partial_name(single_author, all_metadata_authors)
+                                    
+                                    # Попытка 3: расширение фамилий в серии
+                                    if not expanded_single and all_series_authors_str:
+                                        expanded_single = self._expand_surnames_from_metadata(single_author, all_series_authors_str)
+                                    
+                                    # Попытка 4: расширение фамилий в метаданных файла
+                                    if not expanded_single and all_metadata_authors:
+                                        expanded_single = self._expand_surnames_from_metadata(single_author, all_metadata_authors)
+                                    
+                                    if expanded_single:
+                                        expanded_authors.append(expanded_single)
+                                    else:
+                                        expanded_authors.append(single_author)
+                            
+                            # Нормализовать и вернуть список
+                            result_str = ", ".join(expanded_authors)
+                            normalized = self._normalize_author_format(result_str)
+                            if normalized:
+                                return normalized, 'filename'
+                            else:
+                                return result_str, 'filename'
+                        
+                        # Если это один автор - проверить если он полный
+                        words = author.split()
+                        is_full_name = len(words) >= 2 and all(word.replace('.', '').replace('-', '').replace('ё', 'е').replace('Ё', 'Е').isalpha() for word in words)
+                        
+                        if is_full_name:
+                            # Автор уже полный - нормализуем и возвращаем как есть
+                            normalized = self._normalize_author_format(author)
+                            if normalized:
+                                return normalized, 'filename'
+                            else:
+                                # Нормализация не сработала - возвращаем исходный
+                                return author, 'filename'
+                        
+                        # Если это сокращение/одно слово, пытаемся расширить из метаданных
                         expanded_author = ""
                         
                         # Попытка 1: новый метод поиска по частичному имени - СНАЧАЛА ищем во всей серии
@@ -811,18 +878,28 @@ class FB2AuthorExtractor:
     def _extract_author_from_filename(self, fb2_path: Path) -> str:
         """
         Извлечь автора из названия файла.
-        Использует динамический выбор паттерна из конфигурации.
+        
+        ПРАВИЛЬНАЯ ЛОГИКА: Проверять каждое полученное значение на валидность.
+        Если значение в черном списке или не выглядит как имя автора - отбрасывать.
+        
+        ПОРЯДОК ПОПЫТОК:
+        1. Попробовать динамический pattern matching
+        2. Если получилось невалидное значение - отбросить
+        3. Попробовать скобки "(Автор)" в конце
+        4. Если скобки содержат невалидное значение - отбросить  
+        5. Fallback на author_processor
         """
         try:
             filename = fb2_path.stem  # Имя без расширения
             
-            # Использовать динамический pattern matching
+            # ПОПЫТКА 1: Использовать динамический pattern matching
             pattern_dict = self._select_best_pattern(filename, pattern_type='files')
             
             if pattern_dict:
                 # Найден подходящий паттерн - извлечь автора
                 author = self._extract_author_from_filename_with_pattern(filename, pattern_dict)
-                if author:
+                if author and self._is_valid_author_candidate(author):
+                    # Получено ВАЛИДНОЕ значение из паттерна
                     # Если содержит инициалы "А.Фамилия", попробовать расширить из метаданных
                     if re.match(r'^[А-Яа-я]\.[А-Яа-я]', author):
                         all_metadata_authors = self._extract_all_authors_from_metadata(fb2_path)
@@ -837,30 +914,70 @@ class FB2AuthorExtractor:
                                         return auth
                                 return all_metadata_authors
                     return author
+                # Если значение невалидное, не возвращаем, продолжаем к следующему источнику
             
-            # Если динамический matching не сработал, попробовать fallback на прямой парсинг скобок
+            # ПОПЫТКА 2: Проверить явный автор в скобках "(Автор)" в КОНЦЕ имени файла
             bracket_patterns = [
-                r'\(([^)]+)\)(?:\s*$|\s+[-–])',  # В конце или перед дефисом
-                r'(?:^|\s+)(?:[-–]\s+)?\(([^)]+)\)',  # В начале или после дефиса
+                r'\(([^)]+)\)(?:\s*$)',  # В конце: "... (Автор)"
             ]
             
             for pattern in bracket_patterns:
                 match = re.search(pattern, filename)
                 if match:
                     author_candidate = match.group(1).strip()
-                    if author_candidate and not self._is_blacklisted_value(author_candidate):
+                    # Проверить валидность кандидата
+                    if author_candidate and self._is_valid_author_candidate(author_candidate):
                         return author_candidate
+                    # Если невалидный - продолжаем поиск
             
-            # Финальный fallback на author_processor
+            # ПОПЫТКА 3: Fallback на author_processor
             result = self.author_processor.extract_author_from_filename(filename)
             if result:
                 author_name = result[0].value if hasattr(result[0], 'value') else str(result[0])
-                if author_name:
+                if author_name and self._is_valid_author_candidate(author_name):
                     return author_name
         except Exception as e:
             pass
         
         return ''
+    
+    def _is_valid_author_candidate(self, value: str) -> bool:
+        """
+        Проверить, выглядит ли значение как имя автора.
+        
+        Критерии валидности:
+        - НЕ в черном списке (том, часть, выпуск, сборник и т.д.)
+        - Содержит хотя бы одну букву (не только цифры/символы)
+        - Не выглядит как название места/события (не в UPPERCASE целиком)
+        - Имеет разумную длину (не слишком короткое/длинное)
+        
+        Args:
+            value: Значение для проверки
+            
+        Returns:
+            True если похоже на имя автора, False иначе
+        """
+        if not value:
+            return False
+        
+        # Проверка 1: Черный список (название книг, томы и т.д.)
+        if self._is_blacklisted_value(value):
+            return False
+        
+        # Проверка 2: Должна быть хотя бы одна буква
+        if not any(c.isalpha() for c in value):
+            return False
+        
+        # Проверка 3: Не может быть всё в UPPERCASE (похоже на географическое название, аббревиатуру)
+        # "СССР", "USA", "ENGLAND" - это не имена авторов
+        if value.isupper() and len(value) > 1:
+            return False
+        
+        # Проверка 4: Разумная длина
+        if len(value) < 2 or len(value) > 100:
+            return False
+        
+        return True
     
     def _select_best_pattern(self, filename: str, pattern_type: str = 'files') -> Optional[Dict[str, str]]:
         """
