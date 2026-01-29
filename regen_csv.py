@@ -643,25 +643,28 @@ class RegenCSVService:
         self.logger.log(f"[REGEN]   Метаданные FB2: авторы='{metadata_authors}', название='{book_title}', жанр='{metadata_genre}'")
         
         # Проверить, является ли это сборником
-        # ВАЖНО: Правило сборника НЕ применяется если:
-        # 1. Автор из folder_dataset (иерархия папок)
-        # 2. Автор успешно извлечен из filename (filename или folder)
-        # Сборник = "Сборник" только если авторов > 2 в метаданных и нет явного автора в имени файла
+        # Сборник определяется:
+        # 1. Явное наличие маркера (сборник, антология, лучшее и т.д.)
+        # 2. И/или авторов > 2 в метаданных (признак множества авторов)
         author_count = len([a.strip() for a in metadata_authors.split(';') if a.strip()])
         is_anthology = self.extractor.is_anthology(filename, author_count)
         
         # Проверить: есть ли явный автор в названии файла?
-        # Если filename/folder source найден, это не истинная антология
+        # Если filename/folder source найден, это может быть либо явный автор, либо неправильный парс сборника
         has_explicit_author_in_filename = author_source in ['filename', 'folder', 'folder_dataset']
         
-        if is_anthology and not has_explicit_author_in_filename and author_count > 2:
-            # Это истинная антология: есть маркер сборника И нет явного автора И много авторов
+        # ИСПРАВЛЕНИЕ: Если это сборник и авторов > 2, это сборник НЕЗАВИСИМО от того
+        # был ли распарсен "автор" из имени файла (это может быть неправильный парс названия сборника)
+        if is_anthology and author_count > 2:
+            # Это истинная антология: есть маркер сборника И много авторов в метаданных
             proposed_author = "Сборник"
             author_source = "metadata"  # Источник - метаданные (множество авторов)
-            self.logger.log(f"[REGEN]   Обнаружена истинная антология ({author_count} авторов)")
-        elif is_anthology and has_explicit_author_in_filename:
-            # Маркер сборника найден, НО есть явный автор - это сборник одного автора, сохранить его
-            self.logger.log(f"[REGEN]   Слово 'сборник' в названии, но автор явно указан ({author_source}): '{proposed_author}'")
+            self.logger.log(f"[REGEN]   Обнаружена истинная антология ({author_count} авторов, is_anthology={is_anthology})")
+        elif is_anthology and not has_explicit_author_in_filename:
+            # Маркер сборника, но авторов <= 2 И нет явного автора - это сборник одного автора?
+            proposed_author = "Сборник"
+            author_source = "metadata"
+            self.logger.log(f"[REGEN]   Обнаружен сборник с маркером (авторов: {author_count})")
         
         # Применить конвертации фамилий если необходимо
         if proposed_author and proposed_author != "Сборник" and self.surname_conversions:
