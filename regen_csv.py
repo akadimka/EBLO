@@ -1118,7 +1118,17 @@ class RegenCSVService:
             
             # Обновить proposed_author
             if expanded_authors:
-                record.proposed_author = ", ".join(expanded_authors)
+                # Сортировать авторов внутри каждой строки по алфавиту для консистентности
+                sorted_authors = []
+                for author_str in expanded_authors:
+                    if ',' in author_str:
+                        # Несколько авторов - сортировать их
+                        authors_list = [a.strip() for a in author_str.split(',') if a.strip()]
+                        authors_list.sort()
+                        sorted_authors.append(", ".join(authors_list))
+                    else:
+                        sorted_authors.append(author_str)
+                record.proposed_author = ", ".join(sorted_authors)
         
         # Track Мах files after
         for record in records:

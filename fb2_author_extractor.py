@@ -229,43 +229,13 @@ class FB2AuthorExtractor:
                         expanded_author = self._expand_surnames_from_metadata(author, metadata_author)
                     
                     if expanded_author:
-                        if metadata_author:
-                            if expanded_author in metadata_author or metadata_author in expanded_author:
-                                normalized = self._normalize_author_format(expanded_author)
-                                if normalized:
-                                    return normalized, 'filename'
-                                else:
-                                    return expanded_author, 'filename'
-                            elif author in metadata_author or metadata_author in author:
-                                normalized = self._normalize_author_format(metadata_author)
-                                if normalized:
-                                    return normalized, 'metadata'
-                                else:
-                                    return metadata_author, 'metadata'
-                            else:
-                                normalized = self._normalize_author_format(expanded_author)
-                                if normalized:
-                                    return normalized, 'filename'
-                                else:
-                                    return expanded_author, 'filename'
+                        normalized = self._normalize_author_format(expanded_author)
+                        if normalized:
+                            return normalized, 'filename'
                         else:
-                            normalized = self._normalize_author_format(expanded_author)
-                            if normalized:
-                                return normalized, 'filename'
-                            else:
-                                return expanded_author, 'filename'
+                            return expanded_author, 'filename'
                     else:
-                        if metadata_author:
-                            if author in metadata_author or metadata_author in author:
-                                normalized = self._normalize_author_format(metadata_author)
-                                if normalized:
-                                    return normalized, 'metadata'
-                                else:
-                                    return metadata_author, 'metadata'
-                            else:
-                                return author, 'filename'
-                        else:
-                            return author, 'filename'
+                        return author, 'filename'
             
             except Exception as e:
                 pass  # Продолжаем к следующему источнику
