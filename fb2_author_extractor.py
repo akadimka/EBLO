@@ -1613,14 +1613,8 @@ class FB2AuthorExtractor:
                         return full
             return abbreviated_author
         
-        print(f"[EXPAND] Called with: {abbreviated_author}", flush=True)
         if not abbreviated_author or '.' not in abbreviated_author:
             return abbreviated_author
-        
-        # DEBUG for testing
-        is_debug = "Живой" in abbreviated_author
-        if is_debug:
-            print(f"[EXPAND DEBUG] Processing: {abbreviated_author}", flush=True)
         
         try:
             # Парсить "А.Фамилия" или "А. Фамилия"
@@ -1677,8 +1671,6 @@ class FB2AuthorExtractor:
             
             # Получить первую букву инициала
             first_letter = init_part[0].upper()
-            if is_debug:
-                print(f"[EXPAND DEBUG]   init_part={init_part}, surname={surname}, first_letter={first_letter}")
             
             # Поискать в словаре по фамилии как ключу
             surname_lower = surname.lower()
@@ -1686,8 +1678,6 @@ class FB2AuthorExtractor:
             # Попытка 1: найти точное совпадение фамилии в словаре
             if surname_lower in all_authors_map:
                 full_names = all_authors_map[surname_lower]
-                if is_debug:
-                    print(f"[EXPAND DEBUG]   Found in map: {full_names}")
                 
                 # all_authors_map[фамилия] теперь СПИСОК полных имён
                 if isinstance(full_names, list):
@@ -1697,13 +1687,9 @@ class FB2AuthorExtractor:
                         full_parts = full_name.split()
                         if len(full_parts) >= 2:
                             first_name = full_parts[1]  # Второе слово - имя
-                            if is_debug:
-                                print(f"[EXPAND DEBUG]   Checking {full_name}: first_name={first_name}, first_name[0]={first_name[0]}")
                             
                             # Проверить совпадение первой буквы имени с инициалом
                             if first_name and first_name[0].upper() == first_letter:
-                                if is_debug:
-                                    print(f"[EXPAND DEBUG]   MATCH! Returning {full_name}")
                                 return full_name
                 else:
                     # На случай если это ещё старый формат (строка вместо списка)
@@ -1713,18 +1699,11 @@ class FB2AuthorExtractor:
                         first_name = full_parts[1]
                         if first_name and first_name[0].upper() == first_letter:
                             return full_name
-            else:
-                if is_debug:
-                    print(f"[EXPAND DEBUG]   NOT found in map. Available keys: {list(all_authors_map.keys())[:20]}")
             
             # Если не найдено - вернуть как было
-            if is_debug:
-                print(f"[EXPAND DEBUG]   No match, returning as-is: {abbreviated_author}")
             return abbreviated_author
         
         except Exception as e:
-            if is_debug:
-                print(f"[EXPAND DEBUG]   Exception: {e}")
             return abbreviated_author
     
     def expand_surname_to_fullname(self, surname: str, metadata_authors: str) -> str:

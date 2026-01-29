@@ -181,13 +181,6 @@ class RegenCSVService:
         records = []
         
         for idx, fb2_path in enumerate(fb2_files):
-            # DEBUG: Track Мах files
-            if "Мах" in fb2_path.name and "Пилот ракетоносца" in fb2_path.name:
-                print(f"[DEBUG] Processing Мах file at idx={idx}")
-                print(f"[DEBUG] all_series_authors_str has {len(all_series_authors_str)} chars")
-                if "Махров" in all_series_authors_str:
-                    print(f"[DEBUG] WARNING: 'Махров' is already in all_series_authors_str!")
-            
             if progress_callback:
                 progress_callback(idx, len(fb2_files), f"Обработка: {fb2_path.name}")
             
@@ -619,10 +612,6 @@ class RegenCSVService:
         """
         # Получить имя файла без расширения и пути
         filename = fb2_path.stem
-        # DEBUG: Track Мах files
-        is_mah_file = "Мах" in fb2_path.name
-        if is_mah_file:
-            self.logger.log(f"[REGEN] *** TRACK MAH FILE: {fb2_path.name}")
         self.logger.log(f"[REGEN] Обработка файла: {fb2_path.name}")
         
         # Получить информацию из анализа иерархии
@@ -642,13 +631,11 @@ class RegenCSVService:
         
         # Если автор не найден в иерархии папок - используем приоритет
         if not proposed_author:
-            self.logger.log(f"[REGEN]   DEBUG: folder_author is empty, calling resolve_author_by_priority...")
             proposed_author, author_source = self.extractor.resolve_author_by_priority(
                 str(fb2_path),
                 folder_parse_limit=self.folder_parse_limit,
                 all_series_authors_str=all_series_authors_str
             )
-            self.logger.log(f"[REGEN]   DEBUG: resolve_author_by_priority returned: proposed_author={repr(proposed_author)}, author_source={repr(author_source)}")
             if proposed_author:
                 self.logger.log(f"[REGEN]   Автор по приоритетам: '{proposed_author}' (источник: {author_source})")
             else:
@@ -700,10 +687,6 @@ class RegenCSVService:
                 self.logger.log(f"[REGEN]   После конвертации фамилий: '{original_author}' -> '{proposed_author}'")
         
         # Создать запись
-        self.logger.log(f"[REGEN]   DEBUG: About to create BookRecord with proposed_author={repr(proposed_author)}, author_source={repr(author_source)}")
-        if is_mah_file:
-            self.logger.log(f"[REGEN]   *** MAH FILE RECORD: proposed_author={repr(proposed_author)}, author_source={repr(author_source)}")
-        
         # Финальная нормализация автора
         if proposed_author:
             original_proposed = proposed_author
@@ -1108,11 +1091,6 @@ class RegenCSVService:
             self.logger.log("Словарь полных имён пуст, раскрытие невозможно")
             return records
         
-        # DEBUG: Print map to stdout
-        print(f"[STDOUT DEBUG] Authors map built with {len(authors_map)} surnames")
-        if "живой" in authors_map:
-            print(f"[STDOUT DEBUG] Found 'живой': {authors_map['живой']}")
-        
         self.logger.log(f"Построен словарь из {len(authors_map)} фамилий для раскрытия")
         
         # Раскрыть аббревиатуры в каждой записи
@@ -1208,8 +1186,6 @@ class RegenCSVService:
                             for r in records_in_folder)
             if has_dataset:
                 dataset_roots.add(folder_path)
-        
-        print(f"[DEBUG] dataset_roots = {dataset_roots}")
         
         # Для каждой корневой папки датасета - найти консенсус по ВСЕМ файлам в ней
         # (включая подпапки)
@@ -1324,10 +1300,6 @@ class RegenCSVService:
             
             self.logger.log(f"[CONSENSUS] metadata='{metadata_key}': {author_counts}, consensus='{consensus_author}'")
             
-            # DEBUG for Небесный король
-            if metadata_key == "А. Живой":
-                print(f"[CONSENSUS DEBUG] metadata='А. Живой', author_counts={author_counts}, consensus={consensus_author}")
-            
             # Применить
             for record in group_records:
                 if record.author_source in ['filename', 'folder']:
@@ -1354,11 +1326,6 @@ class RegenCSVService:
         """
         try:
             import csv
-            # DEBUG
-            for record in records:
-                if 'Живой' in record.file_path:
-                    print(f"[SAVE DEBUG] {record.file_path}: proposed_author = {record.proposed_author}")
-            
             # Используем UTF-8 без BOM для совместимости
             with open(output_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)

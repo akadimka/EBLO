@@ -176,13 +176,4 @@ class SeriesProcessor:
 if __name__ == '__main__':
     # Простой тест
     processor = SeriesProcessor()
-    print("SeriesProcessor инициализирован")
-    print(f"Паттерны в файлах: {len(processor.file_patterns)}")
-    print(f"Паттерны в папках: {len(processor.folder_patterns)}")
-    print(f"Паттерны последовательности: {len(processor.sequence_patterns)}")
-    print(f"Предел папок при парсинге: {processor.folder_parse_limit}")
-    print()
-    print(f"Приоритеты извлечения серий:")
-    for priority in SeriesExtractionPriority.ORDER:
-        print(f"  {priority}: {SeriesExtractionPriority.get_name(priority)}")
 
