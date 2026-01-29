@@ -41,6 +41,7 @@ venv.bak/
 # CSV files (can be regenerated)
 proposed_series_report.csv
 summary_csv.csv
+*.csv
 
 # Test & Debug files (temporary, for development only)
 test_*.py
