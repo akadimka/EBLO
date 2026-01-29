@@ -204,6 +204,12 @@ class RegenCSVService:
         self.logger.log("[PASS 4] Применение консенсуса авторов...")
         records = self._apply_author_consensus(records)
         
+        # PASS 5: Применить конвертации фамилий
+        if progress_callback:
+            progress_callback(len(fb2_files), len(fb2_files), "Применение конвертаций фамилий...")
+        self.logger.log("[PASS 5] Применение конвертаций фамилий...")
+        records = self._apply_surname_conversions_to_records(records)
+        
         # Сохранить CSV если путь указан
         if output_csv_path:
             self._save_csv(records, output_csv_path)
@@ -644,6 +650,13 @@ class RegenCSVService:
         metadata_authors, book_title, metadata_genre = self._extract_fb2_metadata(fb2_path)
         self.logger.log(f"[REGEN]   Метаданные FB2: авторы='{metadata_authors}', название='{book_title}', жанр='{metadata_genre}'")
         
+        # Применить конвертации фамилий к metadata_authors
+        if metadata_authors and self.surname_conversions:
+            original_metadata = metadata_authors
+            metadata_authors = self._apply_surname_conversions(metadata_authors)
+            if original_metadata != metadata_authors:
+                self.logger.log(f"[REGEN]   После конвертации фамилий: авторы '{original_metadata}' -> '{metadata_authors}'")
+        
         # Проверить, является ли это сборником
         # Сборник определяется:
         # 1. Явное наличие маркера (сборник, антология, лучшее и т.д.)
@@ -865,6 +878,34 @@ class RegenCSVService:
         
         return "; ".join(converted_authors)
     
+    def _apply_surname_conversions_to_records(self, records: List[BookRecord]) -> List[BookRecord]:
+        """
+        Применить конвертации фамилий ко всем записям (для proposed_author).
+        Вызывается в конце pipeline'a, после консенсуса.
+        
+        Args:
+            records: Список записей
+            
+        Returns:
+            Список записей с применёнными конвертациями фамилий
+        """
+        if not self.surname_conversions:
+            return records
+        
+        conversions_applied = 0
+        for record in records:
+            if record.proposed_author and record.proposed_author != "Сборник":
+                original = record.proposed_author
+                record.proposed_author = self._apply_surname_conversions(record.proposed_author)
+                if original != record.proposed_author:
+                    conversions_applied += 1
+                    self.logger.log(f"[PASS 5] {record.filename}: '{original}' -> '{record.proposed_author}'")
+        
+        if conversions_applied > 0:
+            self.logger.log(f"[PASS 5] Всего применено конвертаций: {conversions_applied}")
+        
+        return records
+    
     def _build_authors_map(self, records: List[BookRecord]) -> Dict[str, str]:
         """
         Построить словарь фамилия -> полное имя из всех предложенных авторов.
@@ -1003,14 +1044,13 @@ class RegenCSVService:
         self.logger.log(f"Раскрыто аббревиатур: {expanded_count}")
         return records
     
-    
     def _apply_author_consensus(self, records: List[BookRecord]) -> List[BookRecord]:
         """
         Применить консенсус при расхождениях авторов.
         
         КРИТИЧЕСКИ ВАЖНО: Датасет имеет АБСОЛЮТНЫЙ приоритет!
-        - Если папка содержит хотя бы один файл с folder_dataset - ВСЕ файлы в папке
-          получают одного и того же автора из folder_dataset
+        - Если папка (или иерархия папок) содержит файлы с folder_dataset - ВСЕ файлы
+          в этой папке И ВО ВСЕХ ПОДПАПКАХ получают одного и того же автора
         - Файлы из папок БЕЗ folder_dataset обрабатываются по metadata-консенсусу
         
         Args:
@@ -1021,7 +1061,7 @@ class RegenCSVService:
         """
         consensus_count = 0
         
-        # Этап 1: Построить отображение папок -> файлы
+        # Этап 1: Построить отображение папок -> файлы и найти корневые папки датасета
         folder_to_records = {}
         for record in records:
             file_path = Path(record.file_path)
@@ -1031,57 +1071,87 @@ class RegenCSVService:
                 folder_to_records[parent_folder] = []
             folder_to_records[parent_folder].append(record)
         
-        # Этап 2: Обработать папки с folder_dataset
-        # ДЛЯ КАЖДОЙ ТАКОЙ ПАПКИ: найти консенсус среди folder_dataset файлов
-        # и применить его КО ВСЕМ файлам в папке
+        # Найти корневые папки датасета
+        # Корневая папка = папка которая содержит файлы с folder_dataset
+        # (или иерархия папок которая ведёт к таким файлам)
+        dataset_roots = set()  # Корневые папки датасета
         
-        for folder_path, all_folder_records in folder_to_records.items():
-            # Найти folder_dataset файлы в этой папке
-            folder_dataset_records = [r for r in all_folder_records 
+        for folder_path, records_in_folder in folder_to_records.items():
+            has_dataset = any(r.author_source.startswith("folder_dataset") 
+                            for r in records_in_folder)
+            if has_dataset:
+                dataset_roots.add(folder_path)
+        
+        # Для каждой корневой папки датасета - найти консенсус по ВСЕМ файлам в ней
+        # (включая подпапки)
+        processed_folders = set()
+        
+        for root_folder in dataset_roots:
+            if root_folder in processed_folders:
+                continue
+            
+            # Найти все файлы в этой папке и всех подпапках
+            all_root_records = []
+            root_path = Path(root_folder)
+            
+            for folder_path, records_in_folder in folder_to_records.items():
+                folder_path_obj = Path(folder_path)
+                try:
+                    # Проверить является ли folder_path подпапкой root_folder
+                    folder_path_obj.relative_to(root_path)
+                    # Если попали сюда - это подпапка
+                    all_root_records.extend(records_in_folder)
+                except ValueError:
+                    # Не подпапка
+                    pass
+            
+            # Найти консенсус среди folder_dataset файлов в корневой папке
+            folder_dataset_records = [r for r in all_root_records 
                                       if r.author_source.startswith("folder_dataset")]
             
             if not folder_dataset_records:
-                # Эта папка не имеет folder_dataset - обработаем позже по metadata
                 continue
             
-            # В папке ЕСТЬ folder_dataset!
-            # Найти консенсус среди folder_dataset файлов
+            # Найти консенсус
             folder_authors = {}
             for record in folder_dataset_records:
                 author = record.proposed_author or ""
                 folder_authors[author] = folder_authors.get(author, 0) + 1
             
             consensus_author = max(folder_authors.items(), key=lambda x: x[1])[0]
-            self.logger.log(f"[CONSENSUS] folder='{Path(folder_path).name}': найден датасет, консенсус: '{consensus_author}'")
+            self.logger.log(f"[CONSENSUS] dataset_root='{Path(root_folder).name}': найден консенсус: '{consensus_author}'")
             
-            # ПРИМЕНИТЬ КОНСЕНСУС КО ВСЕМ файлам в папке (не только к folder_dataset!)
-            for record in all_folder_records:
+            # ПРИМЕНИТЬ КОНСЕНСУС КО ВСЕМ файлам в корневой папке И ПОДПАПКАХ
+            for record in all_root_records:
                 if record.proposed_author != consensus_author:
                     old_author = record.proposed_author
                     old_source = record.author_source
                     
-                    # Новый источник зависит от текущего
                     if old_source.startswith("folder_dataset"):
                         new_source = "folder_dataset_cons"
                     else:
-                        # Файлы из metadata/filename переходят в folder_dataset
                         new_source = "folder_dataset"
                     
                     record.author_source = new_source
                     record.proposed_author = consensus_author
                     self.logger.log(f"  [CHANGED] '{old_author}' ({old_source}) -> '{consensus_author}' ({new_source})")
                     consensus_count += 1
-        
-        # Этап 3: Обработать файлы из папок БЕЗ folder_dataset по metadata-консенсусу
-        
-        # Собрать только файлы из папок без dataset
-        non_dataset_records = []
-        for folder_path, all_folder_records in folder_to_records.items():
-            has_dataset = any(r.author_source.startswith("folder_dataset") 
-                            for r in all_folder_records)
             
-            if not has_dataset:
-                non_dataset_records.extend(all_folder_records)
+            # Отметить все папки в этой иерархии как обработанные
+            for folder_path in folder_to_records.keys():
+                folder_path_obj = Path(folder_path)
+                try:
+                    folder_path_obj.relative_to(root_path)
+                    processed_folders.add(folder_path)
+                except ValueError:
+                    pass
+        
+        # Этап 2: Обработать файлы из папок БЕЗ folder_dataset по metadata-консенсусу
+        
+        non_dataset_records = []
+        for folder_path in folder_to_records.keys():
+            if folder_path not in processed_folders:
+                non_dataset_records.extend(folder_to_records[folder_path])
         
         # Сгруппировать по metadata_authors
         metadata_groups = {}
