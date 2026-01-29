@@ -927,8 +927,8 @@ class FB2AuthorExtractor:
             pattern_priority = [
                 "Author - Title (Series. service_words)",
                 "Author. Title (Series. service_words)",
-                "Author - Series.Title",
                 "Author. Series. Title",
+                "Author - Series.Title",
                 "Author - Title",
                 "Author. Title",
                 "Title (Author)",
@@ -988,9 +988,9 @@ class FB2AuthorExtractor:
                 "Author - Title (Series. service_words)": r"^(.+?)\s+-\s+(.+?)\s+\((.+)\)$",
                 "Author. Title (Series. service_words)": r"^(.+?)\.\s+(.+?)\s+\((.+)\)$",
                 "Author - Series.Title": r"^(.+?)\s+-\s+(.+)$",
-                "Author. Series. Title": r"^(.+?)\.\s+(.+)$",
+                "Author. Series. Title": r"^(.+?)\.(.+?)\.(.+)$",
                 "Author - Title": r"^(.+?)\s+-\s+(.+)$",
-                "Author. Title": r"^(.+?)\.\s+(.+)$",
+                "Author. Title": r"^(.+?)\.(.+)$",
                 "Title (Author)": r"(.+?)\s+\(([^)]+)\)$",
                 "Title - (Author)": r"(.+?)\s+-\s+\(([^)]+)\)$",
                 "(Author) - Title": r"^\(([^)]+)\)\s+-\s+(.+)$",
@@ -1640,12 +1640,35 @@ class FB2AuthorExtractor:
                 if dot_pos == -1:
                     return abbreviated_author
                 
-                init_part = s[:dot_pos+1]  # "А."
-                surname = s[dot_pos+1:].lstrip()  # "Фамилия"
+                init_part = s[:dot_pos+1]  # "А." или "Вишневский."
+                surname = s[dot_pos+1:].lstrip()  # "Фамилия" или ""
+                
+                # Если surname пустая, значит вся строка - фамилия с точкой
+                if not surname:
+                    # Например "Вишневский." - это фамилия "Вишневский"
+                    surname = init_part.rstrip('.')
+                    init_part = ""
+                elif not surname and len(init_part) > 2:
+                    # Если init_part длиннее инициала, это фамилия
+                    surname = init_part.rstrip('.')
+                    init_part = ""
                 
                 if not surname:
                     return abbreviated_author
             else:
+                return abbreviated_author
+            
+            # Если init_part пустой, значит это просто фамилия без инициала
+            if not init_part:
+                # Просто фамилия, например "Вишневский"
+                surname_lower = surname.lower()
+                if surname_lower in all_authors_map:
+                    full_names = all_authors_map[surname_lower]
+                    if isinstance(full_names, list) and full_names:
+                        # Вернуть первое полное имя
+                        return full_names[0]
+                    elif isinstance(full_names, str):
+                        return full_names
                 return abbreviated_author
             
             # Проверить что первая часть заканчивается точкой
