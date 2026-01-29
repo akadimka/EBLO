@@ -52,6 +52,11 @@ class FB2AuthorExtractor:
         self.female_names = set(name.lower() for name in self.settings.get_female_names())
         self.all_names = self.male_names | self.female_names
         
+        # Загрузить список аббревиатур для исключения из составных фамилий
+        self.abbreviations_preserve_case = set(
+            self.settings.settings.get('abbreviations_preserve_case', [])
+        )
+        
         # Маркеры сборников/антологий
         self.anthology_markers = [
             'сборник', 'антология', 'коллекция', 'хиты', 'лучшее', 'избранное',
@@ -1655,6 +1660,7 @@ class FB2AuthorExtractor:
         Примеры:
         - "Каменские" + "Юрий Каменский; Вера Каменская" → "Юрий Каменский; Вера Каменская"
         - "Зеленский" + "Борис Зеленский; Святослав Логинов" → "Борис Зеленский; Святослав Логинов"
+        - "Логинов СССР" → извлечение "Логинов" (пропуск "СССР" из abbreviations_preserve_case)
         
         Args:
             surname: Фамилия или сокращение (без точек)
@@ -1666,8 +1672,20 @@ class FB2AuthorExtractor:
         if not surname or not metadata_authors:
             return surname
         
+        # Извлечь первое слово из фамилии, пропуская известные аббревиатуры
+        words = surname.split()
+        first_word = None
+        for word in words:
+            if word not in self.abbreviations_preserve_case:
+                first_word = word
+                break
+        
+        if not first_word:
+            # Если все слова - аббревиатуры, использовать исходную фамилию
+            first_word = surname
+        
         # Нормализовать фамилию для сравнения
-        surname_lower = surname.lower().strip()
+        surname_lower = first_word.lower().strip()
         
         # Парсить metadata_authors
         authors_list = [a.strip() for a in metadata_authors.split(';') if a.strip()]
@@ -1681,12 +1699,17 @@ class FB2AuthorExtractor:
             if author_lower.startswith(surname_lower):
                 matching_authors.append(author)
             # Случай 2: Fuzzy match (более гибкий поиск) - для форм слова (Каменские vs Каменский)
-            elif self._fuzzy_match_surname(surname, author) > 0.75:
+            elif self._fuzzy_match_surname(first_word, author) > 0.75:
                 matching_authors.append(author)
         
-        # Если найдены совпадения, вернуть их
+        # Если найдены совпадения, нормализовать и вернуть их
         if matching_authors:
-            return ", ".join(matching_authors)
+            # Нормализовать каждого автора из ИФ в ФИ (если 2 слова)
+            normalized_authors = []
+            for author in matching_authors:
+                normalized = self._normalize_author_if_needed(author)
+                normalized_authors.append(normalized)
+            return ", ".join(normalized_authors)
         
         return surname
     
@@ -1728,6 +1751,43 @@ class FB2AuthorExtractor:
             return ratio
         except:
             return 0.0
+    
+    def _normalize_author_if_needed(self, author: str) -> str:
+        """
+        Нормализовать автора из ИФ (Имя Фамилия) в ФИ (Фамилия Имя).
+        Для одноименных авторов (1 слово) вернуть как есть.
+        
+        Args:
+            author: Имя автора в любом формате
+        
+        Returns:
+            Нормализованное имя ФИ или исходное если нельзя определить
+        """
+        if not author:
+            return author
+        
+        parts = author.strip().split()
+        
+        # Если одно слово - одноименный автор, вернуть как есть
+        if len(parts) == 1:
+            return author
+        
+        # Если два слова - проверить и нормализовать
+        if len(parts) == 2:
+            first_part = parts[0].lower()
+            second_part = parts[1].lower()
+            
+            # Если первое слово - имя (есть в списках), а второе - не имя, то это ИФ формат
+            if first_part in self.all_names and second_part not in self.all_names:
+                # Поменять на ФИ: "Юрий Каменский" → "Каменский Юрий"
+                return f"{parts[1]} {parts[0]}"
+            
+            # Если уже в ФИ формате (первое не имя, второе имя) - вернуть как есть
+            # Если оба - имена или оба - неизвестны - оставить как есть
+            return author
+        
+        # Более 2 слов - оставить как есть (сложные имена)
+        return author
     
     def reload_config(self):
         """Перезагрузить конфигурацию и паттерны."""
