@@ -958,31 +958,40 @@ class RegenCSVService:
         # Раскрыть аббревиатуры в каждой записи
         expanded_count = 0
         for record in records:
-            if not record.proposed_author or ',' not in record.proposed_author:
+            if not record.proposed_author:
                 continue
             
-            # Проверить содержит ли вообще аббревиатуры
-            if '.' not in record.proposed_author:
-                continue
-            
-            # Раскрыть каждого автора в списке
-            authors_list = record.proposed_author.split(',')
+            # Также обрабатываем одиночных авторов, а не только списки с запятыми
+            authors_list = [a.strip() for a in record.proposed_author.split(',')]
             expanded_authors = []
             
             for author in authors_list:
-                author = author.strip()
+                if not author:
+                    continue
                 
-                # Если это аббревиатура (содержит точку), раскрыть
+                original_author = author
+                
+                # Если это аббревиатура (содержит точку), раскрыть её
                 if '.' in author:
                     expanded = self.extractor.expand_abbreviated_author(author, authors_map)
                     if expanded != author:
                         expanded_count += 1
-                    expanded_authors.append(expanded)
+                        expanded_authors.append(expanded)
+                    else:
+                        expanded_authors.append(author)
                 else:
-                    expanded_authors.append(author)
+                    # Попытаться расширить фамилию (без точек) через fuzzy matching
+                    # Если предложенный автор похож на фамилию из metadata, используем metadata авторов
+                    expanded = self.extractor.expand_surname_to_fullname(author, record.metadata_authors)
+                    if expanded != author:
+                        expanded_count += 1
+                        expanded_authors.append(expanded)
+                    else:
+                        expanded_authors.append(author)
             
             # Обновить proposed_author
-            record.proposed_author = ", ".join(expanded_authors)
+            if expanded_authors:
+                record.proposed_author = ", ".join(expanded_authors)
         
         # Track Мах files after
         for record in records:

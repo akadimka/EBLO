@@ -1648,6 +1648,87 @@ class FB2AuthorExtractor:
         except Exception:
             return abbreviated_author
     
+    def expand_surname_to_fullname(self, surname: str, metadata_authors: str) -> str:
+        """
+        Попытаться расширить фамилию (без точек) до полного имени из метаданных.
+        
+        Примеры:
+        - "Каменские" + "Юрий Каменский; Вера Каменская" → "Юрий Каменский; Вера Каменская"
+        - "Зеленский" + "Борис Зеленский; Святослав Логинов" → "Борис Зеленский; Святослав Логинов"
+        
+        Args:
+            surname: Фамилия или сокращение (без точек)
+            metadata_authors: Строка с авторами из метаданных (разделены ;)
+        
+        Returns:
+            Полные имена если совпадение найдено, иначе исходная фамилия
+        """
+        if not surname or not metadata_authors:
+            return surname
+        
+        # Нормализовать фамилию для сравнения
+        surname_lower = surname.lower().strip()
+        
+        # Парсить metadata_authors
+        authors_list = [a.strip() for a in metadata_authors.split(';') if a.strip()]
+        
+        matching_authors = []
+        for author in authors_list:
+            author_lower = author.lower()
+            
+            # Попытаться найти совпадение
+            # Случай 1: "Каменские" совпадает с "Каменск..." (начало фамилии)
+            if author_lower.startswith(surname_lower):
+                matching_authors.append(author)
+            # Случай 2: Fuzzy match (более гибкий поиск) - для форм слова (Каменские vs Каменский)
+            elif self._fuzzy_match_surname(surname, author) > 0.75:
+                matching_authors.append(author)
+        
+        # Если найдены совпадения, вернуть их
+        if matching_authors:
+            return ", ".join(matching_authors)
+        
+        return surname
+    
+    def _fuzzy_match_surname(self, surname: str, fullname: str) -> float:
+        """
+        Fuzzy match для сравнения фамилии и полного имени.
+        
+        Извлекает фамилию из полного имени и сравнивает с исходной фамилией.
+        
+        Args:
+            surname: Фамилия (может быть во множественном числе: "Каменские")
+            fullname: Полное имя (Имя Фамилия): "Юрий Каменский"
+        
+        Returns:
+            Процент сходства (0-1)
+        """
+        try:
+            from difflib import SequenceMatcher
+            
+            surname_lower = surname.lower().strip()
+            fullname_lower = fullname.lower().strip()
+            
+            # Если фамилия есть в полном имени
+            if surname_lower in fullname_lower:
+                return 1.0
+            
+            # Извлечь последнее слово из fullname (обычно фамилия)
+            parts = fullname_lower.split()
+            if parts:
+                fullname_surname = parts[-1]
+                
+                # Сравнить основы фамилий
+                # "Каменские" vs "Каменский" -> "Камен" vs "Камен" (первые 80%)
+                ratio = SequenceMatcher(None, surname_lower, fullname_surname).ratio()
+                return ratio
+            
+            # Вычислить степень сходства по всему имени
+            ratio = SequenceMatcher(None, surname_lower, fullname_lower).ratio()
+            return ratio
+        except:
+            return 0.0
+    
     def reload_config(self):
         """Перезагрузить конфигурацию и паттерны."""
         self.settings.load()
