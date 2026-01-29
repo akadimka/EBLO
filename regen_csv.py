@@ -161,6 +161,17 @@ class RegenCSVService:
                             all_series_authors.add(author_clean)
             except Exception:
                 pass
+        
+        # Также добавить proposed_author из всех файлов
+        for fb2_path in fb2_files:
+            try:
+                # Get proposed_author from filename parsing
+                proposed_author = self.extractor.extract_author_from_filename(fb2_path)
+                if proposed_author:
+                    all_series_authors.add(proposed_author)
+            except Exception:
+                pass
+        
         all_series_authors_str = "; ".join(sorted(all_series_authors)) if all_series_authors else ""
         if all_series_authors_str:
             self.logger.log(f"[PASS 1.5] Найдено {len(all_series_authors)} уникальных авторов: {all_series_authors_str[:100]}...")
@@ -906,15 +917,21 @@ class RegenCSVService:
         
         return records
     
-    def _build_authors_map(self, records: List[BookRecord]) -> Dict[str, str]:
+    def _build_authors_map(self, records: List[BookRecord]) -> Dict[str, list]:
         """
-        Построить словарь фамилия -> полное имя из всех предложенных авторов.
+        Построить словарь фамилия -> [список полных имён] из всех предложенных авторов.
+        
+        Ключ: фамилия (в нижнем регистре)
+        Значение: СПИСОК полных имён (Фамилия Имя) с этой фамилией
+        
+        Это позволяет расширить "А. Живой" -> поискать все имена с фамилией Живой ->
+        найти то, что начинается с "А" (например "Александр Живой")
         
         Args:
             records: Список BookRecord
         
         Returns:
-            Словарь {фамилия.lower(): полное_имя}
+            Словарь {фамилия.lower(): [полное_имя1, полное_имя2, ...]}
         """
         authors_map = {}
         
@@ -925,6 +942,31 @@ class RegenCSVService:
             # Парсить полные имена (не аббревиатуры)
             if '.' in record.proposed_author:
                 # Пропустить аббревиатуры типа "А.Фамилия"
+                # Но добавить нормализованную форму
+                try:
+                    parts = record.proposed_author.split()
+                    if len(parts) == 2:
+                        init_part = parts[0]
+                        surname = parts[1]
+                    elif len(parts) == 1:
+                        dot_pos = record.proposed_author.find('.')
+                        if dot_pos != -1:
+                            init_part = record.proposed_author[:dot_pos+1]
+                            surname = record.proposed_author[dot_pos+1:].lstrip()
+                        else:
+                            surname = ''
+                    else:
+                        surname = ''
+                    if init_part.endswith('.') and surname:
+                        first_letter = init_part[0].upper()
+                        surname_lower = surname.lower()
+                        normalized = f"{surname} {first_letter}."
+                        if surname_lower not in authors_map:
+                            authors_map[surname_lower] = []
+                        if normalized not in authors_map[surname_lower]:
+                            authors_map[surname_lower].append(normalized)
+                except:
+                    pass
                 continue
             
             # Для каждого автора из proposed_author
@@ -937,17 +979,51 @@ class RegenCSVService:
                 parts = author_part.split()
                 if len(parts) >= 2:
                     surname = parts[0].lower()
-                    # Сохранить полное имя
-                    authors_map[surname] = author_part
+                    # Сохранить полное имя в списке для этой фамилии
+                    if surname not in authors_map:
+                        authors_map[surname] = []
+                    if author_part not in authors_map[surname]:
+                        authors_map[surname].append(author_part)
         
-        # Также собрать из metadata_authors (формат "Имя Фамилия")
+        # Также собрать из metadata_authors (формат "Имя Фамилия" или "А. Фамилия")
         for record in records:
             if not record.metadata_authors:
                 continue
             
             for author_part in record.metadata_authors.split(';'):
                 author_part = author_part.strip()
-                if not author_part or '.' in author_part:
+                if not author_part:
+                    continue
+                
+                # Проверить: это аббревиатура типа "А. Фамилия"?
+                # Сокращённую форму НЕ добавляем как полное имя, но можем использовать её для извлечения фамилии
+                if '.' in author_part:
+                    # Это сокращённая форма типа "А. Живой"
+                    # Попробовать извлечь фамилию и добавить нормализованную форму
+                    try:
+                        parts = author_part.split()
+                        if len(parts) == 2:
+                            init_part = parts[0]
+                            surname = parts[1]
+                        elif len(parts) == 1:
+                            dot_pos = author_part.find('.')
+                            if dot_pos != -1:
+                                init_part = author_part[:dot_pos+1]
+                                surname = author_part[dot_pos+1:].lstrip()
+                            else:
+                                surname = ''
+                        else:
+                            surname = ''
+                        if init_part.endswith('.') and surname:
+                            first_letter = init_part[0].upper()
+                            surname_lower = surname.lower()
+                            normalized = f"{surname} {first_letter}."
+                            if surname_lower not in authors_map:
+                                authors_map[surname_lower] = []
+                            if normalized not in authors_map[surname_lower]:
+                                authors_map[surname_lower].append(normalized)
+                    except:
+                        pass
                     continue
                 
                 # Парсить "Имя Фамилия" и преобразовать в "Фамилия Имя"
@@ -960,13 +1036,16 @@ class RegenCSVService:
                     
                     surname_lower = surname.lower()
                     
-                    # Если фамилия уже есть, не перезаписываем (proposed_author имеет приоритет)
+                    # Добавить в список полных имён для этой фамилии
+                    full_name = f"{surname} {first_name}"
                     if surname_lower not in authors_map:
-                        # Попробовать собрать как "Фамилия Имя"
-                        full_name = f"{surname} {first_name}"
-                        authors_map[surname_lower] = full_name
+                        authors_map[surname_lower] = []
+                    if full_name not in authors_map[surname_lower]:
+                        authors_map[surname_lower].append(full_name)
         
-        self.logger.log(f"Построен словарь из {len(authors_map)} авторов: {list(authors_map.keys())[:5]}...")
+        self.logger.log(f"Построен словарь из {len(authors_map)} фамилий: {list(authors_map.keys())[:5]}...")
+        for surname, names in list(authors_map.items())[:3]:
+            self.logger.log(f"  {surname}: {names}")
         return authors_map
     
     def _expand_abbreviated_authors(self, records: List[BookRecord]) -> List[BookRecord]:
@@ -996,7 +1075,12 @@ class RegenCSVService:
             self.logger.log("Словарь полных имён пуст, раскрытие невозможно")
             return records
         
-        self.logger.log(f"Построен словарь из {len(authors_map)} авторов для раскрытия")
+        # DEBUG: Print map to stdout
+        print(f"[STDOUT DEBUG] Authors map built with {len(authors_map)} surnames")
+        if "живой" in authors_map:
+            print(f"[STDOUT DEBUG] Found 'живой': {authors_map['живой']}")
+        
+        self.logger.log(f"Построен словарь из {len(authors_map)} фамилий для раскрытия")
         
         # Раскрыть аббревиатуры в каждой записи
         expanded_count = 0
@@ -1081,6 +1165,8 @@ class RegenCSVService:
                             for r in records_in_folder)
             if has_dataset:
                 dataset_roots.add(folder_path)
+        
+        print(f"[DEBUG] dataset_roots = {dataset_roots}")
         
         # Для каждой корневой папки датасета - найти консенсус по ВСЕМ файлам в ней
         # (включая подпапки)
@@ -1177,9 +1263,22 @@ class RegenCSVService:
             if len(author_counts) <= 1:
                 continue
             
-            # Консенсус
-            consensus_author = max(author_counts.items(), key=lambda x: x[1])[0]
-            self.logger.log(f"[CONSENSUS] metadata='{metadata_key}': {author_counts}")
+            # Консенсус: выбрать автора с максимальным количеством, предпочитая полные имена (без точек)
+            max_count = max(author_counts.values())
+            candidates = [author for author, count in author_counts.items() if count == max_count]
+            
+            # Предпочесть полные имена (без точек)
+            full_candidates = [c for c in candidates if '.' not in c]
+            if full_candidates:
+                consensus_author = full_candidates[0]
+            else:
+                consensus_author = candidates[0]
+            
+            self.logger.log(f"[CONSENSUS] metadata='{metadata_key}': {author_counts}, consensus='{consensus_author}'")
+            
+            # DEBUG for Небесный король
+            if metadata_key == "А. Живой":
+                print(f"[CONSENSUS DEBUG] metadata='А. Живой', author_counts={author_counts}, consensus={consensus_author}")
             
             # Применить
             for record in group_records:
@@ -1207,6 +1306,11 @@ class RegenCSVService:
         """
         try:
             import csv
+            # DEBUG
+            for record in records:
+                if 'Живой' in record.file_path:
+                    print(f"[SAVE DEBUG] {record.file_path}: proposed_author = {record.proposed_author}")
+            
             # Используем UTF-8 без BOM для совместимости
             with open(output_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)

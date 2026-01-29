@@ -229,16 +229,43 @@ class FB2AuthorExtractor:
                         expanded_author = self._expand_surnames_from_metadata(author, metadata_author)
                     
                     if expanded_author:
-                        # Успешно расширили - используем расширённую версию
-                        normalized = self._normalize_author_format(expanded_author)
-                        if normalized:
-                            return normalized, 'filename'
+                        if metadata_author:
+                            if expanded_author in metadata_author or metadata_author in expanded_author:
+                                normalized = self._normalize_author_format(expanded_author)
+                                if normalized:
+                                    return normalized, 'filename'
+                                else:
+                                    return expanded_author, 'filename'
+                            elif author in metadata_author or metadata_author in author:
+                                normalized = self._normalize_author_format(metadata_author)
+                                if normalized:
+                                    return normalized, 'metadata'
+                                else:
+                                    return metadata_author, 'metadata'
+                            else:
+                                normalized = self._normalize_author_format(expanded_author)
+                                if normalized:
+                                    return normalized, 'filename'
+                                else:
+                                    return expanded_author, 'filename'
                         else:
-                            # Нормализация не сработала, но расширение есть
-                            return expanded_author, 'filename'
+                            normalized = self._normalize_author_format(expanded_author)
+                            if normalized:
+                                return normalized, 'filename'
+                            else:
+                                return expanded_author, 'filename'
                     else:
-                        # Расширение не сработало - возвращаем как есть
-                        return author, 'filename'
+                        if metadata_author:
+                            if author in metadata_author or metadata_author in author:
+                                normalized = self._normalize_author_format(metadata_author)
+                                if normalized:
+                                    return normalized, 'metadata'
+                                else:
+                                    return metadata_author, 'metadata'
+                            else:
+                                return author, 'filename'
+                        else:
+                            return author, 'filename'
             
             except Exception as e:
                 pass  # Продолжаем к следующему источнику
@@ -1577,7 +1604,7 @@ class FB2AuthorExtractor:
         except Exception:
             return ""
     
-    def expand_abbreviated_author(self, abbreviated_author: str, all_authors_map: Dict[str, str]) -> str:
+    def expand_abbreviated_author(self, abbreviated_author: str, all_authors_map: Dict) -> str:
         """
         Раскрыть сокращённого автора (А.Фамилия) до полного имени.
         
@@ -1585,18 +1612,45 @@ class FB2AuthorExtractor:
         1. Парсить "А.Фамилия" - может быть как "А. Фамилия" так и "А.Фамилия"
         2. Извлечь букву инициала и фамилию
         3. Поискать в all_authors_map по фамилии как ключу
-        4. Если найдено и инициал совпадает - вернуть полное имя
-        5. Если нет - оставить как было
+        4. all_authors_map[фамилия] = СПИСОК полных имён
+        5. Найти первое имя, которое начинается с инициала
+        6. Если найдено - вернуть полное имя
+        7. Если нет - оставить как было
         
         Args:
             abbreviated_author: Сокращённое имя типа "А.Фамилия" или "А. Фамилия"
-            all_authors_map: Словарь {фамилия.lower(): полное_имя (Фамилия Имя)}
+            all_authors_map: Словарь {фамилия.lower(): [полное_имя1, полное_имя2, ...]} или строка с авторами
         
         Returns:
             Полное имя если найдено, иначе исходное
         """
+        if isinstance(all_authors_map, str):
+            # Handle string input: ; separated full names
+            all_authors = [a.strip() for a in all_authors_map.split(';') if a.strip()]
+            if '.' in abbreviated_author:
+                # Parse surname from abbreviated
+                parts = abbreviated_author.split()
+                if len(parts) >= 1:
+                    surname = parts[-1].lower()
+                    for full in all_authors:
+                        if surname in full.lower() and '.' not in full and len(full.split()) >= 2:
+                            return full
+            else:
+                # Abbreviated is surname, find full containing it
+                surname = abbreviated_author.lower()
+                for full in all_authors:
+                    if surname in full.lower() and '.' not in full and len(full.split()) >= 2:
+                        return full
+            return abbreviated_author
+        
+        print(f"[EXPAND] Called with: {abbreviated_author}", flush=True)
         if not abbreviated_author or '.' not in abbreviated_author:
             return abbreviated_author
+        
+        # DEBUG for testing
+        is_debug = "Живой" in abbreviated_author
+        if is_debug:
+            print(f"[EXPAND DEBUG] Processing: {abbreviated_author}", flush=True)
         
         try:
             # Парсить "А.Фамилия" или "А. Фамилия"
@@ -1630,27 +1684,54 @@ class FB2AuthorExtractor:
             
             # Получить первую букву инициала
             first_letter = init_part[0].upper()
+            if is_debug:
+                print(f"[EXPAND DEBUG]   init_part={init_part}, surname={surname}, first_letter={first_letter}")
             
             # Поискать в словаре по фамилии как ключу
             surname_lower = surname.lower()
             
-            # Попытка 1: найти точное совпадение фамилии в словаре (ключи - фамилии)
+            # Попытка 1: найти точное совпадение фамилии в словаре
             if surname_lower in all_authors_map:
-                full_name = all_authors_map[surname_lower]
+                full_names = all_authors_map[surname_lower]
+                if is_debug:
+                    print(f"[EXPAND DEBUG]   Found in map: {full_names}")
                 
-                # Парсить полное имя "Фамилия Имя"
-                full_parts = full_name.split()
-                if len(full_parts) >= 2:
-                    first_name = full_parts[1]  # Второе слово - имя
-                    
-                    # Проверить совпадение первой буквы имени с инициалом
-                    if first_name and first_name[0].upper() == first_letter:
-                        return full_name
+                # all_authors_map[фамилия] теперь СПИСОК полных имён
+                if isinstance(full_names, list):
+                    # Искать первое имя, которое начинается с нужной буквы
+                    for full_name in full_names:
+                        # Парсить полное имя "Фамилия Имя"
+                        full_parts = full_name.split()
+                        if len(full_parts) >= 2:
+                            first_name = full_parts[1]  # Второе слово - имя
+                            if is_debug:
+                                print(f"[EXPAND DEBUG]   Checking {full_name}: first_name={first_name}, first_name[0]={first_name[0]}")
+                            
+                            # Проверить совпадение первой буквы имени с инициалом
+                            if first_name and first_name[0].upper() == first_letter:
+                                if is_debug:
+                                    print(f"[EXPAND DEBUG]   MATCH! Returning {full_name}")
+                                return full_name
+                else:
+                    # На случай если это ещё старый формат (строка вместо списка)
+                    full_name = full_names
+                    full_parts = full_name.split()
+                    if len(full_parts) >= 2:
+                        first_name = full_parts[1]
+                        if first_name and first_name[0].upper() == first_letter:
+                            return full_name
+            else:
+                if is_debug:
+                    print(f"[EXPAND DEBUG]   NOT found in map. Available keys: {list(all_authors_map.keys())[:20]}")
             
             # Если не найдено - вернуть как было
+            if is_debug:
+                print(f"[EXPAND DEBUG]   No match, returning as-is: {abbreviated_author}")
             return abbreviated_author
         
-        except Exception:
+        except Exception as e:
+            if is_debug:
+                print(f"[EXPAND DEBUG]   Exception: {e}")
             return abbreviated_author
     
     def expand_surname_to_fullname(self, surname: str, metadata_authors: str) -> str:
@@ -1757,6 +1838,9 @@ class FB2AuthorExtractor:
         Нормализовать автора из ИФ (Имя Фамилия) в ФИ (Фамилия Имя).
         Для одноименных авторов (1 слово) вернуть как есть.
         
+        Важно: Аббревиатуры типа "А. Живой" НЕ упрощаются! Они остаются как есть
+        для раскрытия на этапе expand_abbreviated_authors.
+        
         Args:
             author: Имя автора в любом формате
         
@@ -1777,10 +1861,18 @@ class FB2AuthorExtractor:
             first_part = parts[0].lower()
             second_part = parts[1].lower()
             
+            # Случай 1: "Юрий Каменский" → "Каменский Юрий" (полное имя + фамилия)
             # Если первое слово - имя (есть в списках), а второе - не имя, то это ИФ формат
             if first_part in self.all_names and second_part not in self.all_names:
-                # Поменять на ФИ: "Юрий Каменский" → "Каменский Юрий"
+                # Поменять на ФИ
                 return f"{parts[1]} {parts[0]}"
+            
+            # Случай 2: "А. Живой" → ОСТАВИТЬ КАК ЕСТЬ
+            # Аббревиатуры будут раскрыты на этапе expand_abbreviated_authors
+            # через поиск по словарю авторов
+            if "." in first_part and len(first_part) <= 2:
+                # Это инициал, оставить как есть для раскрытия
+                return author
             
             # Если уже в ФИ формате (первое не имя, второе имя) - вернуть как есть
             # Если оба - имена или оба - неизвестны - оставить как есть
