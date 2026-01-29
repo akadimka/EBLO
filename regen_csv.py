@@ -703,6 +703,14 @@ class RegenCSVService:
         self.logger.log(f"[REGEN]   DEBUG: About to create BookRecord with proposed_author={repr(proposed_author)}, author_source={repr(author_source)}")
         if is_mah_file:
             self.logger.log(f"[REGEN]   *** MAH FILE RECORD: proposed_author={repr(proposed_author)}, author_source={repr(author_source)}")
+        
+        # Финальная нормализация автора
+        if proposed_author:
+            original_proposed = proposed_author
+            proposed_author = self.extractor._normalize_author_format(proposed_author)
+            if original_proposed != proposed_author:
+                self.logger.log(f"[REGEN]   Финальная нормализация автора: '{original_proposed}' -> '{proposed_author}'")
+        
         record = BookRecord(
             file_path=str(fb2_path),
             metadata_authors=metadata_authors,
@@ -716,6 +724,20 @@ class RegenCSVService:
         )
         
         return record
+    
+    def _normalize_title(self, title: str) -> str:
+        """
+        Нормализовать название книги (замена ё -> е).
+        
+        Args:
+            title: Исходное название книги
+        
+        Returns:
+            Нормализованное название
+        """
+        if not title:
+            return title
+        return title.replace('ё', 'е').replace('Ё', 'Е')
     
     def _extract_fb2_metadata(self, fb2_path: Path) -> tuple:
         """
@@ -817,6 +839,9 @@ class RegenCSVService:
                 authors_str = self._apply_surname_conversions(authors_str)
                 self.logger.log(f"[REGEN]   После конвертации фамилий: {authors_str}")
             
+            # Нормализовать название книги
+            title = self._normalize_title(title)
+            
             return authors_str, title or "", genre or ""
         
         except Exception as e:
@@ -914,6 +939,14 @@ class RegenCSVService:
         
         if conversions_applied > 0:
             self.logger.log(f"[PASS 5] Всего применено конвертаций: {conversions_applied}")
+        
+        # Финальная нормализация всех proposed_author после конвертаций
+        for record in records:
+            if record.proposed_author and record.proposed_author != "Сборник":
+                original = record.proposed_author
+                record.proposed_author = self.extractor._normalize_author_format(record.proposed_author)
+                if original != record.proposed_author:
+                    self.logger.log(f"[PASS 5] Финальная нормализация: '{original}' -> '{record.proposed_author}' для {record.file_path}")
         
         return records
     
@@ -1215,6 +1248,8 @@ class RegenCSVService:
                 folder_authors[author] = folder_authors.get(author, 0) + 1
             
             consensus_author = max(folder_authors.items(), key=lambda x: x[1])[0]
+            # Нормализовать консенсус автора
+            consensus_author = self.extractor._normalize_author_format(consensus_author) if consensus_author else ""
             self.logger.log(f"[CONSENSUS] dataset_root='{Path(root_folder).name}': найден консенсус: '{consensus_author}'")
             
             # ПРИМЕНИТЬ КОНСЕНСУС КО ВСЕМ файлам в корневой папке И ПОДПАПКАХ
@@ -1283,6 +1318,9 @@ class RegenCSVService:
                 consensus_author = full_candidates[0]
             else:
                 consensus_author = candidates[0]
+            
+            # Нормализовать консенсус автора
+            consensus_author = self.extractor._normalize_author_format(consensus_author) if consensus_author else ""
             
             self.logger.log(f"[CONSENSUS] metadata='{metadata_key}': {author_counts}, consensus='{consensus_author}'")
             
