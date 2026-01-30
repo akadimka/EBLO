@@ -223,6 +223,12 @@ class RegenCSVService:
                 record.proposed_author = 'Сборник'
                 record.author_source = 'metadata'
 
+        # Финальный fallback: если proposed_author пустой, использовать metadata_authors
+        for record in records:
+            if not record.proposed_author and record.metadata_authors:
+                record.proposed_author = record.metadata_authors
+                record.author_source = 'metadata'
+
         # Сохранить CSV если путь указан
         if output_csv_path:
             self._save_csv(records, output_csv_path)
@@ -1116,7 +1122,17 @@ class RegenCSVService:
                         expanded_count += 1
                         expanded_authors.append(expanded)
                     else:
-                        expanded_authors.append(author)
+                        # Попытка с добавлением пробела после точки
+                        spaced_author = author.replace('.', '. ')
+                        if spaced_author != author:
+                            expanded_spaced = self.extractor.expand_abbreviated_author(spaced_author, authors_map)
+                            if expanded_spaced != spaced_author:
+                                expanded_count += 1
+                                expanded_authors.append(expanded_spaced)
+                            else:
+                                expanded_authors.append(author)
+                        else:
+                            expanded_authors.append(author)
                 else:
                     # Попытаться расширить фамилию (без точек) через fuzzy matching
                     # Если предложенный автор похож на фамилию из metadata, используем metadata авторов
@@ -1199,6 +1215,9 @@ class RegenCSVService:
             all_root_records = []
             root_path = Path(root_folder)
             
+            # Добавить записи из корневой папки
+            all_root_records.extend(folder_to_records.get(root_folder, []))
+            
             for folder_path, records_in_folder in folder_to_records.items():
                 folder_path_obj = Path(folder_path)
                 try:
@@ -1220,8 +1239,12 @@ class RegenCSVService:
             # Найти консенсус
             folder_authors = {}
             for record in folder_dataset_records:
-                author = record.proposed_author or ""
-                folder_authors[author] = folder_authors.get(author, 0) + 1
+                author = record.proposed_author
+                if author:
+                    folder_authors[author] = folder_authors.get(author, 0) + 1
+            
+            if not folder_authors:
+                continue
             
             consensus_author = max(folder_authors.items(), key=lambda x: x[1])[0]
             # Нормализовать консенсус автора

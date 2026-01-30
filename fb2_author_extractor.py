@@ -814,19 +814,14 @@ class FB2AuthorExtractor:
                 fb2_path = Path(fb2_path)
             
             filename = fb2_path.stem  # Имя без расширения
-            print(f"DEBUG: Processing filename: {repr(filename)}")
             
             # ПОПЫТКА 1: Использовать динамический pattern matching
             pattern_dict = self._select_best_pattern(filename, pattern_type='files')
-            print(f"DEBUG: pattern_dict: {pattern_dict}")
             
             if pattern_dict:
                 # Найден подходящий паттерн - извлечь автора
                 author = self._extract_author_from_filename_with_pattern(filename, pattern_dict)
-                print(f"DEBUG: author from pattern: {repr(author)}")
-                valid = self._is_valid_author_candidate(author)
-                print(f"DEBUG: is_valid_author_candidate: {valid}")
-                if author and valid:
+                if author and self._is_valid_author_candidate(author):
                     # Получено ВАЛИДНОЕ значение из паттерна
                     # Если содержит инициалы "А.Фамилия", попробовать расширить из метаданных
                     if re.match(r'^[А-Яа-я]\.[А-Яа-я]', author):
