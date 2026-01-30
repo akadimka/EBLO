@@ -214,6 +214,15 @@ class RegenCSVService:
         self.logger.log("[PASS 5] Применение конвертаций фамилий...")
         records = self._apply_surname_conversions_to_records(records)
         
+        # PASS 6: Гарантировать, что у антологий всегда 'Сборник' как proposed_author
+        for record in records:
+            # Проверка по filename и количеству авторов
+            filename = Path(record.file_path).stem.strip().lower()
+            author_count = len([a.strip() for a in (record.metadata_authors or '').split(';') if a.strip()])
+            if hasattr(self.extractor, 'is_anthology') and self.extractor.is_anthology(filename, author_count):
+                record.proposed_author = 'Сборник'
+                record.author_source = 'metadata'
+
         # Сохранить CSV если путь указан
         if output_csv_path:
             self._save_csv(records, output_csv_path)
@@ -611,7 +620,7 @@ class RegenCSVService:
             BookRecord с информацией из файла
         """
         # Получить имя файла без расширения и пути
-        filename = fb2_path.stem
+        filename = fb2_path.stem.strip().lower()
         self.logger.log(f"[REGEN] Обработка файла: {fb2_path.name}")
         
         # Получить информацию из анализа иерархии
@@ -661,23 +670,16 @@ class RegenCSVService:
         # 2. И/или авторов > 2 в метаданных (признак множества авторов)
         author_count = len([a.strip() for a in metadata_authors.split(';') if a.strip()])
         is_anthology = self.extractor.is_anthology(filename, author_count)
-        
+
         # Проверить: есть ли явный автор в названии файла?
         # Если filename/folder source найден, это может быть либо явный автор, либо неправильный парс сборника
         has_explicit_author_in_filename = author_source in ['filename', 'folder', 'folder_dataset']
-        
-        # ИСПРАВЛЕНИЕ: Если это сборник и авторов > 2, это сборник НЕЗАВИСИМО от того
-        # был ли распарсен "автор" из имени файла (это может быть неправильный парс названия сборника)
-        if is_anthology and author_count > 2:
-            # Это истинная антология: есть маркер сборника И много авторов в метаданных
-            proposed_author = "Сборник"
-            author_source = "metadata"  # Источник - метаданные (множество авторов)
-            self.logger.log(f"[REGEN]   Обнаружена истинная антология ({author_count} авторов, is_anthology={is_anthology})")
-        elif is_anthology and not has_explicit_author_in_filename:
-            # Маркер сборника, но авторов <= 2 И нет явного автора - это сборник одного автора?
+
+        # Явно: если это сборник по маркеру, всегда ставим "Сборник" как автора
+        if is_anthology:
             proposed_author = "Сборник"
             author_source = "metadata"
-            self.logger.log(f"[REGEN]   Обнаружен сборник с маркером (авторов: {author_count})")
+            self.logger.log(f"[REGEN]   Обнаружена антология (is_anthology={is_anthology}, авторов: {author_count})")
         
         # Применить конвертации фамилий если необходимо
         if proposed_author and proposed_author != "Сборник" and self.surname_conversions:
@@ -1059,9 +1061,7 @@ class RegenCSVService:
                     if full_name not in authors_map[surname_lower]:
                         authors_map[surname_lower].append(full_name)
         
-        self.logger.log(f"Построен словарь из {len(authors_map)} фамилий: {list(authors_map.keys())[:5]}...")
-        for surname, names in list(authors_map.items())[:3]:
-            self.logger.log(f"  {surname}: {names}")
+        # Debug output removed
         return authors_map
     
     def _expand_abbreviated_authors(self, records: List[BookRecord]) -> List[BookRecord]:
@@ -1226,22 +1226,23 @@ class RegenCSVService:
             consensus_author = max(folder_authors.items(), key=lambda x: x[1])[0]
             # Нормализовать консенсус автора
             consensus_author = self.extractor._normalize_author_format(consensus_author) if consensus_author else ""
-            self.logger.log(f"[CONSENSUS] dataset_root='{Path(root_folder).name}': найден консенсус: '{consensus_author}'")
+            # Debug output removed
             
             # ПРИМЕНИТЬ КОНСЕНСУС КО ВСЕМ файлам в корневой папке И ПОДПАПКАХ
             for record in all_root_records:
+                # Do not overwrite anthology author
+                if record.proposed_author == "Сборник":
+                    continue
                 if record.proposed_author != consensus_author:
                     old_author = record.proposed_author
                     old_source = record.author_source
-                    
                     if old_source.startswith("folder_dataset"):
                         new_source = "folder_dataset_cons"
                     else:
                         new_source = "folder_dataset"
-                    
                     record.author_source = new_source
                     record.proposed_author = consensus_author
-                    self.logger.log(f"  [CHANGED] '{old_author}' ({old_source}) -> '{consensus_author}' ({new_source})")
+                    # Debug output removed
                     consensus_count += 1
             
             # Отметить все папки в этой иерархии как обработанные
@@ -1298,22 +1299,22 @@ class RegenCSVService:
             # Нормализовать консенсус автора
             consensus_author = self.extractor._normalize_author_format(consensus_author) if consensus_author else ""
             
-            self.logger.log(f"[CONSENSUS] metadata='{metadata_key}': {author_counts}, consensus='{consensus_author}'")
+            # Debug output removed
             
             # Применить
             for record in group_records:
-                if record.author_source in ['filename', 'folder']:
-                    self.logger.log(f"  [PROTECTED] '{record.proposed_author}'")
+                # Do not overwrite anthology author
+                if record.proposed_author == "Сборник":
                     continue
-                
+                if record.author_source in ['filename', 'folder']:
+                    continue
                 if record.proposed_author != consensus_author:
                     old_author = record.proposed_author
                     record.author_source = f"{record.author_source}_cons"
                     record.proposed_author = consensus_author
-                    self.logger.log(f"  [CHANGED] '{old_author}' -> '{consensus_author}'")
                     consensus_count += 1
         
-        self.logger.log(f"Применен консенсус: {consensus_count} записей исправлено")
+        # Debug output removed
         return records
     
     def _save_csv(self, records: List[BookRecord], output_path: str):
