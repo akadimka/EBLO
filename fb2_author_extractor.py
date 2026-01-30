@@ -50,7 +50,6 @@ class FB2AuthorExtractor:
         # Загрузить списки имен для определения порядка слов
         self.male_names = set(name.lower() for name in self.settings.get_male_names())
         self.female_names = set(name.lower() for name in self.settings.get_female_names())
-        self.all_names = self.male_names | self.female_names
         
         # Загрузить список аббревиатур для исключения из составных фамилий
         self.abbreviations_preserve_case = set(
@@ -371,7 +370,14 @@ class FB2AuthorExtractor:
             # Разбить на слова
             words = author_name.split()
             
-            # Нужно ровно 2 слова
+            # Если одно слово и оно есть в списке male_names или female_names, разрешить
+            if len(words) == 1:
+                word_lower = words[0].lower()
+                if word_lower in self.male_names or word_lower in self.female_names:
+                    return words[0]
+                # Можно добавить отдельный список псевдонимов, если нужно
+                return ""
+            # Нужно ровно 2 слова для обычных случаев
             if len(words) != 2:
                 return ""
             
@@ -403,9 +409,9 @@ class FB2AuthorExtractor:
             word1_lower = cleaned_words[0].lower()
             word2_lower = cleaned_words[1].lower()
             
-            word1_is_name = word1_lower in self.all_names
-            word2_is_name = word2_lower in self.all_names
-            
+            word1_is_name = word1_lower in self.male_names or word1_lower in self.female_names
+            word2_is_name = word2_lower in self.male_names or word2_lower in self.female_names
+
             # Если оба или ни один не в списке имен - оставить как есть
             if word1_is_name and not word2_is_name:
                 # Первое слово - имя, второе - фамилия
@@ -808,14 +814,19 @@ class FB2AuthorExtractor:
                 fb2_path = Path(fb2_path)
             
             filename = fb2_path.stem  # Имя без расширения
+            print(f"DEBUG: Processing filename: {repr(filename)}")
             
             # ПОПЫТКА 1: Использовать динамический pattern matching
             pattern_dict = self._select_best_pattern(filename, pattern_type='files')
+            print(f"DEBUG: pattern_dict: {pattern_dict}")
             
             if pattern_dict:
                 # Найден подходящий паттерн - извлечь автора
                 author = self._extract_author_from_filename_with_pattern(filename, pattern_dict)
-                if author and self._is_valid_author_candidate(author):
+                print(f"DEBUG: author from pattern: {repr(author)}")
+                valid = self._is_valid_author_candidate(author)
+                print(f"DEBUG: is_valid_author_candidate: {valid}")
+                if author and valid:
                     # Получено ВАЛИДНОЕ значение из паттерна
                     # Если содержит инициалы "А.Фамилия", попробовать расширить из метаданных
                     if re.match(r'^[А-Яа-я]\.[А-Яа-я]', author):
@@ -1835,7 +1846,8 @@ class FB2AuthorExtractor:
             
             # Случай 1: "Юрий Каменский" → "Каменский Юрий" (полное имя + фамилия)
             # Если первое слово - имя (есть в списках), а второе - не имя, то это ИФ формат
-            if first_part in self.all_names and second_part not in self.all_names:
+            all_names = self.male_names | self.female_names
+            if first_part in all_names and second_part not in all_names:
                 # Поменять на ФИ
                 return f"{parts[1]} {parts[0]}"
             
