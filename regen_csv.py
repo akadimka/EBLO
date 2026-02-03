@@ -698,7 +698,9 @@ class RegenCSVService:
         # Финальная нормализация автора
         if proposed_author:
             original_proposed = proposed_author
-            proposed_author = self.extractor._normalize_author_format(proposed_author)
+            # Используем _normalize_author_if_needed вместо _normalize_author_format
+            # чтобы избежать потери авторов, которые не поддерживают нормализацию (например, "А.Михайловский, А.Харников")
+            proposed_author = self.extractor._normalize_author_if_needed(proposed_author)
             if original_proposed != proposed_author:
                 self.logger.log(f"[REGEN]   Финальная нормализация автора: '{original_proposed}' -> '{proposed_author}'")
         
