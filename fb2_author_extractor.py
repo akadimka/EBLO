@@ -802,9 +802,9 @@ class FB2AuthorExtractor:
         Если значение в черном списке или не выглядит как имя автора - отбрасывать.
         
         ПОРЯДОК ПОПЫТОК:
-        1. Попробовать динамический pattern matching
-        2. Если получилось невалидное значение - отбросить
-        3. Попробовать скобки "(Автор)" в конце
+        1. СНАЧАЛА: Проверить явный автор в скобках "(Автор)" в конце - это самый явный маркер!
+        2. Попробовать динамический pattern matching
+        3. Если получилось невалидное значение - отбросить
         4. Если скобки содержат невалидное значение - отбросить  
         5. Fallback на author_processor
         """
@@ -815,7 +815,22 @@ class FB2AuthorExtractor:
             
             filename = fb2_path.stem  # Имя без расширения
             
-            # ПОПЫТКА 1: Использовать динамический pattern matching
+            # ПОПЫТКА 1 (ПРИОРИТЕТ): Проверить явный автор в скобках "(Автор)" в конце имени файла
+            # Это ЯВНЫЙ маркер, поэтому проверяем его ДО pattern matching
+            bracket_patterns = [
+                r'\(([^)]+)\)(?:\s*$)',  # В конце: "... (Автор)"
+            ]
+            
+            for pattern in bracket_patterns:
+                match = re.search(pattern, filename)
+                if match:
+                    author_candidate = match.group(1).strip()
+                    # Проверить валидность кандидата
+                    if author_candidate and self._is_valid_author_candidate(author_candidate):
+                        return author_candidate
+                    # Если невалидный - продолжаем поиск
+            
+            # ПОПЫТКА 2: Использовать динамический pattern matching
             pattern_dict = self._select_best_pattern(filename, pattern_type='files')
             
             if pattern_dict:
@@ -838,20 +853,6 @@ class FB2AuthorExtractor:
                                 return all_metadata_authors
                     return author
                 # Если значение невалидное, не возвращаем, продолжаем к следующему источнику
-            
-            # ПОПЫТКА 2: Проверить явный автор в скобках "(Автор)" в КОНЦЕ имени файла
-            bracket_patterns = [
-                r'\(([^)]+)\)(?:\s*$)',  # В конце: "... (Автор)"
-            ]
-            
-            for pattern in bracket_patterns:
-                match = re.search(pattern, filename)
-                if match:
-                    author_candidate = match.group(1).strip()
-                    # Проверить валидность кандидата
-                    if author_candidate and self._is_valid_author_candidate(author_candidate):
-                        return author_candidate
-                    # Если невалидный - продолжаем поиск
             
             # ПОПЫТКА 3: Fallback на author_processor
             result = self.author_processor.extract_author_from_filename(filename)
