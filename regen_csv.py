@@ -483,12 +483,16 @@ class RegenCSVService:
                         self.logger.log(f"[HIERARCHY] Уровень {depth}: Паттерн найден но не валиден '{author_raw}' (не в all_names)")
                 else:
                     # Нет паттерна - проверить если это простой формат "Фамилия Имя"
-                    # Попробовать использовать имя папки как есть если оно валидно
-                    if self._validate_author_name(folder_name):
-                        self.logger.log(f"[HIERARCHY] Уровень {depth}: Папка '{folder_name}' валидна как имя автора")
+                    # Попробовать использовать имя папки как есть если оно валидно (или если force_dataset)
+                    is_valid = self._validate_author_name(folder_name) or force_dataset
+                    
+                    if is_valid:
+                        self.logger.log(f"[HIERARCHY] Уровень {depth}: Папка '{folder_name}' " + 
+                                      ("валидна" if self._validate_author_name(folder_name) else "принята (force_dataset)") + 
+                                      " как имя автора")
                         
                         # Применить нормализацию
-                        author_normalized = self.extractor._normalize_author_format(folder_name)
+                        author_normalized = self.extractor._normalize_author_if_needed(folder_name)
                         self.logger.log(f"[HIERARCHY] Уровень {depth}: Нормализация '{folder_name}' → '{author_normalized}'")
                         return author_normalized
                     else:
@@ -1258,17 +1262,23 @@ class RegenCSVService:
                 # Do not overwrite anthology author
                 if record.proposed_author == "Сборник":
                     continue
-                if record.proposed_author != consensus_author:
-                    old_author = record.proposed_author
-                    old_source = record.author_source
-                    if old_source.startswith("folder_dataset"):
-                        new_source = "folder_dataset_cons"
-                    else:
-                        new_source = "folder_dataset"
-                    record.author_source = new_source
-                    record.proposed_author = consensus_author
-                    # Debug output removed
-                    consensus_count += 1
+                # Если автор уже совпадает консенсусу, не трогаем source
+                # (оставляем folder_dataset вместо folder_dataset_cons)
+                if record.proposed_author == consensus_author:
+                    continue
+                # Если автор отличается - применяем консенсус
+                old_author = record.proposed_author
+                old_source = record.author_source
+                if old_source.startswith("folder_dataset"):
+                    # Если уже был folder_dataset, то при консенсусе становится folder_dataset_cons
+                    new_source = "folder_dataset_cons"
+                else:
+                    # Если был другой source, то переходит на folder_dataset
+                    new_source = "folder_dataset"
+                record.author_source = new_source
+                record.proposed_author = consensus_author
+                # Debug output removed
+                consensus_count += 1
             
             # Отметить все папки в этой иерархии как обработанные
             for folder_path in folder_to_records.keys():
