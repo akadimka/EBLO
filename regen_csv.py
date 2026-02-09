@@ -114,6 +114,10 @@ class RegenCSVService:
             self._pass6_expand_abbreviations()
             self.logger.log(f"✅ PASS 6: Завершено раскрытие аббревиатур")
             
+            # Сортировка записей: отдельные файлы по алфавиту, потом папки по алфавиту
+            self._sort_records()
+            self.logger.log(f"✅ Записи отсортированы")
+            
             # Сохранение в CSV
             csv_path = output_csv or self._get_output_csv_path()
             self._save_csv(csv_path)
@@ -481,6 +485,34 @@ class RegenCSVService:
         print(f"✅ PASS 6 завершён\n", flush=True)
         self.logger.log("[PASS 6] Завершено")
     
+    
+    def _sort_records(self) -> None:
+        """Отсортировать записи: сначала отдельные файлы, потом папки (обе по алфавиту).
+        
+        Структура пути:
+        - Отдельные файлы: "Серия - XXX\File.fb2" (1 backslash)
+        - Файлы в папках: "Серия - XXX\Folder\File.fb2" (2+ backslash)
+        """
+        # Разделить новые и старые записи
+        single_files = []  # Отдельные файлы (глубина 1)
+        folder_files = []  # Файлы в папках (глубина 2+)
+        
+        for record in self.records:
+            # Считаем количество backslash в пути
+            path_parts = record.file_path.count('\\')
+            
+            if path_parts == 1:
+                single_files.append(record)
+            else:
+                folder_files.append(record)
+        
+        # Отсортировать обе группы по file_path (алфавитный порядок)
+        single_files.sort(key=lambda r: r.file_path)
+        folder_files.sort(key=lambda r: r.file_path)
+        
+        # Объединить: сначала отдельные, потом папки
+        self.records = single_files + folder_files
+    
     def _save_csv(self, output_path: str) -> None:
         """Сохранить результаты в CSV файл.
         
@@ -507,8 +539,8 @@ class RegenCSVService:
         output_path_obj = Path(output_path)
         output_path_obj.parent.mkdir(parents=True, exist_ok=True)
         
-        # Отсортировать по file_path для консистентности
-        sorted_records = sorted(self.records, key=lambda r: r.file_path)
+        # Использовать уже отсортированные записи (отсортировано в _sort_records())
+        # Не переоопределяем сортировку!
         
         # Написать CSV с всеми 8 колонками согласно документации 6.1
         fieldnames = [
@@ -526,7 +558,7 @@ class RegenCSVService:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             
-            for record in sorted_records:
+            for record in self.records:
                 row = {
                     'file_path': record.file_path,
                     'metadata_authors': record.metadata_authors,
@@ -540,9 +572,9 @@ class RegenCSVService:
                 writer.writerow(row)
         
         # Статистика
-        total = len(sorted_records)
+        total = len(self.records)
         by_source = {}
-        for record in sorted_records:
+        for record in self.records:
             source = record.author_source
             by_source[source] = by_source.get(source, 0) + 1
         
