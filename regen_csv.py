@@ -243,8 +243,8 @@ class RegenCSVService:
                 # Извлечь заголовок из метаданных FB2
                 title = self.extractor._extract_title_from_fb2(fb2_file)
                 
-                # Получить оригинальные авторы из метаданных
-                metadata_authors = self.extractor._extract_author_from_metadata(fb2_file)
+                # Получить всех авторов из метаданных (все авторы из <title-info>)
+                metadata_authors = self.extractor._extract_all_authors_from_metadata(fb2_file)
                 
                 # TODO: Извлечь серию из метаданных FB2 (пока пусто)
                 metadata_series = ""
