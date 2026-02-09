@@ -308,9 +308,9 @@ def apply_author_consensus(records: List[BookRecord],
     """PASS 4: Применить консенсус к группам файлов.
     
     Для каждой группы файлов (определяемой group_key_func):
-    1. Отфильтровать файлы с author_source="folder_dataset" (они не меняются!)
+    1. Отфильтровать файлы с author_source="folder_dataset" или "filename" (они не меняются!)
     2. Найти консенсусного автора среди остальных
-    3. Применить его ко всей группе остальных файлов
+    3. Применить его ко всей группе файлов с source="metadata"
     
     Args:
         records: Список BookRecord для обновления
@@ -333,15 +333,15 @@ def apply_author_consensus(records: List[BookRecord],
     
     # Обработать каждую группу
     for group_key, group_records in groups.items():
-        # Отфильтровать файлы с folder_dataset
-        folder_dataset_records = [r for r in group_records if r.author_source == "folder_dataset"]
-        other_records = [r for r in group_records if r.author_source != "folder_dataset"]
+        # Отфильтровать файлы с надёжными источниками (не меняем их)
+        reliable_records = [r for r in group_records if r.author_source in ("folder_dataset", "filename")]
+        other_records = [r for r in group_records if r.author_source not in ("folder_dataset", "filename")]
         
         if not other_records:
-            # Все файлы с folder_dataset - консенсус не применяем
+            # Все файлы уже определены - консенсус не нужен
             continue
         
-        # Найти консенсусного автора
+        # Найти консенсусного автора среди других файлов
         authors = [r.proposed_author for r in other_records]
         authors_normalized = [normalizer.normalize_format(a) for a in authors]
         
@@ -350,7 +350,7 @@ def apply_author_consensus(records: List[BookRecord],
         consensus_author = counter.most_common(1)[0][0]
         consensus_count = counter.most_common(1)[0][1]
         
-        # Применить консенсус к файлам без folder_dataset
+        # Применить консенсус только к файлам без надёжного источника
         for record in other_records:
             original = record.proposed_author
             record.proposed_author = consensus_author
