@@ -71,6 +71,9 @@ class AuthorNormalizer:
         """Нормализовать формат автора.
         
         "Иван Петров" → "Петров Иван"
+        Если несколько авторов разделены '; ' → нормализует каждого и разделяет запятой
+        "А.Михайловский; А.Харников" → "Михайловский А., Харников А."
+        
         Используется в PASS 3.
         
         Args:
@@ -82,6 +85,22 @@ class AuthorNormalizer:
         if not author or author == "Сборник":
             return author
         
+        # Проверить есть ли несколько авторов разделённых '; '
+        if '; ' in author:
+            authors = author.split('; ')
+            normalized_authors = []
+            
+            for single_author in authors:
+                single_author = single_author.strip()
+                if single_author:
+                    name_obj = AuthorName(single_author)
+                    normalized = name_obj.normalized if name_obj.is_valid else single_author
+                    normalized_authors.append(normalized)
+            
+            # Объединить через запятую
+            return ', '.join(normalized_authors)
+        
+        # Одиночный автор
         name_obj = AuthorName(author)
         return name_obj.normalized if name_obj.is_valid else author
     
@@ -89,6 +108,8 @@ class AuthorNormalizer:
         """Применить conversions к имени автора.
         
         "Гоблин (MeXXanik)" → "Гоблин MeXXanik"
+        Если несколько авторов через запятую → применяет к каждому
+        
         Используется в PASS 1, 5.
         
         Args:
@@ -101,6 +122,27 @@ class AuthorNormalizer:
             return author
         
         conversions = self.settings.get_author_surname_conversions()
+        
+        # Проверить есть ли несколько авторов разделённых запятой
+        if ', ' in author:
+            authors = author.split(', ')
+            converted_authors = []
+            
+            for single_author in authors:
+                single_author = single_author.strip()
+                result = single_author
+                
+                # Пробуем каждую замену
+                for pattern, replacement in conversions.items():
+                    if pattern in result:
+                        result = result.replace(pattern, replacement)
+                
+                converted_authors.append(result)
+            
+            # Объединить через запятую
+            return ', '.join(converted_authors)
+        
+        # Одиночный автор
         result = author
         
         # Пробуем каждую замену
@@ -114,6 +156,8 @@ class AuthorNormalizer:
         """Раскрыть аббревиатуру в имени автора.
         
         "И.Петров" → "Иван Петров" (если найдено в authors_map)
+        Если несколько авторов через запятую → раскрывает каждого
+        
         Используется в PASS 6.
         
         Args:
@@ -126,39 +170,75 @@ class AuthorNormalizer:
         if not author or "." not in author:
             return author
         
-        # Паттерн для поиска "X.Фамилия" или "Фамилия X."
+        # Проверить есть ли несколько авторов разделённых запятой
+        if ', ' in author:
+            authors = author.split(', ')
+            expanded_authors = []
+            
+            for single_author in authors:
+                single_author = single_author.strip()
+                expanded = self._expand_single_abbreviation(single_author, authors_map)
+                expanded_authors.append(expanded)
+            
+            # Объединить через запятую
+            return ', '.join(expanded_authors)
+        
+        # Одиночный автор
+        return self._expand_single_abbreviation(author, authors_map)
+    
+    def _expand_single_abbreviation(self, author: str, authors_map: Dict[str, List[str]]) -> str:
+        """Раскрыть аббревиатуру в одном имени автора.
+        
+        Args:
+            author: Одно имя автора ("А.Харников", "А. Харников", и т.д.)
+            authors_map: Словарь {фамилия.lower(): [полные имена]}
+                         Ключи и значения в формате "Фамилия Имя"
+            
+        Returns:
+            Раскрытое имя или исходное
+        """
+        if not author or "." not in author:
+            return author
+        
+        # Паттерн для поиска "X.Фамилия" или "Фамилия X." или "X. Фамилия" или "Фамилия X."
         pattern = r'([А-Я]\.)\s*([А-ЯЁа-яё]+)|([А-ЯЁа-яё]+)\s*([А-Я]\.)'
         match = re.search(pattern, author)
         
         if not match:
             return author
         
-        # Определить фамилию
+        # Определить фамилию и инициал
         if match.group(2):
-            # Формат: "И.Фамилия"
-            initial = match.group(1)[0]
-            surname = match.group(2)
+            # Формат: "И.Фамилия" или "И. Фамилия"
+            initial = match.group(1)[0]  # 'А'
+            surname = match.group(2)       # 'Харников'
         else:
-            # Формат: "Фамилия И."
-            surname = match.group(3)
-            initial = match.group(4)[0]
+            # Формат: "Фамилия И." или "Фамилия И."
+            surname = match.group(3)       # 'Харников'
+            initial = match.group(4)[0]   # 'А'
         
         surname_lower = surname.lower()
         
-        # Искать в authors_map
+        # Первый попыт: найти в авторах где фамилия - первое слово, имя начинается с инициала
         if surname_lower in authors_map:
             full_names = authors_map[surname_lower]
-            # Попытаться найти имя, которое начинается с этой буквы
             for full_name in full_names:
                 parts = full_name.split()
-                # Проверяем оба варианта расположения фамилии
+                # full_name = "Харников Александр" (Фамилия Имя)
                 if len(parts) >= 2:
-                    # Вариант: "Фамилия Имя"
+                    # Проверяем первая часть - фамилия
                     if parts[0].lower() == surname_lower and parts[1][0].upper() == initial:
                         return full_name
-                    # Вариант: "Имя Фамилия"
-                    if parts[-1].lower() == surname_lower and parts[0][0].upper() == initial:
-                        return full_name
+        
+        # Второй попыт: найти в авторах где имя - первое слово (обратный порядок)
+        # Может быть "Александр Харников"
+        if initial.lower() in authors_map:
+            full_names = authors_map[initial.lower()]
+            for full_name in full_names:
+                parts = full_name.split()
+                # Проверяем есть ли фамилия в конце
+                if len(parts) >= 2 and parts[-1].lower() == surname_lower:
+                    return full_name
         
         return author
 
@@ -167,6 +247,7 @@ def apply_author_normalization(record: BookRecord, normalizer: Optional[AuthorNo
     """PASS 3: Нормализовать формат автора в записи.
     
     "Иван Петров" → "Петров Иван"
+    "А.Михайловский; А.Харников" → "Михайловский А., Харников А." (нормализованные, через запятую)
     
     Args:
         record: BookRecord для обновления
@@ -179,7 +260,15 @@ def apply_author_normalization(record: BookRecord, normalizer: Optional[AuthorNo
         return
     
     original = record.proposed_author
-    record.proposed_author = normalizer.normalize_format(original)
+    
+    # Проверить если несколько авторов разделены '; ' (временный разделитель из папки)
+    if '; ' in record.proposed_author:
+        authors = record.proposed_author.split('; ')
+        normalized_authors = [normalizer.normalize_format(a) for a in authors]
+        # Объединять через запятую
+        record.proposed_author = ', '.join(normalized_authors)
+    else:
+        record.proposed_author = normalizer.normalize_format(original)
 
 
 def apply_surname_conversions_to_records(records: List[BookRecord], 
@@ -187,6 +276,7 @@ def apply_surname_conversions_to_records(records: List[BookRecord],
     """PASS 5: Применить conversions к авторам во всех записях.
     
     Второе применение conversions (после PASS 4 консенсуса).
+    Работает с несколькими авторами разделёнными ', ' (запятая)
     
     Args:
         records: Список BookRecord для обновления
@@ -202,9 +292,14 @@ def apply_surname_conversions_to_records(records: List[BookRecord],
             continue
         
         original = record.proposed_author
-        record.proposed_author = normalizer.apply_conversions(original)
-        # После conversions может понадобиться переформатирование
-        record.proposed_author = normalizer.normalize_format(record.proposed_author)
+        
+        # Проверить если несколько авторов разделены ', ' (запятая)
+        if ', ' in record.proposed_author:
+            authors = record.proposed_author.split(', ')
+            converted_authors = [normalizer.apply_conversions(a) for a in authors]
+            record.proposed_author = ', '.join(converted_authors)
+        else:
+            record.proposed_author = normalizer.apply_conversions(original)
 
 
 def apply_author_consensus(records: List[BookRecord], 
@@ -271,6 +366,7 @@ def build_authors_map(records: List[BookRecord],
     
     Собирает все уникальные авторы и группирует их по фамилии.
     Результат: {"петров": ["Петров Иван", "Петров Сергей"], ...}
+    Обрабатывает авторов разделённых запятой.
     
     Args:
         records: Список BookRecord
@@ -291,26 +387,63 @@ def build_authors_map(records: List[BookRecord],
         # Из proposed_author (уже обработано)
         if record.proposed_author and record.proposed_author != "Сборник":
             author = record.proposed_author
-            normalized = normalizer.normalize_format(author)
-            key = normalized.split()[-1].lower() if normalized else ""  # фамилия - последнее слово
             
-            if key and normalized not in seen:
-                if key not in authors_map:
-                    authors_map[key] = []
-                authors_map[key].append(normalized)
-                seen.add(normalized)
+            # Если несколько авторов через запятую
+            if ', ' in author:
+                for single_author in author.split(', '):
+                    single_author = single_author.strip()
+                    if single_author:
+                        # Пропустить если это аббревиатура (содержит точку)
+                        if '.' not in single_author:
+                            normalized = normalizer.normalize_format(single_author)
+                            key = normalized.split()[0].lower() if normalized else ""  # фамилия - первое слово (после нормализации)
+                            
+                            if key and normalized not in seen:
+                                if key not in authors_map:
+                                    authors_map[key] = []
+                                authors_map[key].append(normalized)
+                                seen.add(normalized)
+            else:
+                # Одиночный автор
+                # Пропустить если это аббревиатура (содержит точку)
+                if '.' not in author:
+                    normalized = normalizer.normalize_format(author)
+                    key = normalized.split()[0].lower() if normalized else ""  # фамилия - первое слово (после нормализации)
+                    
+                    if key and normalized not in seen:
+                        if key not in authors_map:
+                            authors_map[key] = []
+                        authors_map[key].append(normalized)
+                        seen.add(normalized)
         
-        # Из metadata_authors (оригинальные)
+        # Из metadata_authors (оригинальные) - главный источник для аббревиатур
         if record.metadata_authors and record.metadata_authors != "Сборник":
             author = record.metadata_authors
-            normalized = normalizer.normalize_format(author)
-            key = normalized.split()[-1].lower() if normalized else ""
             
-            if key and normalized not in seen:
-                if key not in authors_map:
-                    authors_map[key] = []
-                authors_map[key].append(normalized)
-                seen.add(normalized)
+            # Если несколько авторов через запятую (или точку с запятой из других источников)
+            if ', ' in author or '; ' in author:
+                sep = ', ' if ', ' in author else '; '
+                for single_author in author.split(sep):
+                    single_author = single_author.strip()
+                    if single_author:
+                        normalized = normalizer.normalize_format(single_author)
+                        key = normalized.split()[0].lower() if normalized else ""  # фамилия - первое слово (после нормализации)
+                        
+                        if key and normalized not in seen:
+                            if key not in authors_map:
+                                authors_map[key] = []
+                            authors_map[key].append(normalized)
+                            seen.add(normalized)
+            else:
+                # Одиночный автор
+                normalized = normalizer.normalize_format(author)
+                key = normalized.split()[0].lower() if normalized else ""  # фамилия - первое слово (после нормализации)
+                
+                if key and normalized not in seen:
+                    if key not in authors_map:
+                        authors_map[key] = []
+                    authors_map[key].append(normalized)
+                    seen.add(normalized)
     
     return authors_map
 
@@ -321,6 +454,7 @@ def expand_abbreviated_authors(records: List[BookRecord],
     """PASS 6: Раскрыть аббревиатуры в именах авторов.
     
     "И.Петров" → "Иван Петров" (поиск в authors_map)
+    "А.Михайловский, А.Харников" → "Александр Михайловский, Александр Харников"
     
     Args:
         records: Список BookRecord для обновления
@@ -341,7 +475,14 @@ def expand_abbreviated_authors(records: List[BookRecord],
             continue
         
         original = record.proposed_author
-        record.proposed_author = normalizer.expand_abbreviation(original, authors_map)
+        
+        # Проверить если несколько авторов разделены ', ' (запятая из PASS 3)
+        if ', ' in record.proposed_author:
+            authors = record.proposed_author.split(', ')
+            expanded_authors = [normalizer.expand_abbreviation(a, authors_map) for a in authors]
+            record.proposed_author = ', '.join(expanded_authors)
+        else:
+            record.proposed_author = normalizer.expand_abbreviation(original, authors_map)
         
         if record.proposed_author != original:
             logger.log(f"[PASS 6] Раскрытие аббревиатуры: {original} → {record.proposed_author}")

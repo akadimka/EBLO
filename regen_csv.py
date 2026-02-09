@@ -133,36 +133,93 @@ class RegenCSVService:
             traceback.print_exc()
             return False
     
+    def _parse_author_from_folder_name(self, folder_name: str) -> str:
+        """Распарсить авторов из названия папки.
+        
+        Везде есть формат: "название_серии (авторы)" или "название_серии (автор1, автор2)"
+        
+        Логика:
+        - Если 1 автор: возвращаем его как есть
+        - Если 2 автора: возвращаем обоих через '; ' (будет нормализовано в PASS позже)
+        - Если >2: берём первого
+        
+        Args:
+            folder_name: Название папки
+            
+        Returns:
+            Имя автора/авторов из папки
+        """
+        import re
+        
+        # Сначала проверить есть ли содержимое в скобках
+        # Паттерн: "название (содержимое)"
+        match = re.search(r'\((.*?)\)$', folder_name)
+        
+        if match:
+            # Есть скобки с авторами
+            authors_str = match.group(1)  # "А.Михайловский, А.Харников" или "Буланов Константин"
+            
+            # Если есть несколько авторов разделённых запятой
+            if ',' in authors_str:
+                # Разбить на авторов
+                authors = [a.strip() for a in authors_str.split(',')]
+                
+                if len(authors) <= 2:
+                    # <= 2 авторов - берём всех через '; ' (временный разделитель для PASS)
+                    return '; '.join(authors)
+                else:
+                    # > 2 авторов - берём только первого
+                    return authors[0]
+            
+            # Иначе просто один автор в скобках
+            return authors_str.strip()
+        
+        # Нет скобок - это не ожиданный формат, но вернём как есть
+        return folder_name
+    
     def _build_folder_structure(self) -> Dict[Path, str]:
         """Построить структуру папок и определить авторские папки.
         
         Анализирует иерархию папок и определяет, какие папки являются авторскими
-        (содержат книги одного автора).
+        (содержат книги одного автора). Ищет на разных уровнях вложенности.
         
         Returns:
             Dict[Path, str]: Словарь {папка_путь: имя_автора}
         """
         folder_authors = {}
+        blacklist = self.settings.get_filename_blacklist()
         
-        # Проанализировать первые N уровней вверх от корня work_dir
-        # Папки на уровне 1 от work_dir часто являются авторскими папками
-        for folder in self.work_dir.iterdir():
-            if folder.is_dir():
-                folder_name = folder.name
-                
-                # Проверить: это авторская папка?
-                # Авторская папка обычно содержит:
-                # - Только FB2 файлы + подпапки с серией
-                # - НЕ содержит слова из blacklist (сборник, компиляция)
-                
-                blacklist = self.settings.get_filename_blacklist()
-                is_blacklisted = any(word.lower() in folder_name.lower() for word in blacklist)
-                
-                if not is_blacklisted:
-                    # Это вероятно авторская папка
-                    folder_authors[folder] = folder_name
-                
-                self.logger.log(f"[Структура] Папка: {folder_name} → автор: {folder_name if not is_blacklisted else '[исключена]'}")
+        # Рекурсивно скан папок до нужной глубины (2-3 уровня)
+        # Нужно найти папки типа "Автор Фамилия" которые могут быть на разных уровнях
+        def scan_folder(folder_path: Path, depth: int = 0, max_depth: int = 3):
+            if depth > max_depth:
+                return
+            
+            try:
+                for folder in folder_path.iterdir():
+                    if folder.is_dir():
+                        folder_name = folder.name
+                        
+                        # Проверить: это авторская папка?
+                        is_blacklisted = any(word.lower() in folder_name.lower() for word in blacklist)
+                        
+                        if not is_blacklisted:
+                            # Это вероятно авторская папка
+                            # Парсим имя автора (может быть несколько авторов в названии)
+                            author_name = self._parse_author_from_folder_name(folder_name)
+                            folder_authors[folder] = author_name
+                            
+                            parsed_name = author_name if not is_blacklisted else '[исключена]'
+                            self.logger.log(f"[Структура {depth}] Папка: {folder_name} → автор: {parsed_name}")
+                        
+                        # Рекурсивно смотрим подпапки (но не очень глубоко)
+                        if depth < max_depth:
+                            scan_folder(folder, depth + 1, max_depth)
+            except Exception as e:
+                self.logger.log(f"[Структура] Ошибка при сканировании {folder_path}: {e}")
+        
+        # Начинаем сканирование с work_dir
+        scan_folder(self.work_dir, depth=0, max_depth=2)
         
         return folder_authors
     
@@ -407,7 +464,7 @@ class RegenCSVService:
             'file_title'
         ]
         
-        with open(output_path, 'w', newline='', encoding='utf-8-sig') as f:
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             
