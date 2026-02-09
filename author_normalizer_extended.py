@@ -1,0 +1,347 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Author Normalizer Extended - PASS 3, 5, 6 functions for CSV regeneration
+
+Модуль обработки авторов для PASS 3, 5, 6 системы регенерации CSV.
+Функции для:
+- PASS 3: Нормализация формата авторов (Имя Фамилия → Фамилия Имя)
+- PASS 5: Применение конвертаций фамилий (после консенсуса)
+- PASS 6: Раскрытие аббревиатур (И.Петров → Иван Петров)
+
+Все функции работают с BookRecord dataclass и используют SettingsManager для конфигурации.
+"""
+
+import re
+from typing import List, Dict, Set, Optional, Callable, Any
+from collections import Counter
+from dataclasses import dataclass, field
+
+try:
+    from settings_manager import SettingsManager
+    from logger import Logger
+    from name_normalizer import AuthorName
+except ImportError:
+    from .settings_manager import SettingsManager
+    from .logger import Logger
+    from .name_normalizer import AuthorName
+
+
+@dataclass
+class BookRecord:
+    """Запись о книге с прогрессивным заполнением на разных PASS.
+    
+    Evolves through the PASS system:
+    - PASS 1: Initialized with author and series determined by priority
+    - PASS 3: proposed_author normalized format
+    - PASS 4: proposed_author may change due to consensus, author_source = "consensus"
+    - PASS 5: proposed_author may be reconverted
+    - PASS 6: proposed_author abbreviations expanded
+    """
+    file_path: str              # Путь к FB2 файлу (относительно library_path)
+    file_title: str             # Название книги из title-info
+    metadata_authors: str       # Исходные авторы из FB2 XML (неизменяемое!)
+    proposed_author: str        # Предложенный автор (эволюционирует через PASS)
+    author_source: str          # Источник: "folder_dataset", "filename", "metadata", "consensus"
+    metadata_series: str = ""   # Оригинальная серия из FB2 XML (неизменяемое!)
+    proposed_series: str = ""   # Предложенная серия (эволюционирует через PASS)
+    series_source: str = ""     # Источник серии: "folder_dataset", "filename", "metadata", "consensus"
+    file_path_normalized: str = ""  # Опционально: нормализованный путь
+
+
+class AuthorNormalizer:
+    """Helper class for author normalization operations."""
+    
+    def __init__(self, settings: Optional[SettingsManager] = None):
+        """Initialize with SettingsManager.
+        
+        Args:
+            settings: SettingsManager instance, loads from config.json if None
+        """
+        self.settings = settings or SettingsManager('config.json')
+        self.logger = Logger()
+        self._init_author_name()
+    
+    def _init_author_name(self):
+        """Initialize AuthorName with config path."""
+        config_path = self.settings._config_path if hasattr(self.settings, '_config_path') else 'config.json'
+        AuthorName.set_config_path(config_path)
+    
+    def normalize_format(self, author: str) -> str:
+        """Нормализовать формат автора.
+        
+        "Иван Петров" → "Петров Иван"
+        Используется в PASS 3.
+        
+        Args:
+            author: Имя автора в любом формате
+            
+        Returns:
+            Нормализованное имя
+        """
+        if not author or author == "Сборник":
+            return author
+        
+        name_obj = AuthorName(author)
+        return name_obj.normalized if name_obj.is_valid else author
+    
+    def apply_conversions(self, author: str) -> str:
+        """Применить conversions к имени автора.
+        
+        "Гоблин (MeXXanik)" → "Гоблин MeXXanik"
+        Используется в PASS 1, 5.
+        
+        Args:
+            author: Имя автора
+            
+        Returns:
+            Имя с применёнными conversions
+        """
+        if not author or author == "Сборник":
+            return author
+        
+        conversions = self.settings.get_author_surname_conversions()
+        result = author
+        
+        # Пробуем каждую замену
+        for pattern, replacement in conversions.items():
+            if pattern in result:
+                result = result.replace(pattern, replacement)
+        
+        return result
+    
+    def expand_abbreviation(self, author: str, authors_map: Dict[str, List[str]]) -> str:
+        """Раскрыть аббревиатуру в имени автора.
+        
+        "И.Петров" → "Иван Петров" (если найдено в authors_map)
+        Используется в PASS 6.
+        
+        Args:
+            author: Имя автора с возможной аббревиатурой
+            authors_map: Словарь {фамилия.lower(): [полные имена]}
+            
+        Returns:
+            Имя с раскрытой аббревиатурой или исходное имя
+        """
+        if not author or "." not in author:
+            return author
+        
+        # Паттерн для поиска "X.Фамилия" или "Фамилия X."
+        pattern = r'([А-Я]\.)\s*([А-ЯЁа-яё]+)|([А-ЯЁа-яё]+)\s*([А-Я]\.)'
+        match = re.search(pattern, author)
+        
+        if not match:
+            return author
+        
+        # Определить фамилию
+        if match.group(2):
+            # Формат: "И.Фамилия"
+            initial = match.group(1)[0]
+            surname = match.group(2)
+        else:
+            # Формат: "Фамилия И."
+            surname = match.group(3)
+            initial = match.group(4)[0]
+        
+        surname_lower = surname.lower()
+        
+        # Искать в authors_map
+        if surname_lower in authors_map:
+            full_names = authors_map[surname_lower]
+            # Попытаться найти имя, которое начинается с этой буквы
+            for full_name in full_names:
+                parts = full_name.split()
+                # Проверяем оба варианта расположения фамилии
+                if len(parts) >= 2:
+                    # Вариант: "Фамилия Имя"
+                    if parts[0].lower() == surname_lower and parts[1][0].upper() == initial:
+                        return full_name
+                    # Вариант: "Имя Фамилия"
+                    if parts[-1].lower() == surname_lower and parts[0][0].upper() == initial:
+                        return full_name
+        
+        return author
+
+
+def apply_author_normalization(record: BookRecord, normalizer: Optional[AuthorNormalizer] = None) -> None:
+    """PASS 3: Нормализовать формат автора в записи.
+    
+    "Иван Петров" → "Петров Иван"
+    
+    Args:
+        record: BookRecord для обновления
+        normalizer: AuthorNormalizer instance (создаётся если None)
+    """
+    if not normalizer:
+        normalizer = AuthorNormalizer()
+    
+    if record.proposed_author == "Сборник":
+        return
+    
+    original = record.proposed_author
+    record.proposed_author = normalizer.normalize_format(original)
+
+
+def apply_surname_conversions_to_records(records: List[BookRecord], 
+                                         settings: Optional[SettingsManager] = None) -> None:
+    """PASS 5: Применить conversions к авторам во всех записях.
+    
+    Второе применение conversions (после PASS 4 консенсуса).
+    
+    Args:
+        records: Список BookRecord для обновления
+        settings: SettingsManager instance (создаётся если None)
+    """
+    if not settings:
+        settings = SettingsManager('config.json')
+    
+    normalizer = AuthorNormalizer(settings)
+    
+    for record in records:
+        if record.proposed_author == "Сборник":
+            continue
+        
+        original = record.proposed_author
+        record.proposed_author = normalizer.apply_conversions(original)
+        # После conversions может понадобиться переформатирование
+        record.proposed_author = normalizer.normalize_format(record.proposed_author)
+
+
+def apply_author_consensus(records: List[BookRecord], 
+                          group_key_func: Callable[[BookRecord], str],
+                          settings: Optional[SettingsManager] = None) -> None:
+    """PASS 4: Применить консенсус к группам файлов.
+    
+    Для каждой группы файлов (определяемой group_key_func):
+    1. Отфильтровать файлы с author_source="folder_dataset" (они не меняются!)
+    2. Найти консенсусного автора среди остальных
+    3. Применить его ко всей группе остальных файлов
+    
+    Args:
+        records: Список BookRecord для обновления
+        group_key_func: Функция для определения ключа группы (например, file_path.parent)
+        settings: SettingsManager instance (создаётся если None)
+    """
+    if not settings:
+        settings = SettingsManager('config.json')
+    
+    normalizer = AuthorNormalizer(settings)
+    logger = Logger()
+    
+    # Сгруппировать записи по ключу
+    groups: Dict[str, List[BookRecord]] = {}
+    for record in records:
+        key = group_key_func(record)
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(record)
+    
+    # Обработать каждую группу
+    for group_key, group_records in groups.items():
+        # Отфильтровать файлы с folder_dataset
+        folder_dataset_records = [r for r in group_records if r.author_source == "folder_dataset"]
+        other_records = [r for r in group_records if r.author_source != "folder_dataset"]
+        
+        if not other_records:
+            # Все файлы с folder_dataset - консенсус не применяем
+            continue
+        
+        # Найти консенсусного автора
+        authors = [r.proposed_author for r in other_records]
+        authors_normalized = [normalizer.normalize_format(a) for a in authors]
+        
+        # Найти самого частого автора
+        counter = Counter(authors_normalized)
+        consensus_author = counter.most_common(1)[0][0]
+        consensus_count = counter.most_common(1)[0][1]
+        
+        # Применить консенсус к файлам без folder_dataset
+        for record in other_records:
+            original = record.proposed_author
+            record.proposed_author = consensus_author
+            record.author_source = "consensus"
+            
+            logger.log(f"[PASS 4] Консенсус в {group_key}: {original} → {consensus_author} "
+                      f"({consensus_count}/{len(other_records)})")
+
+
+def build_authors_map(records: List[BookRecord], 
+                     settings: Optional[SettingsManager] = None) -> Dict[str, List[str]]:
+    """Построить словарь авторов для раскрытия аббревиатур в PASS 6.
+    
+    Собирает все уникальные авторы и группирует их по фамилии.
+    Результат: {"петров": ["Петров Иван", "Петров Сергей"], ...}
+    
+    Args:
+        records: Список BookRecord
+        settings: SettingsManager instance (создаётся если None)
+        
+    Returns:
+        Словарь {фамилия.lower(): [полные_имена]}
+    """
+    if not settings:
+        settings = SettingsManager('config.json')
+    
+    normalizer = AuthorNormalizer(settings)
+    authors_map: Dict[str, List[str]] = {}
+    seen = set()  # Для дедупликации
+    
+    # Собрать авторов из proposed_author и metadata_authors
+    for record in records:
+        # Из proposed_author (уже обработано)
+        if record.proposed_author and record.proposed_author != "Сборник":
+            author = record.proposed_author
+            normalized = normalizer.normalize_format(author)
+            key = normalized.split()[-1].lower() if normalized else ""  # фамилия - последнее слово
+            
+            if key and normalized not in seen:
+                if key not in authors_map:
+                    authors_map[key] = []
+                authors_map[key].append(normalized)
+                seen.add(normalized)
+        
+        # Из metadata_authors (оригинальные)
+        if record.metadata_authors and record.metadata_authors != "Сборник":
+            author = record.metadata_authors
+            normalized = normalizer.normalize_format(author)
+            key = normalized.split()[-1].lower() if normalized else ""
+            
+            if key and normalized not in seen:
+                if key not in authors_map:
+                    authors_map[key] = []
+                authors_map[key].append(normalized)
+                seen.add(normalized)
+    
+    return authors_map
+
+
+def expand_abbreviated_authors(records: List[BookRecord],
+                               authors_map: Optional[Dict[str, List[str]]] = None,
+                               settings: Optional[SettingsManager] = None) -> None:
+    """PASS 6: Раскрыть аббревиатуры в именах авторов.
+    
+    "И.Петров" → "Иван Петров" (поиск в authors_map)
+    
+    Args:
+        records: Список BookRecord для обновления
+        authors_map: Словарь для поиска полных имён (создаётся если None)
+        settings: SettingsManager instance (создаётся если None)
+    """
+    if not settings:
+        settings = SettingsManager('config.json')
+    
+    normalizer = AuthorNormalizer(settings)
+    logger = Logger()
+    
+    if not authors_map:
+        authors_map = build_authors_map(records, settings)
+    
+    for record in records:
+        if record.proposed_author == "Сборник" or "." not in record.proposed_author:
+            continue
+        
+        original = record.proposed_author
+        record.proposed_author = normalizer.expand_abbreviation(original, authors_map)
+        
+        if record.proposed_author != original:
+            logger.log(f"[PASS 6] Раскрытие аббревиатуры: {original} → {record.proposed_author}")

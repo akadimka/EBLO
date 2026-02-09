@@ -1057,11 +1057,27 @@ class FB2AuthorExtractor:
             return ''
     
     def _is_blacklisted_value(self, value: str) -> bool:
-        """Проверить, есть ли значение в чёрном списке."""
-        blacklist = ['том', 'часть', 'выпуск', 'сборник', 'антология', 
-                     'book', 'vol', 'volume', 'part', 'выпуск']
+        """Проверить, есть ли значение в чёрном списке.
+        
+        Использует list filename_blacklist из config.json.
+        Параметр защиты для PASS 1: если название папки находится в blacklist,
+        пропускаем его и ищем дальше (или переходим на парсинг имени файла).
+        
+        Args:
+            value: Значение для проверки (название папки)
+            
+        Returns:
+            True если значение в blacklist, False иначе
+        """
+        blacklist = self.settings.get_filename_blacklist()
         value_lower = value.lower()
-        return any(bl in value_lower for bl in blacklist)
+        
+        # Проверить если какое-то слово из blacklist содержится в value
+        for bl_word in blacklist:
+            if bl_word.lower() in value_lower:
+                return True
+        
+        return False
     
     def _has_explicit_author_in_parentheses(self, fb2_path: Path) -> bool:
         """
@@ -1249,6 +1265,58 @@ class FB2AuthorExtractor:
             pass
         
         return False
+    
+    def _extract_title_from_fb2(self, fb2_path: Path) -> Optional[str]:
+        """Извлечь название книги из FB2 файла.
+        
+        Ищет тег <book-title> в <title-info>.
+        
+        Args:
+            fb2_path: Path к FB2 файлу
+            
+        Returns:
+            Название книги или None
+        """
+        try:
+            content = None
+            
+            # Спробуем разные кодировки
+            encodings_to_try = [
+                ('cp1251', 'strict'),
+                ('utf-8', 'strict'),
+                ('cp1251', 'replace'),
+                ('utf-8', 'replace'),
+                ('latin-1', 'replace'),
+            ]
+            
+            for encoding, errors in encodings_to_try:
+                try:
+                    with open(fb2_path, 'r', encoding=encoding, errors=errors) as f:
+                        content = f.read()
+                    break
+                except Exception:
+                    continue
+            
+            if not content:
+                return None
+            
+            # Найти <title-info> блок
+            title_info_match = re.search(r'<(?:fb:)?title-info>.*?</(?:fb:)?title-info>', content, re.DOTALL)
+            if not title_info_match:
+                return None
+            
+            title_info_content = title_info_match.group(0)
+            
+            # Найти <book-title>
+            title_match = re.search(r'<book-title>(.*?)</book-title>', title_info_content, re.DOTALL)
+            if title_match:
+                title = title_match.group(1).strip()
+                return title if title else None
+            
+            return None
+            
+        except Exception:
+            return None
     
     def _expand_surnames_from_metadata(self, surname_string: str, metadata_author: str) -> str:
         """
