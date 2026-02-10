@@ -72,6 +72,8 @@ class AuthorName:
             raw_name: Author name in any format
         """
         self.raw_name = raw_name.strip() if raw_name else ""
+        # Заменить ё на е для унификации на всех этапах обработки
+        self.raw_name = self.raw_name.replace('ё', 'е')
         self.is_valid = self._validate()
         self.parts = self._extract_parts()  # (lastname, firstname, patronymic)
         self.normalized = self._normalize()
@@ -448,6 +450,7 @@ class AuthorName:
         """Normalize to standard format: Lastname Firstname [Patronymic].
         
         Нормализовать в стандартный формат: Фамилия Имя [Отчество].
+        Также заменяет ё на е для унификации.
         
         Returns: Normalized name string (or empty if invalid or matches blacklist)
         """
@@ -465,6 +468,9 @@ class AuthorName:
             parts_list.append(patronymic)
         
         result = " ".join(parts_list) if parts_list else ""
+        
+        # Заменить ё на е для унификации
+        result = result.replace('ё', 'е')
         
         # Final check: if normalized result matches blacklist with 60%+ similarity, reject it
         if result and self._contains_blacklist_word(threshold=0.6):
