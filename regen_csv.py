@@ -341,10 +341,10 @@ class RegenCSVService:
     def _pass2_extract_from_filename(self) -> None:
         """PASS 2: Извлечь авторов из имён файлов и папок.
         
-        Для файлов, не определённых в PASS 1 (не folder_dataset),
-        ищем автора в любых скобках в пути файла:
-        - В самом имени файла: "Название (Автор).fb2"
-        - В папках пути: "Папка (Автор)/файл.fb2"
+        Для файлов, не определённых в PASS 1 (не folder_dataset):
+        1. Ищем автора в скобках в пути файла
+        2. Проверяем если это сборник (маркеры в имени + авторов > 2)
+        3. Если сборник - устанавливаем "Сборник", иначе применяем извлечённого автора
         
         Пропускаем файлы с author_source="folder_dataset" - они уже определены.
         """
@@ -355,13 +355,33 @@ class RegenCSVService:
         self.logger.log("[PASS 2] Начало извлечения авторов из имён файлов/папок...")
         
         extracted_count = 0
+        collection_count = 0
         
         for record in self.records:
             # Пропустить файлы с folder_dataset - они уже определены надёжно
             if record.author_source == "folder_dataset":
                 continue
             
-            # Попытаться найти автора в пути файла
+            # Проверить если это сборник по имени файла
+            file_name = Path(record.file_path).stem  # имя файла без расширения
+            
+            # Считаем количество авторов в metadata
+            author_count = 0
+            if record.metadata_authors and record.metadata_authors not in ("Сборник", "[неизвестно]"):
+                # Считаем авторов (разделены на ; или ,)
+                author_count = max(
+                    record.metadata_authors.count(';') + 1,
+                    record.metadata_authors.count(',') + 1
+                )
+            
+            # Проверить если файл - сборник
+            if self.extractor.is_anthology(file_name, author_count):
+                record.proposed_author = "Сборник"
+                record.author_source = "filename"
+                collection_count += 1
+                continue
+            
+            # Не сборник - попытаться найти автора в пути файла
             file_path = Path(record.file_path)
             
             # Проверить все части пути, начиная с самой близкой к файлу (справа)
@@ -389,8 +409,8 @@ class RegenCSVService:
                 record.author_source = "filename"
                 extracted_count += 1
         
-        print(f"✅ PASS 2 завершён: {extracted_count} авторов извлечено из файлов/папок\n", flush=True)
-        self.logger.log(f"[PASS 2] Извлечено {extracted_count} авторов из файлов/папок")
+        print(f"✅ PASS 2 завершён: {extracted_count} авторов + {collection_count} сборников извлечено\n", flush=True)
+        self.logger.log(f"[PASS 2] Извлечено {extracted_count} авторов и {collection_count} сборников")
     
     def _pass3_normalize_authors(self) -> None:
         """PASS 3: Нормализовать формат авторов.
