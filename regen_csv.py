@@ -342,6 +342,10 @@ class RegenCSVService:
             self._pass6_expand_abbreviations()
             self.logger.log(f"✅ PASS 6: Завершено раскрытие аббревиатур")
             
+            # Сортировка авторов по алфавиту если их несколько
+            self._sort_authors_in_records()
+            self.logger.log(f"✅ Авторы отсортированы по алфавиту")
+            
             # Сортировка записей: отдельные файлы по алфавиту, потом папки по алфавиту
             self._sort_records()
             self.logger.log(f"✅ Записи отсортированы")
@@ -971,6 +975,29 @@ class RegenCSVService:
         print(f"✅ PASS 6 завершён\n", flush=True)
         self.logger.log("[PASS 6] Завершено")
     
+    def _sort_authors_in_records(self) -> None:
+        """Отсортировать авторов по алфавиту если их несколько (разделены запятой).
+        
+        Проходит по всем records и сортирует proposed_author если содержит несколько авторов.
+        Разделитель предполагается запятая с пробелом ", ".
+        """
+        for record in self.records:
+            if not record.proposed_author or record.proposed_author in ("Сборник", "[неизвестно]"):
+                continue
+            
+            # Проверить есть ли запятая (несколько авторов)
+            if ',' in record.proposed_author:
+                # Разбить по запятой
+                authors = [a.strip() for a in record.proposed_author.split(',')]
+                
+                # Убрать пустые
+                authors = [a for a in authors if a]
+                
+                if len(authors) > 1:
+                    # Отсортировать по алфавиту
+                    authors.sort()
+                    # Объединить обратно с запятой
+                    record.proposed_author = ", ".join(authors)
     
     def _sort_records(self) -> None:
         """Отсортировать записи: сначала отдельные файлы, потом папки (обе по алфавиту).
