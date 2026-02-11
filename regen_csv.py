@@ -577,6 +577,7 @@ class RegenCSVService:
             # Проверка 1: Одно слово - это фамилия, найти полное имя в metadata
             if len(words) == 1:
                 surname = words[0]
+                matching_authors = []  # Собираем всех авторов с этой фамилией
                 
                 for full_name in metadata_authors_list:
                     full_lower = full_name.lower()
@@ -584,10 +585,20 @@ class RegenCSVService:
                     
                     # Проверяем в конце (обычный порядок Фамилия Имя)
                     if full_lower.endswith(surname_lower) or full_lower.startswith(surname_lower):
-                        return full_name
+                        matching_authors.append(full_name)
                     # Или может быть фамилия прямо в имени
-                    if surname_lower in full_lower.split():
-                        return full_name
+                    elif surname_lower in full_lower.split():
+                        matching_authors.append(full_name)
+                
+                # Если нашли авторов - вернуть их
+                if matching_authors:
+                    if len(matching_authors) == 1:
+                        return matching_authors[0]
+                    else:
+                        # Несколько авторов с одинаковой фамилией
+                        # Отсортировать для стабильности и объединить через "; "
+                        matching_authors.sort()
+                        return "; ".join(matching_authors)
                 
                 # Если не нашли - вернуть как есть
                 return partial_author
