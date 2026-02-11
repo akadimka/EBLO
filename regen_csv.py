@@ -599,6 +599,7 @@ class RegenCSVService:
                 # Проверяем, совпадает ли это с одним из metadata authors
                 for full_name in metadata_authors_list:
                     full_lower = full_name.lower()
+                    full_name_words = full_name.split()
                     
                     # Точное совпадение?
                     if partial_lower == full_lower:
@@ -606,7 +607,14 @@ class RegenCSVService:
                     
                     # Может быть это обратный порядок? (Живой Алексей vs Алексей Живой)
                     if partial_author in full_name or full_name in partial_author:
-                        return full_name
+                        # ВАЖНО: если partial_author содержит больше информации (больше слов),
+                        # чем full_name, то оставить partial_author как более полную версию
+                        # Пример: partial="Иванов Дмитрий", full_name="Дмитрий"
+                        # Иванов Дмитрий содержит Дмитрий, но имеет больше информации
+                        if len(words) > len(full_name_words):
+                            return partial_author  # Более полная версия из filename
+                        else:
+                            return full_name  # Более полная версия из metadata
                 
                 # Если это 2 слова но НЕ совпадает ни с одним metadata author,
                 # это вероятно НЕСКОЛЬКО авторов (типа "Прозоров Живой" = автор1 + автор2)

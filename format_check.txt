@@ -1,0 +1,4 @@
+No format issues found! All authors are properly formatted.
+
+Total authors processed: 168
+Unique authors (when split by '; '): 93
