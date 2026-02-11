@@ -605,6 +605,16 @@ class RegenCSVService:
                     if partial_lower == full_lower:
                         return partial_author
                     
+                    # НОВОЕ: Проверка если одни и те же слова в разном порядке?
+                    # (например "Тё Илья" vs "Илья Тё" - одни и те же слова)
+                    partial_words_set = set(w.lower() for w in words)
+                    full_name_words_set = set(w.lower() for w in full_name_words)
+                    if (len(words) == len(full_name_words) and 
+                        partial_words_set == full_name_words_set):
+                        # Одни и те же слова, только в разном порядке
+                        # Поскольку filename обычно надёжнее metadata, оставляем partial_author
+                        return partial_author
+                    
                     # Может быть это обратный порядок? (Живой Алексей vs Алексей Живой)
                     if partial_author in full_name or full_name in partial_author:
                         # ВАЖНО: если partial_author содержит больше информации (больше слов),
