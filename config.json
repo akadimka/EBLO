@@ -131,12 +131,58 @@
       "example": "Анисимов. Вариант «Бис» 2. Год мертвой змеи.fb2"
     },
     {
+      "pattern": "Author, Author. Title. (Series)",
+      "example": "Живой, Прозоров. Легион (Легион 1-3).fb2"
+    },
+    {
+      "pattern": "Author. Title. (Series)",
+      "example": "Анисимов. Вариант «Бис» 2. Год мертвой змеи.fb2"
+    },
+    {
       "pattern": "Author - Title (Series. service_words)",
       "example": "Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия).fb2"
     },
     {
       "pattern": "Author. Title (Series. service_words)",
       "example": "Демченко. Хольмградские истории (Хольмградские истории. Трилогия).fb2"
+    },
+    {
+      "pattern": "Author, Author - Title (Series. service_words)",
+      "example": "Земляной Андрей, Орлов Борис - Академик (Странник 4-5) - 2022.fb2"
+    }
+  ],
+  "author_name_patterns": [
+    {
+      "pattern": "(Name)",
+      "example": "Асташ"
+    },
+    {
+      "pattern": "(Surname) (Name)",
+      "example": "Иванов Сергей"
+    },
+    {
+      "pattern": "(Surname) (Name) (Patronymic)",
+      "example": "Иванов Сергей Владимирович"
+    },
+    {
+      "pattern": "(Name) (Surname)",
+      "example": "Сергей Иванов"
+    },
+    {
+      "pattern": "(Surname) ((Name))",
+      "example": "Иванов (Сергей)"
+    },
+    {
+      "pattern": "(Surname) (Initial). (Name)",
+      "example": "Роберт Дж. Сойер"
+    },
+    {
+      "pattern": "(N). (Surname)",
+      "example": "С. Иванов"
+    },
+    {
+      "pattern": "(Surname)",
+      "example": "Иванов"
     }
   ],
   "author_series_patterns_in_folders": [

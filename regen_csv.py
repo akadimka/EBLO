@@ -18,9 +18,11 @@ CSV Regeneration Service - Main orchestrator for the 6-PASS system
 """
 
 import csv
+import json
 import os
+import re
 from pathlib import Path
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Tuple
 from dataclasses import asdict
 import sys
 
@@ -59,6 +61,7 @@ class RegenCSVService:
         Args:
             config_path: Path to config.json
         """
+        self.config_path = Path(config_path)
         self.settings = SettingsManager(config_path)
         self.logger = Logger()
         self.extractor = FB2AuthorExtractor(config_path)
@@ -68,6 +71,231 @@ class RegenCSVService:
         self.folder_parse_limit = self.settings.get_folder_parse_limit()
         
         self.records: List[BookRecord] = []
+        
+        # Загрузить паттерны извлечения авторов из файла/папки
+        self.author_patterns = self._load_author_patterns()
+        
+        # Загрузить список известных имён авторов (для проверки наличия имени)
+        self.author_names = self._load_author_names()
+        
+        # Загрузить паттерны распознавания структуры имён
+        self.author_name_patterns = self._load_author_name_patterns()
+    
+    def _load_author_patterns(self) -> List[Dict]:
+        """Загрузить паттерны извлечения авторов из конфига.
+        
+        Returns:
+            List of pattern dicts with 'pattern' key
+        """
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+            patterns = config_data.get('author_series_patterns_in_files', [])
+            return patterns if patterns else []
+        except Exception as e:
+            self.logger.log(f"⚠️ Ошибка загрузки паттернов авторов: {e}")
+            return []
+    
+    def _load_author_names(self) -> set:
+        """Загрузить список всех известных имён авторов (муж. + жен.).
+        
+        Returns:
+            Set имён в нижнем регистре
+        """
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+            
+            male_names = set(name.lower() for name in config_data.get('male_names', []))
+            female_names = set(name.lower() for name in config_data.get('female_names', []))
+            return male_names | female_names
+        except Exception as e:
+            self.logger.log(f"⚠️ Ошибка загрузки списка имён: {e}")
+            return set()
+    
+    def _load_author_name_patterns(self) -> List[Dict]:
+        """Загрузить паттерны распознавания структуры имён авторов.
+        
+        Returns:
+            List of name pattern dicts
+        """
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+            patterns = config_data.get('author_name_patterns', [])
+            return patterns if patterns else []
+        except Exception as e:
+            self.logger.log(f"⚠️ Ошибка загрузки паттернов имён: {e}")
+            return []
+    
+    def _contains_author_name(self, text: str) -> bool:
+        """Проверить содержит ли текст имя автора (по двум уровням).
+        
+        Уровень 1: Быстрая проверка - есть ли известное имя в тексте
+        Уровень 2: Полная проверка - соответствует ли текст паттернам имён
+        
+        Args:
+            text: Текст для проверки (папка или имя файла)
+            
+        Returns:
+            True если найдено имя, False иначе
+        """
+        # Уровень 1: Проверка по известным именам
+        text_lower = text.lower()
+        words = re.split(r'[,\-\.\s«»()]+', text_lower)
+        
+        for word in words:
+            word_clean = word.strip()
+            if word_clean and word_clean in self.author_names:
+                return True
+        
+        # Уровень 2: Проверка по структурным паттернам
+        for pattern_dict in self.author_name_patterns:
+            pattern_desc = pattern_dict.get('pattern', '')
+            regex = self._pattern_to_regex(pattern_desc)
+            if regex and re.search(regex, text, re.IGNORECASE):
+                return True
+        
+        return False
+    
+    def _pattern_to_regex(self, pattern_desc: str) -> Optional[str]:
+        """Конвертировать описание паттерна имени в регулярное выражение.
+        
+        Args:
+            pattern_desc: Description like "(Surname)" or "(Surname) (Name)"
+            
+        Returns:
+            Regex pattern or None
+        """
+        # Маппинг описаний паттернов на regex
+        patterns_map = {
+            "(Name)": r'\b[A-ZА-Я][a-zа-я]{1,}\b',  # Одно слово с заглавной буквы
+            "(Surname)": r'\b[A-ZА-Я][a-zа-я]{1,}\b',
+            "(Surname) (Name)": r'\b[A-ZА-Я][a-zа-я]{1,}\s+[A-ZА-Я][a-zа-я]{1,}\b',
+            "(Name) (Surname)": r'\b[A-ZА-Я][a-zа-я]{1,}\s+[A-ZА-Я][a-zа-я]{1,}\b',
+            "(Surname) (Name) (Patronymic)": r'\b[A-ZА-Я][a-zа-я]{1,}\s+[A-ZА-Я][a-zа-я]{1,}\s+[A-ZА-Я][a-zа-я]{1,}\b',
+            "(Surname) ((Name))": r'\b[A-ZА-Я][a-zа-я]{1,}\s*\([A-ZА-Я][a-zа-я]{1,}\)\b',
+            "(Surname) (Initial). (Name)": r'\b[A-ZА-Я][a-zа-я]{1,}\s+[A-ZА-Я]\.?\s+[A-ZА-Я][a-zа-я]{1,}\b',
+            "(N). (Surname)": r'\b[A-ZА-Я]\.?\s+[A-ZА-Я][a-zа-я]{1,}\b',
+        }
+        
+        return patterns_map.get(pattern_desc)
+    
+    def _file_pattern_to_regex(self, pattern_desc: str) -> Optional[Tuple[str, List[str]]]:
+        """Конвертировать описание паттерна файла в regex с группами.
+        
+        Args:
+            pattern_desc: Description like "Author - Title" or "Author - Title (Series. service_words)"
+            
+        Returns:
+            Tuple (regex_pattern, group_names) или None если не распознан
+        """
+        # Маппинг описаний паттернов файлов на regex с именованными группами
+        patterns_map = {
+            "(Author) - Title": (
+                r'^\((?P<author>[^)]+)\)\s*-\s*(?P<title>.+)$',
+                ['author', 'title']
+            ),
+            "Author - Title": (
+                r'^(?P<author>.*?)\s*-\s*(?P<title>[^(]+)(?:\(.*\))?$',
+                ['author', 'title']
+            ),
+            "Author. Title": (
+                r'^(?P<author>[^.]+)\.\s*(?P<title>.+?)(?:\(.+\))?$',
+                ['author', 'title']
+            ),
+            "Title (Author)": (
+                r'^(?P<title>.*?)\s*\((?P<author>[^)]+)\)$',
+                ['title', 'author']
+            ),
+            "Title - (Author)": (
+                r'^(?P<title>.*?)\s*-\s*\((?P<author>[^)]+)\)$',
+                ['title', 'author']
+            ),
+            "Author - Series.Title": (
+                r'^(?P<author>.*?)\s*-\s*(?P<series>[^.]+)\.\s*(?P<title>.+)$',
+                ['author', 'series', 'title']
+            ),
+            "Author. Series. Title": (
+                r'^(?P<author>[^.]+)\.\s*(?P<series>[^.]+)\.\s*(?P<title>.+)$',
+                ['author', 'series', 'title']
+            ),
+            "Author. Title. (Series)": (
+                r'^(?P<author>[^.]+)\.\s*(?P<title>[^.]+)\.\s*\((?P<series>[^)]+)\)$',
+                ['author', 'title', 'series']
+            ),
+            "Author - Title (Series. service_words)": (
+                r'^(?P<author>[^-]+?)\s*-\s*(?P<title>[^(]+?)\s*\((?P<series>[^)]+)\)(?:\s*-\s*.+)?$',
+                ['author', 'title', 'series']
+            ),
+            "Author. Title (Series. service_words)": (
+                r'^(?P<author>[^.]+)\.\s*(?P<title>[^(]+?)\s*\((?P<series>[^)]+)\)$',
+                ['author', 'title', 'series']
+            ),
+            "Author, Author - Title (Series. service_words)": (
+                r'^(?P<author>[^-]+?\s*,\s*[^-]+?)\s*-\s*(?P<title>[^(]+?)\s*\((?P<series>[^)]+)\)(?:\s*-\s*.+)?$',
+                ['author', 'title', 'series']
+            ),
+        }
+        
+        return patterns_map.get(pattern_desc)
+    
+    def _extract_author_from_filename_by_patterns(self, filename: str) -> Optional[str]:
+        """Извлечь автора из имени файла, подбирая наиболее полное совпадение.
+        
+        Логика:
+        1. Перебрать ВСЕ паттерны из author_series_patterns_in_files
+        2. Найти ЛУЧШИЙ паттерн (с наибольшим количеством совпадающих групп)
+        3. Извлечь группу 'author' из наиболее полного паттерна
+        4. Проверить что это действительно имя автора (используя _contains_author_name)
+        
+        Приоритет: Паттерн с 3+ группами (author, title, series) > паттерн с 2 группами (author, title)
+        
+        Args:
+            filename: Имя файла без расширения
+            
+        Returns:
+            Имя автора или None
+        """
+        if not filename or not self.author_patterns:
+            return None
+        
+        # Отслеживаем лучшее совпадение
+        best_author = None
+        best_group_count = 0
+        
+        # Перебрать ВСЕ паттерны и выбрать наиболее полный
+        for pattern_dict in self.author_patterns:
+            pattern_desc = pattern_dict.get('pattern', '')
+            
+            # Конвертировать описание в regex
+            regex_data = self._file_pattern_to_regex(pattern_desc)
+            if not regex_data:
+                continue
+            
+            regex_pattern, group_names = regex_data
+            
+            # Попытаться совпростить с паттерном
+            try:
+                match = re.match(regex_pattern, filename, re.IGNORECASE)
+                if match:
+                    # Считаем сколько групп совпадало (сколько информации извлекли)
+                    matched_groups = len([g for g in match.groups() if g is not None])
+                    
+                    # Если это лучше чем предыдущее совпадение - запомнить
+                    if matched_groups > best_group_count:
+                        author = match.group('author')
+                        if author:
+                            author = author.strip()
+                            # Проверить что это действительно имя автора
+                            if self._contains_author_name(author):
+                                best_author = author
+                                best_group_count = matched_groups
+            except Exception:
+                # Если проблема с regex - пропустить этот паттерн
+                continue
+        
+        return best_author
     
     def regenerate(self, output_csv: Optional[str] = None) -> bool:
         """Выполнить полный цикл регенерации CSV.
@@ -150,27 +378,33 @@ class RegenCSVService:
         - Если 2 автора: возвращаем обоих через '; ' (будет нормализовано в PASS позже)
         - Если >2: берём первого
         
+        КРИТИЧНО: Проверяем что это действительно ИМЯ автора (не название папки/серии)
+        
         Args:
             folder_name: Название папки
             
         Returns:
-            Имя автора/авторов из папки
+            Имя автора/авторов из папки, или "" если не найдено имя
         """
-        import re
-        
         # Сначала проверить есть ли содержимое в скобках
         # Паттерн: "название (содержимое)" - ищет ПОСЛЕДНИЕ скобки в строке
         # Используем [^)]* чтобы избежать несоответствия с вложенными скобками
         match = re.search(r'\(([^)]*)\)$', folder_name)
         
         if match:
-            # Есть скобки с авторами
-            authors_str = match.group(1)  # "А.Михайловский, А.Харников" или "Буланов Константин"
+            # Есть скобки с содержимым
+            content = match.group(1)  # "А.Михайловский, А.Харников" или "Буланов Константин"
+            
+            # КРИТИЧНО: Проверить что это действительно содержит имя автора
+            if not self._contains_author_name(content):
+                # Содержимое в скобках - не имя автора (например "(1)" или "(2021)")
+                # Вернём пустую строку чтобы обойти эту папку
+                return ""
             
             # Если есть несколько авторов разделённых запятой
-            if ',' in authors_str:
+            if ',' in content:
                 # Разбить на авторов
-                authors = [a.strip() for a in authors_str.split(',')]
+                authors = [a.strip() for a in content.split(',')]
                 
                 if len(authors) <= 2:
                     # <= 2 авторов - берём всех через '; ' (временный разделитель для PASS)
@@ -180,10 +414,226 @@ class RegenCSVService:
                     return authors[0]
             
             # Иначе просто один автор в скобках
-            return authors_str.strip()
+            return content.strip()
         
-        # Нет скобок - это не ожиданный формат, но вернём как есть
-        return folder_name
+        # Нет скобок - это обычно название папки/серии, не имя автора
+        # Проверили - если это содержит имя автора используем, иначе пустая строка
+        if self._contains_author_name(folder_name):
+            # Может быть в формате "Имя Фамилия" без скобок
+            return folder_name
+        
+        # Не имя - просто название папки/серии
+        return ""
+    
+    def _clean_author_name(self, author_str: str) -> str:
+        """Очистить имя автора от паразитных символов.
+        
+        Удаляет:
+        - Точки в конце строки
+        - Скобки и их содержимое (кроме скобок в составных именах)
+        - Кавычки в начале/конце
+        - Лишние пробелы
+        - Запятые в конце
+        
+        Args:
+            author_str: Строка с именем автора
+            
+        Returns:
+            Очищенная строка
+        """
+        if not author_str:
+            return ""
+        
+        try:
+            # Уберём кавычки в начале и конце
+            author_str = author_str.strip('«»"\'')
+            
+            # Уберём скобки с содержимым (для случаев типа "(Легион Живой,")
+            # Но будем осторожны - оставляем скобки если это составное имя вроде "А.В. (составное)"
+            author_str = re.sub(r'\s*\([^)]*\)\s*', ' ', author_str)
+            
+            # Уберём точку в конце (для "Метельский." → "Метельский")
+            author_str = re.sub(r'\.$', '', author_str)
+            
+            # Уберём запятую в конце (для случаев типа "Николаев Злотников,")
+            author_str = re.sub(r',$', '', author_str)
+            
+            # Нормализуем пробелы (несколько пробелов → один)
+            author_str = re.sub(r'\s+', ' ', author_str)
+            
+            return author_str.strip()
+        except Exception:
+            return author_str
+    
+    def _process_and_expand_authors(self, cleaned_author: str, current_record, all_records) -> str:
+        """Обработать авторов: разделить по запятым, расширить, убрать дубли.
+        
+        Алгоритм:
+        1. Убрать дубликаты в исходной строке (например "Автор, Автор" → "Автор")
+        2. Разбить по запятым на отдельных авторов
+        3. Для каждого: расширить из metadata текущего файла
+        4. Если не расширилось - искать в metadata соседних файлов из той же папки
+        5. Убрать дубликаты авторов в результате
+        6. Объединить с "; " разделителем
+        
+        Args:
+            cleaned_author: Очищенное имя/имена авторов (может быть "Автор1, Автор2")
+            current_record: Текущий CV record с metadata_authors
+            all_records: Все records для поиска в соседних файлах
+            
+        Returns:
+            Финальное имя автора в формате "ФИ" или "ФИ; ФИ"
+        """
+        if not cleaned_author:
+            return ""
+        
+        # Шаг 0: Убрать дубликаты в исходной строке (например "Автор, Автор, Автор")
+        # Разбиваем, удаляем дубли, и заново объединяем
+        initial_parts = [a.strip() for a in cleaned_author.split(',') if a.strip()]
+        seen_initial = set()
+        unique_initial = []
+        for part in initial_parts:
+            if part not in seen_initial:
+                unique_initial.append(part)
+                seen_initial.add(part)
+        
+        if len(unique_initial) < len(initial_parts):
+            # Были дубликаты в исходной строке - использовать очищенную версию
+            cleaned_author = ", ".join(unique_initial)
+        
+        # Шаг 1: Разбить по запятым если есть несколько авторов
+        author_parts = [a.strip() for a in cleaned_author.split(',') if a.strip()]
+        
+        # Шаг 2: Расширить каждого автора
+        expanded_parts = []
+        for part in author_parts:
+            # Сначала пробуем расширить из metadata текущего файла
+            expanded = self._expand_author_to_full_name(part, current_record.metadata_authors or "")
+            
+            # Если не получилось и это одно слово (фамилия) - ищем в соседних файлах
+            if expanded == part and len(part.split()) == 1:  # Не расширилось
+                # Ищем других файлов в той же папке или начинающихся с этого автора
+                current_dir = str(Path(current_record.file_path).parent)
+                
+                for other_record in all_records:
+                    if other_record.file_path == current_record.file_path:
+                        continue  # Пропустить сам себя
+                    
+                    other_dir = str(Path(other_record.file_path).parent)
+                    
+                    # Если файлы в одной папке - пробуем его metadata
+                    if other_dir == current_dir and other_record.metadata_authors:
+                        found = self._expand_author_to_full_name(part, other_record.metadata_authors)
+                        if found != part:  # Нашли!
+                            expanded = found
+                            break
+            
+            if expanded:
+                expanded_parts.append(expanded)
+        
+        # Шаг 3: Убрать дубликаты авторов, сохраняя порядок
+        unique_authors = []
+        seen = set()
+        for author in expanded_parts:
+            if author not in seen:
+                unique_authors.append(author)
+                seen.add(author)
+        
+        # Шаг 3.5: Отсортировать авторов по алфавиту
+        unique_authors.sort()
+        
+        # Шаг 4: Объединить с разделителем "; "
+        if not unique_authors:
+            return cleaned_author
+        
+        return "; ".join(unique_authors)
+    
+    def _expand_author_to_full_name(self, partial_author: str, metadata_authors: str) -> str:
+        """Расширить partial author name до полного формата "Фамилия Имя" используя metadata.
+        
+        Логика:
+        - Если одно слово (только фамилия) → найти в metadata и вернуть полное имя
+        - Если 2 слова → проверить, совпадает ли с metadata author. Если нет → попытаться разобрать как несколько авторов
+        - Если 2+ слова и совпадает с metadata → вернуть как есть
+        
+        Args:
+            partial_author: Извлечённое имя автора (может быть incomplete)
+            metadata_authors: Полные авторы из metadata FB2
+            
+        Returns:
+            Полное имя в формате "Фамилия Имя"
+        """
+        if not partial_author or not metadata_authors:
+            return partial_author
+        
+        try:
+            words = partial_author.split()
+            metadata_authors_list = [a.strip() for a in re.split(r'[;,]', metadata_authors) if a.strip()]
+            
+            # Проверка 1: Одно слово - это фамилия, найти полное имя в metadata
+            if len(words) == 1:
+                surname = words[0]
+                
+                for full_name in metadata_authors_list:
+                    full_lower = full_name.lower()
+                    surname_lower = surname.lower()
+                    
+                    # Проверяем в конце (обычный порядок Фамилия Имя)
+                    if full_lower.endswith(surname_lower) or full_lower.startswith(surname_lower):
+                        return full_name
+                    # Или может быть фамилия прямо в имени
+                    if surname_lower in full_lower.split():
+                        return full_name
+                
+                # Если не нашли - вернуть как есть
+                return partial_author
+            
+            # Проверка 2: Несколько слов - проверить совпадает ли с metadata
+            if len(words) >= 2:
+                partial_lower = partial_author.lower()
+                
+                # Проверяем, совпадает ли это с одним из metadata authors
+                for full_name in metadata_authors_list:
+                    full_lower = full_name.lower()
+                    
+                    # Точное совпадение?
+                    if partial_lower == full_lower:
+                        return partial_author
+                    
+                    # Может быть это обратный порядок? (Живой Алексей vs Алексей Живой)
+                    if partial_author in full_name or full_name in partial_author:
+                        return full_name
+                
+                # Если это 2 слова но НЕ совпадает ни с одним metadata author,
+                # это вероятно НЕСКОЛЬКО авторов (типа "Прозоров Живой" = автор1 + автор2)
+                # Попробуем найти каждое слово как отдельную фамилию
+                if len(words) == 2:
+                    found_authors = []
+                    for word in words:
+                        for full_name in metadata_authors_list:
+                            full_lower = full_name.lower()
+                            word_lower = word.lower()
+                            # Ищем это слово в metadata authors
+                            if full_lower.endswith(word_lower) or full_lower.startswith(word_lower) or word_lower in full_lower.split():
+                                found_authors.append(full_name)
+                                break
+                    
+                    # Если нашли 2 одинаковых автора - вернуть одного
+                    if len(found_authors) == 2:
+                        if found_authors[0] == found_authors[1]:
+                            return found_authors[0]
+                        else:
+                            return "; ".join(found_authors)
+                    elif len(found_authors) == 1:
+                        # Нашли только одного из двух - вернуть его
+                        return found_authors[0]
+                
+                # Если ничего не совпало - вернуть как есть
+                return partial_author
+            
+            return partial_author
+        except Exception:
+            return partial_author
     
     def _build_folder_structure(self) -> Dict[Path, str]:
         """Построить структуру папок и определить авторские папки.
@@ -382,20 +832,36 @@ class RegenCSVService:
                 continue
             
             # Не сборник - попытаться найти автора в пути файла
+            # ПРИОРИТЕТ: имя_файла → папки
+            
+            # Сначала попробовать извлечь из ИМЕНИ ФАЙЛА по паттернам
+            extracted_author = self._extract_author_from_filename_by_patterns(file_name)
+            
+            if extracted_author:
+                # Успешно извлекли из имени файла
+                # Шаг 1: Очистить от паразитных символов
+                cleaned_author = self._clean_author_name(extracted_author)
+                
+                # Шаг 2: Обработать несколько авторов и убрать дубликаты
+                final_author = self._process_and_expand_authors(cleaned_author, record, self.records)
+                
+                record.proposed_author = final_author
+                record.author_source = "filename"
+                extracted_count += 1
+                continue
+            
+            # Если в имени файла не нашлось - проверить папки
             file_path = Path(record.file_path)
             
             # Проверить все части пути, начиная с самой близкой к файлу (справа)
             # Идём вверх по иерархии папок
             parts_to_check = []
             
-            # Сначала само имя файла (без расширения)
-            parts_to_check.append(file_path.stem)
-            
             # Затем все папки в пути (от листа к корню)
             for parent in file_path.parents:
                 parts_to_check.append(parent.name)
             
-            # Попытаться парсить каждую часть
+            # Попытаться парсить каждую папку
             parsed_author = None
             for part in parts_to_check:
                 parsed_author = self._parse_author_from_folder_name(part)
@@ -403,7 +869,7 @@ class RegenCSVService:
                     # Нашли - берём первый найденный
                     break
             
-            # Если найдено - применить
+            # Если найдено в папке - применить
             if parsed_author and parsed_author != "Сборник":
                 record.proposed_author = parsed_author
                 record.author_source = "filename"
