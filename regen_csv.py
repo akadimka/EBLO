@@ -21,6 +21,7 @@ import csv
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import List, Dict, Optional, Callable, Tuple
 from dataclasses import asdict
@@ -128,6 +129,67 @@ class RegenCSVService:
             self.logger.log(f"⚠️ Ошибка загрузки паттернов имён: {e}")
             return []
     
+    def _normalize_diacritics(self, text: str) -> str:
+        """Нормализовать диакритику (удалить ё→е, и т.д.).
+        
+        Пример: "Жеребьёв" → "Жеребьев"
+        Используем NFD decomposition и отфильтровываем combining marks.
+        
+        Args:
+            text: Текст с возможной диакритикой
+            
+        Returns:
+            Текст без диакритики
+        """
+        if not text:
+            return text
+        # NFD разбивает буквы с диакритикой на базовую букву и комбинирующие символы
+        nfd = unicodedata.normalize('NFD', text)
+        # Отфильтровываем диакритику (категория Mn = combining mark nonspacing)
+        return ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+    
+    def _looks_like_author_name(self, text: str) -> bool:
+        """Проверить выглядит ли текст как имя автора (по структуре только).
+        
+        На отличие от _contains_author_name, это НЕ проверяет:
+        - Наличие в known_authors
+        - Сложные паттерны
+        
+        Проверяет только базовую структуру:
+        - Не пусто и не брак
+        - Содержит буквы (кириллицу или латиницу)
+        - Не содержит подозрительный чисел (999 999)
+        - Не очень длинное
+        
+        Args:
+            text: Текст для проверки
+            
+        Returns:
+            True если выглядит как имя, False иначе
+        """
+        if not text or len(text) < 2:
+            return False
+        
+        # Слишком длинное - вероятно не имя
+        if len(text) > 100:
+            return False
+        
+        # Содержит ли хотя бы одну букву (кириллица или латиница)?
+        has_letter = any(c.isalpha() for c in text)
+        if not has_letter:
+            return False
+        
+        # Содержит ли подозрительные числовые последовательности?
+        if re.search(r'\d{3,}', text):  # 999 и более подряд
+            return False
+        
+        # Содержит ли опасные символы?
+        dangerous_chars = ['@', '#', '$', '%', '^', '&', '*', '|', '\\', '/']
+        if any(c in text for c in dangerous_chars):
+            return False
+        
+        return True
+    
     def _contains_author_name(self, text: str) -> bool:
         """Проверить содержит ли текст имя автора (по двум уровням).
         
@@ -142,7 +204,10 @@ class RegenCSVService:
         """
         # Уровень 1: Проверка по известным именам
         text_lower = text.lower()
-        words = re.split(r'[,\-\.\s«»()]+', text_lower)
+        # ВАЖНО: Нормализировать диакритику! Жеребьёв → жеребьев
+        text_normalized = self._normalize_diacritics(text_lower)
+        
+        words = re.split(r'[,\-\.\s«»()]+', text_normalized)
         
         for word in words:
             word_clean = word.strip()
@@ -288,7 +353,8 @@ class RegenCSVService:
                         if author:
                             author = author.strip()
                             # Проверить что это действительно имя автора
-                            if self._contains_author_name(author):
+                            # ПРИОРИТЕТ: 1) известное имя, 2) похоже на имя по структуре
+                            if self._contains_author_name(author) or self._looks_like_author_name(author):
                                 best_author = author
                                 best_group_count = matched_groups
             except Exception:
@@ -822,7 +888,9 @@ class RegenCSVService:
         self.logger.log(f"[PASS 1] Прочитано {fb2_count} файлов (ошибок: {error_count})")
     
     def _pass2_extract_from_filename(self) -> None:
-        """PASS 2: Извлечь авторов из имён файлов и папок.
+        """PASS 2: Извлечение авторов из имён файлов/папок с кешированием.
+        
+        ОПТИМИЗАЦИЯ: Папки парсятся один раз и кешируются для всех файлов внутри них.
         
         Для файлов, не определённых в PASS 1 (не folder_dataset):
         1. Ищем автора в скобках в пути файла
@@ -836,6 +904,10 @@ class RegenCSVService:
         print("="*80, flush=True)
         
         self.logger.log("[PASS 2] Начало извлечения авторов из имён файлов/папок...")
+        
+        # КЕШИРОВАНИЕ ПАПОК: Для каждой уникальной папки парсим один раз
+        # Ключ: полный путь папки, Значение: извлечённый автор
+        folder_cache = {}
         
         extracted_count = 0
         collection_count = 0
@@ -884,6 +956,7 @@ class RegenCSVService:
                 continue
             
             # Если в имени файла не нашлось - проверить папки
+            # Используем кеш для избежания повторного парсинга одной папки
             file_path = Path(record.file_path)
             
             # Проверить все части пути, начиная с самой близкой к файлу (справа)
@@ -892,15 +965,24 @@ class RegenCSVService:
             
             # Затем все папки в пути (от листа к корню)
             for parent in file_path.parents:
-                parts_to_check.append(parent.name)
+                parts_to_check.append(str(parent))
             
-            # Попытаться парсить каждую папку
+            # Попытаться парсить каждую папку, используя кеш
             parsed_author = None
-            for part in parts_to_check:
-                parsed_author = self._parse_author_from_folder_name(part)
-                if parsed_author and parsed_author != "Сборник":
-                    # Нашли - берём первый найденный
-                    break
+            for folder_path in parts_to_check:
+                # Проверить кеш
+                if folder_path in folder_cache:
+                    parsed_author = folder_cache[folder_path]
+                    if parsed_author and parsed_author != "Сборник":
+                        break  # Нашли в кеше - используем
+                else:
+                    # Парсим папку в первый раз и кешируем результат
+                    folder_name = Path(folder_path).name
+                    parsed_author = self._parse_author_from_folder_name(folder_name)
+                    folder_cache[folder_path] = parsed_author  # Кешируем результат
+                    
+                    if parsed_author and parsed_author != "Сборник":
+                        break  # Нашли - используем этого автора
             
             # Если найдено в папке - применить
             if parsed_author and parsed_author != "Сборник":
@@ -909,7 +991,8 @@ class RegenCSVService:
                 extracted_count += 1
         
         print(f"✅ PASS 2 завершён: {extracted_count} авторов + {collection_count} сборников извлечено\n", flush=True)
-        self.logger.log(f"[PASS 2] Извлечено {extracted_count} авторов и {collection_count} сборников")
+        print(f"   Кешировано папок: {len(folder_cache)}\n", flush=True)
+        self.logger.log(f"[PASS 2] Извлечено {extracted_count} авторов и {collection_count} сборников (кеш: {len(folder_cache)} папок)")
     
     def _pass3_normalize_authors(self) -> None:
         """PASS 3: Нормализовать формат авторов.
