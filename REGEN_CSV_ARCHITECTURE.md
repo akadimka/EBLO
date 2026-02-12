@@ -1032,4 +1032,201 @@ logger.py                    ← без изменений
 
 ---
 
+## 11. Исправления и улучшения логики парсинга (Feb 2026)
+
+### 11.1 Commit 5431307: Исправление потери фамилии при расширении имени
+
+**Проблема:** "Иванов Дмитрий" из файла → "Дмитрий" в выводе
+
+**Причина:** Функция `_expand_author_to_full_name()` заменяла более полную версию из имени файла на менее полную из метаданных.
+
+**Решение:**
+```python
+# Добавлена проверка количества слов перед заменой
+if len(words) > len(full_name_words):
+    return partial_author  # Более полная версия из filename
+else:
+    return full_name  # Более полная версия из metadata
+```
+
+**Результат:** "Иванов Дмитрий" остаётся неизменным
+
+---
+
+### 11.2 Commit 0e2478a: Сохранение порядка слов в имени
+
+**Проблема:** "Тё Илья" из файла → "Илья Те" (перепутанный порядок слов)
+
+**Причина:** Функция находила оба слова в метаданных но в другом порядке, возвращала версию из метаданных.
+
+**Решение:**
+```python
+# Проверка если одни и те же слова в разном порядке
+partial_words_set = set(w.lower() for w in words)
+full_name_words_set = set(w.lower() for w in full_name_words)
+if (len(words) == len(full_name_words) and 
+    partial_words_set == full_name_words_set):
+    return partial_author  # Сохраняем порядок из filename
+```
+
+**Результат:** "Те Илья" сохраняет правильный порядок слов
+
+---
+
+### 11.3 Commit 8b3875b: Сбор всех соавторов-однофамильцев
+
+**Проблема:** Filename "Белаш" + metadata "Людмила Белаш; Александр Белаш" → только один автор
+
+**Причина:** Функция возвращалась сразу после первого совпадения в цикле.
+
+**Решение:**
+```python
+matching_authors = []  # Собираем ВСЕ авторов
+for full_name in metadata_authors_list:
+    if surname_matches(full_name, surname):
+        matching_authors.append(full_name)
+
+# Если нашли авторов - вернуть их
+if matching_authors:
+    if len(matching_authors) > 1:
+        matching_authors.sort()
+        return "; ".join(matching_authors)
+```
+
+**Результат:** "Александр Белаш; Людмила Белаш" (оба соавтора), отсортированы
+
+---
+
+### 11.4 Commit 1d0d26f: Дебаг и оптимизация PASS 2 - кеширование папок + поддержка неизвестных авторов
+
+**Проблемы:**
+1. Папка "Жеребьёв" парсилась для каждого файла отдельно (неэффективно)
+2. "Жеребьёв" не в known_authors → `_contains_author_name()` возвращал False
+3. CSV ошибочно показывал proposed_author = "ЛенИздат" (из папки) вместо "Жеребьёв"
+
+**Решения:**
+
+#### A. Кеширование результатов парсинга папок в PASS 2
+```python
+folder_cache = {}  # Ключ: папка, Значение: автор
+
+for folder_path in parts_to_check:
+    if folder_path in folder_cache:
+        parsed_author = folder_cache[folder_path]
+    else:
+        parsed_author = self._parse_author_from_folder_name(folder_name)
+        folder_cache[folder_path] = parsed_author  # Кешируем
+```
+
+**Эффект:** Каждая папка парсится один раз для всех файлов внутри неё → консистентность и оптимизация
+
+#### B. Нормализация диакритики в `_contains_author_name()`
+```python
+def _normalize_diacritics(self, text: str) -> str:
+    """Жеребьёв → жеребьев"""
+    nfd = unicodedata.normalize('NFD', text)
+    return ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+
+# В проверке:
+text_normalized = self._normalize_diacritics(text_lower)
+```
+
+**Эффект:** "Жеребьёв" (с ё) теперь совпадает с "жеребьев" (без диакритики) в конфиге
+
+#### C. Поддержка неизвестных авторов через `_looks_like_author_name()`
+```python
+# Проверяет структуру имени БЕЗ требования быть в known_authors
+def _looks_like_author_name(self, text: str) -> bool:
+    if len(text) < 2 or len(text) > 100:
+        return False
+    has_letter = any(c.isalpha() for c in text)
+    if not has_letter:
+        return False
+    # Нет подозрительных символов и чисел
+    return True
+
+# В extraction:
+if self._contains_author_name(author) or self._looks_like_author_name(author):
+    best_author = author
+```
+
+**Эффект:** "Жеребьёв" теперь извлекается из filename даже если не в known_authors
+
+**Результат:**
+```
+proposed_author: "Владислав Жеребьев" (вместо ошибочного "ЛенИздат")
+normalized_author: "Жеребьев Владислав"
+source: "filename"
+```
+
+---
+
+### 11.5 Commit 9bd28a8: Поддержка множественного числа фамилий для соавторов
+
+**Проблема:** Filename "Каменские - Витязь.fb2" (множественное число) + metadata "Юрий Каменский; Вера Каменская" → оба автора теряются
+
+**Причина:** "Каменские" не совпадал с "Каменский" или "Каменская"
+
+**Решения:**
+
+#### A. Функция `_extract_surname_from_fullname()` - правильное извлечение фамилии
+```python
+def _extract_surname_from_fullname(self, full_name: str) -> str:
+    """Извлекает фамилию из полного имени, проверяя каждое слово против known_names
+    
+    Логика:
+    1. Разбиваем на слова
+    2. Ищем какое слово есть в known_names (это ИМЯ)
+    3. Остальное = ФАМИЛИЯ
+    4. Пропускаем инициалы (А., А.В., А.В.М.)
+    
+    Работает для любого порядка:
+    - "Юрий Каменский" → "Каменский"
+    - "Каменский Юрий" → "Каменский"
+    - "А.В. Чехов" → "Чехов"
+    - "Чехов А.В." → "Чехов"
+    """
+```
+
+**Ключевая особенность:** Не предполагает, что фамилия всегда в конце или в начале - проверяет против `known_names`
+
+#### B. Функция `_normalize_surname_endings()` - нормализация окончаний
+```python
+def _normalize_surname_endings(self, surname: str) -> str:
+    """Удаляет гендерные окончания русских фамилий
+    
+    Каменские → Каменск (множественное число)
+    Каменский → Каменск (мужское)
+    Каменская → Каменск (женское)
+    Кольцкие → Кольц
+    Кольцкий → Кольц
+    Кольцкая → Кольц
+    """
+```
+
+#### C. Обновлена `_expand_author_to_full_name()` для использования новых функций
+```python
+# Извлекаем фамилию правильно
+metadata_surname = self._extract_surname_from_fullname(full_name)
+metadata_surname_normalized = self._normalize_surname_endings(metadata_surname)
+
+# Сравниваем нормализованные корни
+if surname_normalized_lower == metadata_surname_normalized_lower:
+    matching_authors.append(full_name)
+```
+
+**Результат:**
+```
+filename: "Каменские - Витязь специального назначения.fb2"
+proposed_author: "Юрий Каменский; Вера Каменская"
+normalized_author: "Каменская Вера, Каменский Юрий"
+```
+
+**Преимущества:**
+- Универсальная логика для любого порядка слов в имени
+- Правильная обработка инициалов и гендерных окончаний
+- Собирает ВСЕ соавторов с одинаковой фамилией
+
+---
+
 ## Готово.
