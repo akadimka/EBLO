@@ -76,6 +76,9 @@ class RegenCSVService:
         # Загрузить паттерны извлечения авторов из файла/папки
         self.author_patterns = self._load_author_patterns()
         
+        # Загрузить паттерны извлечения авторов из названий ПАПОК
+        self.folder_patterns = self._load_folder_patterns()
+        
         # Загрузить список известных имён авторов (для проверки наличия имени)
         self.author_names = self._load_author_names()
         
@@ -83,7 +86,7 @@ class RegenCSVService:
         self.author_name_patterns = self._load_author_name_patterns()
     
     def _load_author_patterns(self) -> List[Dict]:
-        """Загрузить паттерны извлечения авторов из конфига.
+        """Загрузить паттерны извлечения авторов из имён ФАЙЛОВ.
         
         Returns:
             List of pattern dicts with 'pattern' key
@@ -94,7 +97,22 @@ class RegenCSVService:
             patterns = config_data.get('author_series_patterns_in_files', [])
             return patterns if patterns else []
         except Exception as e:
-            self.logger.log(f"⚠️ Ошибка загрузки паттернов авторов: {e}")
+            self.logger.log(f"⚠️ Ошибка загрузки паттернов авторов в файлах: {e}")
+            return []
+    
+    def _load_folder_patterns(self) -> List[Dict]:
+        """Загрузить паттерны извлечения авторов из имён ПАПОК.
+        
+        Returns:
+            List of pattern dicts with 'pattern' key
+        """
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+            patterns = config_data.get('author_series_patterns_in_folders', [])
+            return patterns if patterns else []
+        except Exception as e:
+            self.logger.log(f"⚠️ Ошибка загрузки паттернов авторов в папках: {e}")
             return []
     
     def _load_author_names(self) -> set:
@@ -242,6 +260,41 @@ class RegenCSVService:
             "(Surname) ((Name))": r'\b[A-ZА-Я][a-zа-я]{1,}\s*\([A-ZА-Я][a-zа-я]{1,}\)\b',
             "(Surname) (Initial). (Name)": r'\b[A-ZА-Я][a-zа-я]{1,}\s+[A-ZА-Я]\.?\s+[A-ZА-Я][a-zа-я]{1,}\b',
             "(N). (Surname)": r'\b[A-ZА-Я]\.?\s+[A-ZА-Я][a-zа-я]{1,}\b',
+        }
+        
+        return patterns_map.get(pattern_desc)
+    
+    def _folder_pattern_to_regex(self, pattern_desc: str) -> Optional[Tuple[str, List[str]]]:
+        """Конвертировать описание паттерна ПАПКИ в regex с группами.
+        
+        Args:
+            pattern_desc: Description like "Author" или "Author - Folder Name" или "Series (Author)"
+            
+        Returns:
+            Tuple (regex_pattern, group_names) или None если не распознан
+        """
+        # Маппинг описаний паттернов папок на regex с именованными группами
+        patterns_map = {
+            "Author": (
+                r'^(?P<author>[А-Яа-яЁё\w\s\.]+?)$',
+                ['author']
+            ),
+            "Author - Folder Name": (
+                r'^(?P<author>[^-]+?)\s*-\s*(?P<folder_name>.+)$',
+                ['author', 'folder_name']
+            ),
+            "Series (Author)": (
+                r'^(?P<series>[^(]+?)\s*\((?P<author>[^)]+)\)$',
+                ['series', 'author']
+            ),
+            "(Series) Author": (
+                r'^\((?P<series>[^)]+)\)\s*(?P<author>.+)$',
+                ['series', 'author']
+            ),
+            "Series": (
+                r'^(?P<series>.+)$',
+                ['series']
+            ),
         }
         
         return patterns_map.get(pattern_desc)
@@ -437,63 +490,120 @@ class RegenCSVService:
             return False
     
     def _parse_author_from_folder_name(self, folder_name: str) -> str:
-        """Распарсить авторов из названия папки.
+        """Распарсить автора из названия папки, подбирая наиболее полное совпадение.
         
-        Везде есть формат: "название_серии (авторы)" или "название_серии (автор1, автор2)"
-        Правильно обрабатывает случаи с несколькими скобками:
-        "МВП-2 (1) Одиссея (Александр Чернов)" → "Александр Чернов"
+        Логика (АНАЛОГИЧНО _extract_author_from_filename_by_patterns):
+        1. Перебрать ВСЕ паттерны из author_series_patterns_in_folders
+        2. Найти ЛУЧШИЙ паттерн (с наибольшим количеством совпадающих групп)
+        3. Извлечь группу 'author' из наиболее полного паттерна
+        4. Проверить что это действительно имя автора (используя _contains_author_name)
+        5. ФИЛЬТР: Отклонить если это просто описание (типа "Другой мир", "Парижский отдел")
         
-        Логика:
-        - Если 1 автор: возвращаем его как есть
-        - Если 2 автора: возвращаем обоих через '; ' (будет нормализовано в PASS позже)
-        - Если >2: берём первого
-        
-        КРИТИЧНО: Проверяем что это действительно ИМЯ автора (не название папки/серии)
+        Поддерживаемые форматы:
+        - "Максим Шаттам" (просто имя)
+        - "Максим Шаттам - Собрание сочинений" (автор перед дефисом)
+        - "Защита Периметра (Абенд Эдвард)" (автор в скобках)
+        - "(Боевой отряд) Петров И." (автор после скобок)
         
         Args:
             folder_name: Название папки
             
         Returns:
-            Имя автора/авторов из папки, или "" если не найдено имя
+            Имя автора из папки, или "" если не найдено имя
         """
-        # Сначала проверить есть ли содержимое в скобках
-        # Паттерн: "название (содержимое)" - ищет ПОСЛЕДНИЕ скобки в строке
-        # Используем [^)]* чтобы избежать несоответствия с вложенными скобками
-        match = re.search(r'\(([^)]*)\)$', folder_name)
+        if not folder_name or not self.folder_patterns:
+            return ""
         
-        if match:
-            # Есть скобки с содержимым
-            content = match.group(1)  # "А.Михайловский, А.Харников" или "Буланов Константин"
-            
-            # КРИТИЧНО: Проверить что это действительно содержит имя автора
-            if not self._contains_author_name(content):
-                # Содержимое в скобках - не имя автора (например "(1)" или "(2021)")
-                # Вернём пустую строку чтобы обойти эту папку
-                return ""
-            
-            # Если есть несколько авторов разделённых запятой
-            if ',' in content:
-                # Разбить на авторов
-                authors = [a.strip() for a in content.split(',')]
-                
-                if len(authors) <= 2:
-                    # <= 2 авторов - берём всех через '; ' (временный разделитель для PASS)
-                    return '; '.join(authors)
-                else:
-                    # > 2 авторов - берём только первого
-                    return authors[0]
-            
-            # Иначе просто один автор в скобках
-            return content.strip()
+        # Отслеживаем лучшее совпадение
+        best_author = ""
+        best_group_count = 0
         
-        # Нет скобок - это обычно название папки/серии, не имя автора
-        # Проверили - если это содержит имя автора используем, иначе пустая строка
-        if self._contains_author_name(folder_name):
-            # Может быть в формате "Имя Фамилия" без скобок
-            return folder_name
+        # Перебрать ВСЕ паттерны и выбрать наиболее полный
+        for pattern_dict in self.folder_patterns:
+            pattern_desc = pattern_dict.get('pattern', '')
+            
+            # Конвертировать описание в regex
+            regex_data = self._folder_pattern_to_regex(pattern_desc)
+            if not regex_data:
+                continue
+            
+            regex_pattern, group_names = regex_data
+            
+            # Попытаться совпоставить с паттерном
+            try:
+                match = re.match(regex_pattern, folder_name, re.IGNORECASE)
+                if match:
+                    # Проверяем есть ли группа 'author' в этом паттерне
+                    if 'author' not in group_names:
+                        continue  # Этот паттерн не имеет автора (например "Series")
+                    
+                    # Считаем сколько групп совпадало (сколько информации извлекли)
+                    matched_groups = len([g for g in match.groups() if g is not None])
+                    
+                    # Если это лучше чем предыдущее совпадение - запомнить
+                    if matched_groups > best_group_count:
+                        author = match.group('author')
+                        if author:
+                            author = author.strip()
+                            # Проверить что это действительно имя автора
+                            # ПРИОРИТЕТ: 1) известное имя, 2) похоже на имя по структуре
+                            if self._contains_author_name(author) or self._looks_like_author_name(author):
+                                # ДОПОЛНИТЕЛЬНЫЙ ФИЛЬТР: Проверить не это ли просто описание?
+                                # "Другой мир" vs "Максим Шаттам" - первое это описание, второе имя
+                                # Эвристит: если слова не в known_authors И совпадает с blacklist - это описание
+                                if self._looks_like_series_name(author):
+                                    # Это похоже на название серии/описание, а не имя автора
+                                    continue
+                                
+                                best_author = author
+                                best_group_count = matched_groups
+            except Exception:
+                # Если проблема с regex - пропустить этот паттерн
+                continue
         
-        # Не имя - просто название папки/серии
-        return ""
+        return best_author
+    
+    def _looks_like_series_name(self, text: str) -> bool:
+        """Проверить похоже ли это на название серии, а не имя автора.
+        
+        Эвристики:
+        - Содержит слова из blacklist (названия папок, серий)
+        - Все слова известные нарицательные (не имена собственные)
+        - Совпадает с существующими серийными паттернами
+        
+        Args:
+            text: Текст для проверки
+            
+        Returns:
+            True если похоже на серию, False если на автора
+        """
+        if not text:
+            return False
+        
+        blacklist = self.settings.get_filename_blacklist()
+        text_lower = text.lower()
+        
+        # Проверить сколько слов из blacklist содержится
+        blacklist_word_count = 0
+        for word in blacklist:
+            if word.lower() in text_lower:
+                blacklist_word_count += 1
+        
+        # Если много слов blacklist - это серия/описание
+        if blacklist_word_count >= 1:
+            return True
+        
+        # Проверить слова в author_names
+        words = text.split()
+        words_in_author_names = sum(1 for w in words if w.lower() in self.author_names)
+        
+        # Если НОЛЬ слов из author_names (имён авторов) - это вероятно серия
+        if words_in_author_names == 0 and len(words) <= 3:
+            # Типа "Другой мир", "Парижский отдел" - общие русские слова, не имена
+            # Срабатывает только для коротких описаний (2-3 слова)
+            return True
+        
+        return False
     
     def _clean_author_name(self, author_str: str) -> str:
         """Очистить имя автора от паразитных символов.
@@ -875,48 +985,111 @@ class RegenCSVService:
     def _build_folder_structure(self) -> Dict[Path, str]:
         """Построить структуру папок и определить авторские папки.
         
-        Анализирует иерархию папок и определяет, какие папки являются авторскими
-        (содержат книги одного автора). Ищет на разных уровнях вложенности.
+        Логика:
+        1. Для каждой TOP-LEVEL папки (прямых подпапок work_dir) 
+        2. Найти первый FB2 файл и идти вверх по иерархии от этого файла
+        3. Если найдено имя АВТОРА (не серии) - это авторская папка
+        4. Все подпапки авторской папки считаются папками серий
+        
+        Оптимизация: использует многопоточность для параллельного парсинга папок.
+        
+        ВАЖНО: Не используем folder_parse_limit - проверяем ВСЕ top-level папки!
+        folder_parse_limit применяется в PASS 2 для файлов.
         
         Returns:
             Dict[Path, str]: Словарь {папка_путь: имя_автора}
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading
+        
         folder_authors = {}
-        blacklist = self.settings.get_filename_blacklist()
+        folder_authors_lock = threading.Lock()  # Для потокобезопасного доступа
         
-        # Рекурсивно скан папок до нужной глубины (2-3 уровня)
-        # Нужно найти папки типа "Автор Фамилия" которые могут быть на разных уровнях
-        def scan_folder(folder_path: Path, depth: int = 0, max_depth: int = 3):
-            if depth > max_depth:
-                return
+        try:
+            # Найти все TOP-LEVEL папки (прямые подпапки work_dir)
+            top_level_dirs = sorted([d for d in self.work_dir.iterdir() if d.is_dir()])
             
-            try:
-                for folder in folder_path.iterdir():
-                    if folder.is_dir():
-                        folder_name = folder.name
-                        
-                        # Проверить: это авторская папка?
-                        is_blacklisted = any(word.lower() in folder_name.lower() for word in blacklist)
-                        
-                        if not is_blacklisted:
-                            # Это вероятно авторская папка
-                            # Парсим имя автора (может быть несколько авторов в названии)
-                            author_name = self._parse_author_from_folder_name(folder_name)
-                            folder_authors[folder] = author_name
-                            
-                            parsed_name = author_name if not is_blacklisted else '[исключена]'
-                            self.logger.log(f"[Структура {depth}] Папка: {folder_name} → автор: {parsed_name}")
-                        
-                        # Рекурсивно смотрим подпапки (но не очень глубоко)
-                        if depth < max_depth:
-                            scan_folder(folder, depth + 1, max_depth)
-            except Exception as e:
-                self.logger.log(f"[Структура] Ошибка при сканировании {folder_path}: {e}")
+            # Использовать многопоточность если папок много (>10)
+            use_threading = len(top_level_dirs) > 10
+            
+            if use_threading:
+                # МНОГОПОТОЧНЫЙ режим для больших датасетов
+                max_workers = min(4, len(top_level_dirs))  # Не более 4 потоков
+                
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(self._parse_single_top_level_dir, top_dir, folder_authors_lock): top_dir 
+                        for top_dir in top_level_dirs
+                    }
+                    
+                    for future in as_completed(futures):
+                        result = future.result()
+                        if result:
+                            with folder_authors_lock:
+                                folder_authors.update(result)
+            else:
+                # ОДНОПОТОЧНЫЙ режим для маленьких датасетов (быстрее из-за отсутствия overhead)
+                for top_dir in top_level_dirs:
+                    result = self._parse_single_top_level_dir(top_dir, folder_authors_lock)
+                    if result:
+                        folder_authors.update(result)
         
-        # Начинаем сканирование с work_dir
-        scan_folder(self.work_dir, depth=0, max_depth=2)
+        except Exception as e:
+            self.logger.log(f"[Структура] Ошибка при построении структуры папок: {e}")
         
+        self.logger.log(f"[Структура] Найдено авторских папок: {len(folder_authors)}")
         return folder_authors
+    
+    def _parse_single_top_level_dir(self, top_dir: Path, folder_authors_lock) -> Dict[Path, str]:
+        """Парсить одну top-level папку и найти авторскую папку.
+        
+        Args:
+            top_dir: Одна из top-level папок
+            folder_authors_lock: Lock для потокобезопасного доступа
+            
+        Returns:
+            Dict с найденной авторской папкой (может быть пусто)
+        """
+        result = {}
+        
+        try:
+            # Найти первый FB2 файл в этой папке или её подпапках
+            first_fb2 = None
+            for fb2_file in top_dir.rglob('*.fb2'):
+                first_fb2 = fb2_file
+                break  # Берём ПЕРВЫЙ найденный файл
+            
+            if not first_fb2:
+                return result  # В этой папке нет FB2 файлов
+            
+            # Идти вверх по иерархии папок (от файла к корню) до work_dir
+            current_path = first_fb2.parent
+            
+            while current_path != current_path.parent and current_path != self.work_dir:
+                folder_name = current_path.name
+                
+                # ВАЖНО: Применить конвертацию к названию папки ДО парсинга!
+                # Например: "Гоблин (MeXXanik)" → "Гоблин MeXXanik"
+                conversions = self.settings.get_author_surname_conversions()
+                folder_name_to_parse = conversions.get(folder_name, folder_name)
+                
+                # Парсим эту папку для поиска авторского имени
+                # ВАЖНО: НЕ применяем blacklist при проверке авторской папки!
+                # Авторская папка определяется по паттернам, blacklist нужен для других контекстов
+                author_name = self._parse_author_from_folder_name(folder_name_to_parse)
+                
+                if author_name:
+                    # Нашли имя АВТОРА!
+                    result[current_path] = author_name
+                    break  # Остановиться - все подпапки этой папки уже покрыты
+                else:
+                    # Это не авторская папка (или серия) - идти выше
+                    current_path = current_path.parent
+        
+        except Exception as e:
+            self.logger.log(f"[Структура] Ошибка при парсинге {top_dir}: {e}")
+        
+        return result
     
     def _get_author_for_file(self, fb2_file: Path, folder_authors: Dict[Path, str]) -> tuple:
         """Определить автора для конкретного файла используя структуру папок.
@@ -1250,31 +1423,18 @@ class RegenCSVService:
                     record.proposed_author = ", ".join(authors)
     
     def _sort_records(self) -> None:
-        """Отсортировать записи: сначала отдельные файлы, потом папки (обе по алфавиту).
+        """Отсортировать записи по иерархии папок и файлов.
         
-        Структура пути:
-        - Отдельные файлы: "Серия - XXX\File.fb2" (1 backslash)
-        - Файлы в папках: "Серия - XXX\Folder\File.fb2" (2+ backslash)
+        Сортировка: все файлы в папке идут подряд, затем подпапки и их файлы.
+        Пример результата:
+        - Папка1/файл1.fb2
+        - Папка1/файл2.fb2
+        - Папка1/Подпапка1/файл3.fb2
+        - Папка1/Подпапка1/файл4.fb2
+        - Папка2/файл5.fb2
         """
-        # Разделить новые и старые записи
-        single_files = []  # Отдельные файлы (глубина 1)
-        folder_files = []  # Файлы в папках (глубина 2+)
-        
-        for record in self.records:
-            # Считаем количество backslash в пути
-            path_parts = record.file_path.count('\\')
-            
-            if path_parts == 1:
-                single_files.append(record)
-            else:
-                folder_files.append(record)
-        
-        # Отсортировать обе группы по file_path (алфавитный порядок)
-        single_files.sort(key=lambda r: r.file_path)
-        folder_files.sort(key=lambda r: r.file_path)
-        
-        # Объединить: сначала отдельные, потом папки
-        self.records = single_files + folder_files
+        # Простая сортировка по пути файла (естественная иерархия)
+        self.records.sort(key=lambda r: r.file_path)
     
     def _save_csv(self, output_path: str) -> None:
         """Сохранить результаты в CSV файл.
