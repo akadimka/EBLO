@@ -618,6 +618,123 @@ class RegenCSVService:
         
         return "; ".join(unique_authors)
     
+    def _normalize_surname_endings(self, surname: str) -> str:
+        """Нормализовать окончания русских фамилий для сравнения.
+        
+        Удаляет типичные окончания русских фамилий чтобы получить корень:
+        - Каменские → Каменск (множественное число)
+        - Каменский → Каменск (мужское)
+        - Каменская → Каменск (женское)
+        - Кольцкие → Кольц
+        - Кольцкий → Кольц
+        - Кольцкая → Кольц
+        
+        Args:
+            surname: Фамилия с окончанием
+            
+        Returns:
+            Фамилия с удаленным окончанием (корень)
+        """
+        if not surname:
+            return surname
+        
+        # Типичные окончания русских фамилий в порядке специфичности
+        # (более специфичные в начале)
+        patterns = [
+            (r'ские$', ''),   # Каменские → Каменск
+            (r'ский$', ''),   # Каменский → Каменск
+            (r'ская$', ''),   # Каменская → Каменск
+            (r'цкие$', ''),   # Кольцкие → Кольц
+            (r'цкий$', ''),   # Кольцкий → Кольц
+            (r'цкая$', ''),   # Кольцкая → Кольц
+        ]
+        
+        normalized = surname
+        for pattern, replacement in patterns:
+            normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+            # Если что-то заменилось - возвращаем сразу (не применяем больше паттернов)
+            if normalized != surname:
+                return normalized
+        
+        return surname
+    
+    def _extract_surname_from_fullname(self, full_name: str) -> str:
+        """Извлечь фамилию из полного имени, проверяя каждое слово против known_names.
+        
+        Логика: 
+        1. Разбиваем имя на слова
+        2. Ищем какое слово есть в known_names (это имя)
+        3. Остальные слова = фамилия
+        4. Работает для любого порядка: "Юрий Каменский" и "Каменский Юрий"
+        5. Инициалы (А.В.) не считаются за имена
+        
+        Пример:
+        - "Юрий Каменский" → фамилия = "Каменский"
+        - "Каменский Юрий" → фамилия = "Каменский"
+        - "А.В. Чехов" → фамилия = "Чехов" (А.В. - инициалы, игнорируются)
+        - "Чехов А.В." → фамилия = "Чехов"
+        - "Чехов" → фамилия = "Чехов" (если не найдено имён)
+        
+        Args:
+            full_name: Полное имя вроде "Юрий Каменский"
+            
+        Returns:
+            Фамилия или исходное имя если не смогли разобрать
+        """
+        if not full_name:
+            return full_name
+        
+        words = full_name.split()
+        if len(words) <= 1:
+            return full_name  # Одно слово - оставляем как есть
+        
+        # Ищем какое слово есть в known_names (КРОМЕ инициалов)
+        found_name_words = []
+        
+        for i, word in enumerate(words):
+            word_lower = word.lower()
+            
+            # Пропускаем инициалы (А, А., В., А.В., А.В.М., и т.п.)
+            # Инициалы: только буквы и точки, максимум 3 буквы
+            letter_count = sum(1 for c in word_lower if c.isalpha())
+            punct_count = word_lower.count('.')
+            
+            # Если это похоже на инициалы (мало букв, много точек относительно букв)
+            if letter_count <= 3 and punct_count >= letter_count - 1 and '.' in word_lower:
+                continue  # Это инициалы, не считаем
+            
+            word_clean = re.sub(r'[^\w]', '', word_lower)  # Удаляем пунктуацию
+            
+            if word_clean and word_clean in self.author_names:
+                # Нашли известное имя - добавляем индекс этого слова
+                found_name_words.append(i)
+        
+        # Если нашли известное имя - остальное = фамилия
+        if found_name_words:
+            # Собираем остальные слова как фамилию
+            surname_words = [word for i, word in enumerate(words) if i not in found_name_words]
+            if surname_words:
+                return ' '.join(surname_words)
+        
+        # Если не нашли в known_names - используем последнее слово как фамилию
+        # (это мало вероятно, но имеет смысл для неизвестных авторов)
+        if len(words) >= 2:
+            # Удаляем инициалы (А, А., В., А.В., и т.п.)
+            non_initial_words = []
+            for w in words:
+                w_lower = w.lower()
+                letter_count = sum(1 for c in w_lower if c.isalpha())
+                punct_count = w_lower.count('.')
+                # Если это НЕ инициалы - добавляем
+                if not (letter_count <= 3 and punct_count >= letter_count - 1 and '.' in w_lower):
+                    non_initial_words.append(w)
+            
+            if len(non_initial_words) >= 1:
+                # Если есть слова кроме инициалов - последнее из них = фамилия
+                return non_initial_words[-1]
+        
+        return full_name
+    
     def _expand_author_to_full_name(self, partial_author: str, metadata_authors: str) -> str:
         """Расширить partial author name до полного формата "Фамилия Имя" используя metadata.
         
@@ -625,6 +742,9 @@ class RegenCSVService:
         - Если одно слово (только фамилия) → найти в metadata и вернуть полное имя
         - Если 2 слова → проверить, совпадает ли с metadata author. Если нет → попытаться разобрать как несколько авторов
         - Если 2+ слова и совпадает с metadata → вернуть как есть
+        
+        Поддерживает нюансы русских фамилий:
+        - "Каменские" (множественное число) → совпадает с "Каменский" и "Каменская"
         
         Args:
             partial_author: Извлечённое имя автора (может быть incomplete)
@@ -645,14 +765,32 @@ class RegenCSVService:
                 surname = words[0]
                 matching_authors = []  # Собираем всех авторов с этой фамилией
                 
+                # Нормализуем фамилию из filename (может быть "Каменские")
+                surname_normalized = self._normalize_surname_endings(surname)
+                
                 for full_name in metadata_authors_list:
                     full_lower = full_name.lower()
                     surname_lower = surname.lower()
+                    surname_normalized_lower = surname_normalized.lower()
                     
-                    # Проверяем в конце (обычный порядок Фамилия Имя)
-                    if full_lower.endswith(surname_lower) or full_lower.startswith(surname_lower):
+                    # Извлекаем фамилию из полного имени, правильно обрабатывая разные порядки слов
+                    # "Юрий Каменский" → фамилия = "Каменский"
+                    # "Каменский Юрий" → фамилия = "Каменский"
+                    metadata_surname = self._extract_surname_from_fullname(full_name)
+                    metadata_surname_lower = metadata_surname.lower()
+                    metadata_surname_normalized = self._normalize_surname_endings(metadata_surname)
+                    metadata_surname_normalized_lower = metadata_surname_normalized.lower()
+                    
+                    # Проверяем разные варианты совпадения:
+                    # 1. Точное совпадение фамилий
+                    if surname_lower == metadata_surname_lower:
                         matching_authors.append(full_name)
-                    # Или может быть фамилия прямо в имени
+                    # 2. Совпадение нормализованных корней (Каменские == Каменский + Каменская)
+                    elif surname_normalized_lower == metadata_surname_normalized_lower:
+                        matching_authors.append(full_name)
+                    # 3. Старая логика - для остальных случаев
+                    elif full_lower.endswith(surname_lower) or full_lower.startswith(surname_lower):
+                        matching_authors.append(full_name)
                     elif surname_lower in full_lower.split():
                         matching_authors.append(full_name)
                 
