@@ -1103,6 +1103,36 @@ class FB2AuthorExtractor:
                     return True
         return False
     
+    def _detect_correct_encoding(self, fb2_path: Path) -> str:
+        """Автоматически определить правильную кодировку FB2 файла.
+        
+        Проверяет только 2 кодировки: UTF-8 и CP1251.
+        Возвращает содержимое первой которая успешно читается без ошибок.
+        
+        Returns:
+            Содержимое файла с правильной кодировкой, или '' если не удалось прочитать
+        """
+        # Пробуем только 2 кодировки в порядке: UTF-8, потом CP1251
+        for encoding in ['utf-8', 'cp1251']:
+            try:
+                with open(fb2_path, 'r', encoding=encoding, errors='strict') as f:
+                    content = f.read()
+                
+                if content:
+                    return content
+                    
+            except (UnicodeDecodeError, Exception):
+                continue
+        
+        # Если обе не сработали со strict, берём с replace (fallback)
+        try:
+            with open(fb2_path, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read()
+        except Exception:
+            return ''
+    
+    
+    
     def _extract_author_from_metadata(self, fb2_path: Path) -> str:
         """
         Извлечь автора из метаданных FB2 файла.
@@ -1114,25 +1144,8 @@ class FB2AuthorExtractor:
         try:
             import re
             
-            content = None
-            
-            # Попробуем разные кодировки в порядке приоритета
-            # FB2 файлы часто в cp1251 (старые русские), так что пробуем её первой
-            encodings_to_try = [
-                ('cp1251', 'strict'),     # Русская кодировка - часто встречается в старых FB2
-                ('utf-8', 'strict'),      # UTF-8 без ошибок
-                ('cp1251', 'replace'),    # Русская кодировка с заменой
-                ('utf-8', 'replace'),     # UTF-8 с заменой
-                ('latin-1', 'replace'),   # Fallback - всегда работает
-            ]
-            
-            for encoding, errors in encodings_to_try:
-                try:
-                    with open(fb2_path, 'r', encoding=encoding, errors=errors) as f:
-                        content = f.read()
-                    break
-                except Exception:
-                    continue
+            # Использовать функцию автоматического определения кодировки
+            content = self._detect_correct_encoding(fb2_path)
             
             if not content:
                 return ''
@@ -1191,24 +1204,8 @@ class FB2AuthorExtractor:
         try:
             import re
             
-            content = None
-            
-            # Попробуем разные кодировки в порядке приоритета
-            encodings_to_try = [
-                ('cp1251', 'strict'),     # Русская кодировка - часто встречается в старых FB2
-                ('utf-8', 'strict'),      # UTF-8 без ошибок
-                ('cp1251', 'replace'),    # Русская кодировка с заменой
-                ('utf-8', 'replace'),     # UTF-8 с заменой
-                ('latin-1', 'replace'),   # Fallback - всегда работает
-            ]
-            
-            for encoding, errors in encodings_to_try:
-                try:
-                    with open(fb2_path, 'r', encoding=encoding, errors=errors) as f:
-                        content = f.read()
-                    break
-                except Exception:
-                    continue
+            # Использовать функцию автоматического определения кодировки
+            content = self._detect_correct_encoding(fb2_path)
             
             if not content:
                 return ''
@@ -1278,24 +1275,8 @@ class FB2AuthorExtractor:
             Название книги или None
         """
         try:
-            content = None
-            
-            # Спробуем разные кодировки
-            encodings_to_try = [
-                ('cp1251', 'strict'),
-                ('utf-8', 'strict'),
-                ('cp1251', 'replace'),
-                ('utf-8', 'replace'),
-                ('latin-1', 'replace'),
-            ]
-            
-            for encoding, errors in encodings_to_try:
-                try:
-                    with open(fb2_path, 'r', encoding=encoding, errors=errors) as f:
-                        content = f.read()
-                    break
-                except Exception:
-                    continue
+            # Использовать функцию автоматического определения кодировки
+            content = self._detect_correct_encoding(fb2_path)
             
             if not content:
                 return None
