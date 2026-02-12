@@ -1067,50 +1067,43 @@ class RegenCSVService:
         return folder_authors
     
     def _parse_single_top_level_dir(self, top_dir: Path, folder_authors_lock) -> Dict[Path, str]:
-        """Парсить одну top-level папку и найти авторскую папку.
+        """Парсить одну top-level папку и найти все авторские папки (прямые подпапки).
+        
+        Логика:
+        1. Итерировать ВСЕ прямые подпапки top_dir (не рекурсивно)
+        2. Для каждой подпапки - применить conversions
+        3. Парсить название папки - если парсится как автор - это авторская папка
+        4. Добавить в результат
         
         Args:
-            top_dir: Одна из top-level папок
+            top_dir: Одна из top-level папок (контейнер для всех авторов)
             folder_authors_lock: Lock для потокобезопасного доступа
             
         Returns:
-            Dict с найденной авторской папкой (может быть пусто)
+            Dict со найденными авторскими папками {папка: название_автора}
         """
         result = {}
         
         try:
-            # Найти первый FB2 файл в этой папке или её подпапках
-            first_fb2 = None
-            for fb2_file in top_dir.rglob('*.fb2'):
-                first_fb2 = fb2_file
-                break  # Берём ПЕРВЫЙ найденный файл
+            # Найти ВСЕ прямые подпапки (не рекурсивно!)
+            # Это папки авторов или контейнеры серий
+            direct_subdirs = sorted([d for d in top_dir.iterdir() if d.is_dir()])
             
-            if not first_fb2:
-                return result  # В этой папке нет FB2 файлов
+            conversions = self.settings.get_author_surname_conversions()
             
-            # Идти вверх по иерархии папок (от файла к корню) до work_dir
-            current_path = first_fb2.parent
-            
-            while current_path != current_path.parent and current_path != self.work_dir:
-                folder_name = current_path.name
+            for subdir in direct_subdirs:
+                folder_name = subdir.name
                 
-                # ВАЖНО: Применить конвертацию к названию папки ДО парсинга!
+                # Применить конвертацию к названию папки
                 # Например: "Гоблин (MeXXanik)" → "Гоблин MeXXanik"
-                conversions = self.settings.get_author_surname_conversions()
                 folder_name_to_parse = conversions.get(folder_name, folder_name)
                 
-                # Парсим эту папку для поиска авторского имени
-                # ВАЖНО: НЕ применяем blacklist при проверке авторской папки!
-                # Авторская папка определяется по паттернам, blacklist нужен для других контекстов
+                # Проверить: парсится ли это как автор?
                 author_name = self._parse_author_from_folder_name(folder_name_to_parse)
                 
                 if author_name:
-                    # Нашли имя АВТОРА!
-                    result[current_path] = author_name
-                    break  # Остановиться - все подпапки этой папки уже покрыты
-                else:
-                    # Это не авторская папка (или серия) - идти выше
-                    current_path = current_path.parent
+                    # Нашли авторскую папку!
+                    result[subdir] = author_name
         
         except Exception as e:
             self.logger.log(f"[Структура] Ошибка при парсинге {top_dir}: {e}")
