@@ -381,6 +381,7 @@ class RegenCSVService:
         # Отслеживаем лучшее совпадение
         best_author = None
         best_group_count = 0
+        best_pattern_desc = None
         
         # Перебрать ВСЕ паттерны и выбрать наиболее полный
         for pattern_dict in self.author_patterns:
@@ -408,8 +409,32 @@ class RegenCSVService:
                             # Проверить что это действительно имя автора
                             # ПРИОРИТЕТ: 1) известное имя, 2) похоже на имя по структуре
                             if self._contains_author_name(author) or self._looks_like_author_name(author):
-                                best_author = author
-                                best_group_count = matched_groups
+                                # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: валидация качества совпадения
+                                # Паттерны с точкой более надежны для текстов содержащих точку
+                                is_point_pattern = '.' in pattern_desc
+                                author_has_point = '.' in author
+                                
+                                # Если паттерн БЕЗ точки, но автор содержит точку - вероятно ошибка
+                                if not is_point_pattern and author_has_point:
+                                    # Точка в авторе для паттернов без точки - плохой знак
+                                    # Пропустить этот паттерн и искать лучше
+                                    continue
+                                
+                                # ВАЖНО: Для паттернов с точкой (Author. Title) доверяем результату!
+                                # Точка - это очень надежный разделитель между автором и остальным
+                                if is_point_pattern:
+                                    # Паттерн с точкой very специфичен, принимаем результат
+                                    best_author = author
+                                    best_group_count = matched_groups
+                                    best_pattern_desc = pattern_desc
+                                    # НЕ проверяем _looks_like_series_name для точечных паттернов
+                                    # Точка - достаточный признак авторского имени
+                                else:
+                                    # Для паттернов БЕЗ точки - применяем фильтр
+                                    if not self._looks_like_series_name(author):
+                                        best_author = author
+                                        best_group_count = matched_groups
+                                        best_pattern_desc = pattern_desc
             except Exception:
                 # Если проблема с regex - пропустить этот паттерн
                 continue
@@ -567,7 +592,7 @@ class RegenCSVService:
         """Проверить похоже ли это на название серии, а не имя автора.
         
         Эвристики:
-        - Содержит слова из blacklist (названия папок, серий)
+        - Содержит слова из blacklist (названия папок, серий) - проверяем ЦЕЛЫЕ СЛОВА
         - Все слова известные нарицательные (не имена собственные)
         - Совпадает с существующими серийными паттернами
         
@@ -581,12 +606,14 @@ class RegenCSVService:
             return False
         
         blacklist = self.settings.get_filename_blacklist()
-        text_lower = text.lower()
+        text_words = [w.lower() for w in text.split()]  # Разбиваем на слова
         
-        # Проверить сколько слов из blacklist содержится
+        # Проверить сколько ЦЕЛЫХ СЛОВ из blacklist содержится
+        # ВАЖНО: проверяем целые слова, не подстроки!
+        # Пример: "логин" в blacklist НЕ должно исключать "Логинов"
         blacklist_word_count = 0
         for word in blacklist:
-            if word.lower() in text_lower:
+            if word.lower() in text_words:  # ← Проверяем целое слово в списке слов
                 blacklist_word_count += 1
         
         # Если много слов blacklist - это серия/описание
@@ -594,11 +621,10 @@ class RegenCSVService:
             return True
         
         # Проверить слова в author_names
-        words = text.split()
-        words_in_author_names = sum(1 for w in words if w.lower() in self.author_names)
+        words_in_author_names = sum(1 for w in text_words if w in self.author_names)
         
         # Если НОЛЬ слов из author_names (имён авторов) - это вероятно серия
-        if words_in_author_names == 0 and len(words) <= 3:
+        if words_in_author_names == 0 and len(text_words) <= 3:
             # Типа "Другой мир", "Парижский отдел" - общие русские слова, не имена
             # Срабатывает только для коротких описаний (2-3 слова)
             return True
@@ -1261,10 +1287,37 @@ class RegenCSVService:
                 # Шаг 2: Обработать несколько авторов и убрать дубликаты
                 final_author = self._process_and_expand_authors(cleaned_author, record, self.records)
                 
-                record.proposed_author = final_author
-                record.author_source = "filename"
-                extracted_count += 1
-                continue
+                # Шаг 3: ПОДТВЕРЖДЕНИЕ по метаданным!
+                # Проверить совпадает ли извлеченный автор с метаданными FB2
+                is_metadata_confirmed = True  # По умолчанию доверяем extraction
+                
+                if record.metadata_authors and record.metadata_authors not in ("Сборник", "[неизвестно]"):
+                    # Есть метаданные - проверим совпадение
+                    metadata_lower = record.metadata_authors.lower()
+                    final_author_lower = final_author.lower()
+                    
+                    # Проверяем совпадает ли:
+                    # 1. Точное совпадение: "Логинов" == "Логинов" в метаданных
+                    # 2. Частичное совпадение: "Логинов" содержится в "Анатолий Логинов"
+                    # 3. Обратное совпадение: "Анатолий" из метаданных содержится в "Логинов Анатолий"
+                    
+                    is_in_metadata = (
+                        final_author_lower in metadata_lower or  # "Логинов" в "Анатолий Логинов"
+                        metadata_lower in final_author_lower or  # "Анатолий Логинов" в "Логинов Анатолий"
+                        any(word in metadata_lower for word in final_author_lower.split())  # Любое слово совпадает
+                    )
+                    
+                    is_metadata_confirmed = is_in_metadata
+                
+                # Если метаданные подтверждают - используем extracted author
+                if is_metadata_confirmed:
+                    record.proposed_author = final_author
+                    record.author_source = "filename"
+                    extracted_count += 1
+                    continue
+                
+                # Если метаданные НЕ подтверждают - не используем extraction
+                # Попробуем папки или metadata (пропускаем continue)
             
             # Если в имени файла не нашлось - проверить папки
             # Используем кеш для избежания повторного парсинга одной папки
