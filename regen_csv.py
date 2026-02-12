@@ -225,7 +225,7 @@ class RegenCSVService:
         # ВАЖНО: Нормализировать диакритику! Жеребьёв → жеребьев
         text_normalized = self._normalize_diacritics(text_lower)
         
-        words = re.split(r'[,\-\.\s«»()]+', text_normalized)
+        words = re.split(r'[,\-\.\s«»();]+', text_normalized)
         
         for word in words:
             word_clean = word.strip()
@@ -275,6 +275,10 @@ class RegenCSVService:
         """
         # Маппинг описаний паттернов папок на regex с именованными группами
         patterns_map = {
+            "Author, Author": (
+                r'^(?P<author>[^,]+?)\s*,\s*(?P<author2>.+)$',
+                ['author', 'author2']
+            ),
             "Author": (
                 r'^(?P<author>[А-Яа-яЁё\w\s\.]+?)$',
                 ['author']
@@ -570,14 +574,38 @@ class RegenCSVService:
                         author = match.group('author')
                         if author:
                             author = author.strip()
+                            
+                            # НОВОЕ: Проверить есть ли второй автор (для папок типа "Author1, Author2")
+                            if 'author2' in group_names and match.group('author2'):
+                                author2 = match.group('author2').strip()
+                                
+                                # Логика восстановления полного ФИ для второго автора
+                                # Если author2 - только одно слово (имя), добавить фамилию из author1
+                                author2_words = author2.split()
+                                if len(author2_words) == 1:
+                                    # author2 - только имя, добавить фамилию из author
+                                    author_words = author.split()
+                                    if author_words:
+                                        # Фамилия обычно первое слово в формате "Фамилия Имя"
+                                        surname = author_words[0]
+                                        author2 = surname + " " + author2  # "Белаш Людмила"
+                                
+                                author = author + "; " + author2  # Объединить обоих авторов через ";"
+                            
                             # Проверить что это действительно имя автора
                             # ПРИОРИТЕТ: 1) известное имя, 2) похоже на имя по структуре
                             if self._contains_author_name(author) or self._looks_like_author_name(author):
+                                # DEBUG
+                                if folder_name.startswith("Белаш") or folder_name.startswith("Бирюков"):
+                                    self.logger.log(f"[DEBUG] Author passed validation: {author}")
+                                
                                 # ДОПОЛНИТЕЛЬНЫЙ ФИЛЬТР: Проверить не это ли просто описание?
                                 # "Другой мир" vs "Максим Шаттам" - первое это описание, второе имя
                                 # Эвристит: если слова не в known_authors И совпадает с blacklist - это описание
                                 if self._looks_like_series_name(author):
                                     # Это похоже на название серии/описание, а не имя автора
+                                    if folder_name.startswith("Белаш") or folder_name.startswith("Бирюков"):
+                                        self.logger.log(f"[DEBUG] Author looks like series, skipping: {author}")
                                     continue
                                 
                                 best_author = author

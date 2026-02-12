@@ -67,17 +67,22 @@ class AuthorNormalizer:
         config_path = self.settings._config_path if hasattr(self.settings, '_config_path') else 'config.json'
         AuthorName.set_config_path(config_path)
     
-    def normalize_format(self, author: str) -> str:
+    def normalize_format(self, author: str, metadata_authors: str = "") -> str:
         """Нормализовать формат автора.
         
         "Иван Петров" → "Петров Иван"
         Если несколько авторов разделены '; ' → нормализует каждого и разделяет запятой
         "А.Михайловский; А.Харников" → "Михайловский А., Харников А."
         
+        Если автор содержит неполное ФИ (только имя), использует metadata_authors для восстановления.
+        Пример: "Белаш Александр; Людмила" + metadata_authors="Людмила Белаш; Александр Белаш"
+        → "Белаш Александр; Людмила Белаш" (восстановлена фамилия для второго)
+        
         Используется в PASS 3.
         
         Args:
             author: Имя автора в любом формате
+            metadata_authors: Авторы из метаданных (для восстановления неполных ФИ)
             
         Returns:
             Нормализованное имя
@@ -90,9 +95,27 @@ class AuthorNormalizer:
             authors = author.split('; ')
             normalized_authors = []
             
+            # Парсируем metadata_authors для восстановления неполных ФИ
+            metadata_authors_list = []
+            if metadata_authors:
+                metadata_authors_list = [a.strip() for a in metadata_authors.replace(';', ',').split(',')]
+            
             for single_author in authors:
                 single_author = single_author.strip()
                 if single_author:
+                    # Проверить если это неполное ФИ (одно слово)
+                    author_words = single_author.split()
+                    if len(author_words) == 1 and metadata_authors_list:
+                        # Одно слово - это имя, нужно найти фамилию из metadata
+                        single_word = author_words[0]
+                        # Ищем в metadata авторов, где это слово есть
+                        for meta_author in metadata_authors_list:
+                            meta_words = meta_author.split()
+                            if single_word in meta_words:
+                                # Используем полное ФИ из metadata
+                                single_author = meta_author
+                                break
+                    
                     name_obj = AuthorName(single_author)
                     normalized = name_obj.normalized if name_obj.is_valid else single_author
                     normalized_authors.append(normalized)
@@ -249,6 +272,9 @@ def apply_author_normalization(record: BookRecord, normalizer: Optional[AuthorNo
     "Иван Петров" → "Петров Иван"
     "А.Михайловский; А.Харников" → "Михайловский А., Харников А." (нормализованные, через запятую)
     
+    Если автор содержит неполное ФИ, использует metadata_authors для восстановления:
+    "Белаш Александр; Людмила" → "Белаш Александр; Людмила Белаш" → "Белаш Александр, Белаш Людмила"
+    
     Args:
         record: BookRecord для обновления
         normalizer: AuthorNormalizer instance (создаётся если None)
@@ -263,12 +289,10 @@ def apply_author_normalization(record: BookRecord, normalizer: Optional[AuthorNo
     
     # Проверить если несколько авторов разделены '; ' (временный разделитель из папки)
     if '; ' in record.proposed_author:
-        authors = record.proposed_author.split('; ')
-        normalized_authors = [normalizer.normalize_format(a) for a in authors]
-        # Объединять через запятую
-        record.proposed_author = ', '.join(normalized_authors)
+        # Передать metadata_authors для восстановления неполных ФИ
+        record.proposed_author = normalizer.normalize_format(original, record.metadata_authors)
     else:
-        record.proposed_author = normalizer.normalize_format(original)
+        record.proposed_author = normalizer.normalize_format(original, record.metadata_authors)
 
 
 def apply_surname_conversions_to_records(records: List[BookRecord], 
