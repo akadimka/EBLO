@@ -1,0 +1,24 @@
+Fix critical architecture bugs in 6-PASS system: PASS 1 Сборник default and PASS 4 consensus protection
+
+PASS 1: Remove Сборник default that blocks fallback mechanism
+- Changed proposed_author=author or "Сборник" to proposed_author=author or ""
+- Allows empty values to flow through PASS 2 and PASS 2 Fallback
+- Impact: 18 records now correctly use metadata as fallback instead of being stuck as Сборник
+
+PASS 4: Protect metadata-sourced authors from consensus overwrite
+- Fixed apply_author_consensus() to exclude "metadata" source from consensus processing
+- Changed 'other_records' to 'undetermined_records' to only include unattributed files
+- Added clear source tracking: folder_dataset, filename, metadata are all "determined"
+- Impact: Files like "Лидин, Серебряная" keep metadata authors instead of being overwritten
+
+Additional fixes:
+- Improved validation order in filename extraction (blacklist check BEFORE known author words)
+- Added regex patterns for multi-author format (Author, Author. Title)
+- Added "СССР" to blacklist words to prevent false author extraction
+
+Fixes these specific issues:
+✓ Жеребьёв files: Now extract "Владислав Жеребьёв" from filename (not Сборник)
+✓ Логинов. СССР: Now extracts "Логинов" (blacklist protects from СССР noise)
+✓ Лидин, Серебряная: Now uses metadata "Александр Лидин; Татьяна Серебряная"
+
+Test results: 672 files processed, CSV shows 654 (97%) from filename, 18 (3%) from metadata

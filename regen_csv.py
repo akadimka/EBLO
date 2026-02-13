@@ -358,6 +358,14 @@ class RegenCSVService:
                 r'^(?P<author>[^-]+?\s*,\s*[^-]+?)\s*-\s*(?P<title>[^(]+?)\s*\((?P<series>[^)]+)\)(?:\s*-\s*.+)?$',
                 ['author', 'title', 'series']
             ),
+            "Author, Author. Title": (
+                r'^(?P<author>[^.]+\s*,\s*[^.]+)\.\s*(?P<title>.+?)(?:\(.+\))?$',
+                ['author', 'title']
+            ),
+            "Author, Author. Title. (Series)": (
+                r'^(?P<author>[^.]+\s*,\s*[^.]+)\.\s*(?P<title>[^.]+)\.\s*\((?P<series>[^)]+)\)$',
+                ['author', 'title', 'series']
+            ),
         }
         
         return patterns_map.get(pattern_desc)
@@ -415,17 +423,23 @@ class RegenCSVService:
                             # Это предотвращает ложное извлечение названий серий или описаний
                             has_known_author_words = self._contains_author_name(author)
                             looks_like_author_structurally = self._looks_like_author_name(author)
+                            is_blacklisted = self._looks_like_series_name(author)  # Проверка blacklist И серийности
                             
                             # ВАЖНО: Требуем чтобы ЛИБО:
                             # 1. Автор содержит известные авторские слова (высокая уверенность)
+                            #    ИТо НЕ содержит blacklist слова вроде "Сборник", "СССР" и т.д.
                             # 2. Структурно выглядит как имя И не похож на серию/описание
                             
                             should_accept = False
                             
-                            if has_known_author_words:
-                                # У нас есть известные авторские слова - это надежный критерий
+                            # ⚠️ КРИТИЧНО: Сначала проверяем БЕЗ blacklist слов!
+                            if is_blacklisted:
+                                # Содержит blacklist слова или похоже на серию → отвергаем
+                                should_accept = False
+                            elif has_known_author_words:
+                                # У нас есть известные авторские слова И нет blacklist слов
                                 should_accept = True
-                            elif looks_like_author_structurally and not self._looks_like_series_name(author):
+                            elif looks_like_author_structurally:
                                 # Структурно похоже на имя И не похоже на серию/описание
                                 should_accept = True
                             
@@ -1346,8 +1360,8 @@ class RegenCSVService:
                     file_path=str(rel_path),
                     file_title=title or "[без названия]",
                     metadata_authors=metadata_authors or "[неизвестно]",
-                    proposed_author=author or "Сборник",
-                    author_source=source or "metadata",
+                    proposed_author=author or "",  # ← PASS 1 результат (может быть пусто!)
+                    author_source=source or "",  # ← PASS 1 источник (может быть пусто!)
                     metadata_series=metadata_series,
                     proposed_series=metadata_series,  # На PASS 1 = metadata (пока пусто)
                     series_source=""  # На PASS 1: series не заполняется (нет логики)

@@ -332,9 +332,13 @@ def apply_author_consensus(records: List[BookRecord],
     """PASS 4: Применить консенсус к группам файлов.
     
     Для каждой группы файлов (определяемой group_key_func):
-    1. Отфильтровать файлы с author_source="folder_dataset" или "filename" (они не меняются!)
-    2. Найти консенсусного автора среди остальных
-    3. Применить его ко всей группе файлов с source="metadata"
+    1. Отфильтровать файлы с определённым источником (folder_dataset, filename, metadata)
+       - Эти файлы НЕ меняются, у них уже есть надёжный источник!
+    2. Найти консенсусного автора среди файлов БЕЗ источника
+    3. Применить консенсус только к файлам без источника
+    
+    ⚠️ КРИТИЧНО: Файлы с author_source="metadata" (из PASS 2 Fallback) НЕ переписываются!
+    Это не "other_records" - это результат fallback механизма и имеют определённый источник.
     
     Args:
         records: Список BookRecord для обновления
@@ -357,16 +361,22 @@ def apply_author_consensus(records: List[BookRecord],
     
     # Обработать каждую группу
     for group_key, group_records in groups.items():
-        # Отфильтровать файлы с надёжными источниками (не меняем их)
-        reliable_records = [r for r in group_records if r.author_source in ("folder_dataset", "filename")]
-        other_records = [r for r in group_records if r.author_source not in ("folder_dataset", "filename")]
+        # ⚠️ ИСПРАВЛЕНИЕ: Исключить файлы с ДЛЮБЫм определённым источником
+        # folder_dataset - определён в PASS 1
+        # filename - определён в PASS 2
+        # metadata - определён в PASS 2 Fallback
+        # Консенсус применяется ТОЛЬКО к файлам где source="" (пусто)
+        determined_records = [r for r in group_records 
+                            if r.author_source in ("folder_dataset", "filename", "metadata")]
+        undetermined_records = [r for r in group_records 
+                               if r.author_source not in ("folder_dataset", "filename", "metadata")]
         
-        if not other_records:
-            # Все файлы уже определены - консенсус не нужен
+        if not undetermined_records:
+            # Все файлы в группе уже имеют определённый источник - консенсус не нужен
             continue
         
-        # Найти консенсусного автора среди других файлов
-        authors = [r.proposed_author for r in other_records]
+        # Найти консенсусного автора среди файлов БЕЗ источника
+        authors = [r.proposed_author for r in undetermined_records]
         authors_normalized = [normalizer.normalize_format(a) for a in authors]
         
         # Найти самого частого автора
@@ -374,14 +384,14 @@ def apply_author_consensus(records: List[BookRecord],
         consensus_author = counter.most_common(1)[0][0]
         consensus_count = counter.most_common(1)[0][1]
         
-        # Применить консенсус только к файлам без надёжного источника
-        for record in other_records:
+        # Применить консенсус ТОЛЬКО к файлам без источника
+        for record in undetermined_records:
             original = record.proposed_author
             record.proposed_author = consensus_author
             record.author_source = "consensus"
             
             logger.log(f"[PASS 4] Консенсус в {group_key}: {original} → {consensus_author} "
-                      f"({consensus_count}/{len(other_records)})")
+                      f"({consensus_count}/{len(undetermined_records)})")
 
 
 def build_authors_map(records: List[BookRecord], 
