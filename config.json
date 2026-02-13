@@ -189,12 +189,12 @@
   ],
   "author_series_patterns_in_folders": [
     {
-      "pattern": "Author",
-      "example": "Иван Петров"
-    },
-    {
       "pattern": "Author, Author",
       "example": "Иван Петров, Сергей Иванов"
+    },
+    {
+      "pattern": "(Surname) (Name)",
+      "example": "Волков Тим"
     },
     {
       "pattern": "Author - Folder Name",
@@ -425,6 +425,7 @@
     "Руслан",
     "Рустам",
     "Савелий",
+    "Саша",
     "Сергей",
     "Святослав",
     "Сергей",

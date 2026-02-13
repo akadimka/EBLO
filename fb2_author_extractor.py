@@ -869,11 +869,13 @@ class FB2AuthorExtractor:
         """
         Проверить, выглядит ли значение как имя автора.
         
-        Критерии валидности:
-        - НЕ в черном списке (том, часть, выпуск, сборник и т.д.)
-        - Содержит хотя бы одну букву (не только цифры/символы)
-        - Не выглядит как название места/события (не в UPPERCASE целиком)
-        - Имеет разумную длину (не слишком короткое/длинное)
+        СТРОГАЯ ВАЛИДАЦИЯ:
+        1. Черный список (том, часть, выпуск, сборник и т.д.)
+        2. Разумная длина (2-100 символов)
+        3. Буквы (не только цифры)
+        4. Не в UPPERCASE целиком
+        5. ГЛАВНОЕ: Должно содержать известные авторские слова ИЛИ выглядеть как структурное имя (2+ слова)
+           но НЕ выглядеть как название серии/описания
         
         Args:
             value: Значение для проверки
@@ -893,7 +895,6 @@ class FB2AuthorExtractor:
             return False
         
         # Проверка 3: Не может быть всё в UPPERCASE (похоже на географическое название, аббревиатуру)
-        # "СССР", "USA", "ENGLAND" - это не имена авторов
         if value.isupper() and len(value) > 1:
             return False
         
@@ -901,7 +902,75 @@ class FB2AuthorExtractor:
         if len(value) < 2 or len(value) > 100:
             return False
         
-        return True
+        # ГЛАВНАЯ ПРОВЕРКА 5: Должно содержать известные авторские слова ИЛИ выглядеть как имя
+        # Но НЕ выглядеть как название серии
+        has_known_author_words = self._contains_known_author_name(value)
+        looks_like_series = self._looks_like_series_description(value)
+        
+        if has_known_author_words:
+            # Есть известные авторские слова - это хороший знак
+            return True
+        
+        if looks_like_series:
+            # Выглядит как название серии/описания - отклонить
+            return False
+        
+        # Проверить структурное сходство с именем (2+ слова, начинающихся с заглавной)
+        words = re.split(r'\s+', value)
+        if len(words) >= 2:
+            # Проверить: есть ли капитализация
+            capitalized_words = [w for w in words if w and w[0].isupper()]
+            if len(capitalized_words) >= 2:
+                # Выглядит структурно как имя (Иван Петров)
+                return True
+        
+        return False
+    
+    def _contains_known_author_name(self, text: str) -> bool:
+        """Check if text contains any known author names from config."""
+        try:
+            text_normalized = self._normalize_diacritics(text.lower())
+            words = re.split(r'[^а-яa-z]+', text_normalized)
+            
+            for word in words:
+                if word and len(word) >= 2:
+                    if word in self.author_names:
+                        return True
+            return False
+        except:
+            return False
+    
+    def _looks_like_series_description(self, text: str) -> bool:
+        """Check if text looks like series name, not author name."""
+        try:
+            # Blacklist слова, указывающие на серию/сборник
+            blacklist = ['выпуск', 'сборник', 'серия', 'цикл', 'книга', 'том', 'часть', 'номер', 'сборка']
+            text_lower = text.lower()
+            
+            # Если содержит blacklist слова - это серия
+            if any(word in text_lower for word in blacklist):
+                return True
+            
+            # Проверить структурное сходство: выглядит ли это как имя автора?
+            # "Иван Петров" (2 слова, оба капитализированы) - это имя, а не серия
+            words = re.split(r'\s+', text)
+            if len(words) >= 2:
+                # Проверить: есть ли капитализация (имена обычно начинаются с заглавной)
+                capitalized_words = [w for w in words if w and w[0].isupper()]
+                if len(capitalized_words) >= 2:
+                    # Выглядит структурно как имя (Иван Петров, Мороз Игорь)
+                    # Это НЕ серия, это потенциальное имя автора
+                    return False
+            
+            # Если нет известных авторских слов И текст короткий И не выглядит как имя - вероятно серия
+            if not self._contains_known_author_name(text):
+                if len(words) <= 3:
+                    # Короткий текст без известных авторских слов и без цписанной структуры имени
+                    return True
+            
+            return False
+        except:
+            return False
     
     def _select_best_pattern(self, filename: str, pattern_type: str = 'files') -> Optional[Dict[str, str]]:
         """

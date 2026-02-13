@@ -268,7 +268,7 @@ class RegenCSVService:
         """Конвертировать описание паттерна ПАПКИ в regex с группами.
         
         Args:
-            pattern_desc: Description like "Author" или "Author - Folder Name" или "Series (Author)"
+            pattern_desc: Description like "(Surname) (Name)" или "Author - Folder Name" или "Series (Author)"
             
         Returns:
             Tuple (regex_pattern, group_names) или None если не распознан
@@ -279,9 +279,9 @@ class RegenCSVService:
                 r'^(?P<author>[^,]+?)\s*,\s*(?P<author2>.+)$',
                 ['author', 'author2']
             ),
-            "Author": (
-                r'^(?P<author>[А-Яа-яЁё\w\s\.]+?)$',
-                ['author']
+            "(Surname) (Name)": (
+                r'^(?P<author>\S+)\s+(?P<author2>\S+)$',
+                ['author', 'author2']
             ),
             "Author - Folder Name": (
                 r'^(?P<author>[^-]+?)\s*-\s*(?P<folder_name>.+)$',
@@ -410,35 +410,33 @@ class RegenCSVService:
                         author = match.group('author')
                         if author:
                             author = author.strip()
-                            # Проверить что это действительно имя автора
-                            # ПРИОРИТЕТ: 1) известное имя, 2) похоже на имя по структуре
-                            if self._contains_author_name(author) or self._looks_like_author_name(author):
-                                # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: валидация качества совпадения
-                                # Паттерны с точкой более надежны для текстов содержащих точку
-                                is_point_pattern = '.' in pattern_desc
-                                author_has_point = '.' in author
-                                
-                                # Если паттерн БЕЗ точки, но автор содержит точку - вероятно ошибка
-                                if not is_point_pattern and author_has_point:
-                                    # Точка в авторе для паттернов без точки - плохой знак
-                                    # Пропустить этот паттерн и искать лучше
-                                    continue
-                                
-                                # ВАЖНО: Для паттернов с точкой (Author. Title) доверяем результату!
-                                # Точка - это очень надежный разделитель между автором и остальным
-                                if is_point_pattern:
-                                    # Паттерн с точкой very специфичен, принимаем результат
-                                    best_author = author
-                                    best_group_count = matched_groups
-                                    best_pattern_desc = pattern_desc
-                                    # НЕ проверяем _looks_like_series_name для точечных паттернов
-                                    # Точка - достаточный признак авторского имени
-                                else:
-                                    # Для паттернов БЕЗ точки - применяем фильтр
-                                    if not self._looks_like_series_name(author):
-                                        best_author = author
-                                        best_group_count = matched_groups
-                                        best_pattern_desc = pattern_desc
+                            
+                            # СТРОГАЯ ВАЛИДАЦИЯ: автор должен содержать известные слова авторов
+                            # Это предотвращает ложное извлечение названий серий или описаний
+                            has_known_author_words = self._contains_author_name(author)
+                            looks_like_author_structurally = self._looks_like_author_name(author)
+                            
+                            # ВАЖНО: Требуем чтобы ЛИБО:
+                            # 1. Автор содержит известные авторские слова (высокая уверенность)
+                            # 2. Структурно выглядит как имя И не похож на серию/описание
+                            
+                            should_accept = False
+                            
+                            if has_known_author_words:
+                                # У нас есть известные авторские слова - это надежный критерий
+                                should_accept = True
+                            elif looks_like_author_structurally and not self._looks_like_series_name(author):
+                                # Структурно похоже на имя И не похоже на серию/описание
+                                should_accept = True
+                            
+                            if not should_accept:
+                                # Автор не прошел валидацию - пропустить этот паттерн
+                                continue
+                            
+                            # ПРОШЛА ВАЛИДАЦИЯ! Сохранить как лучший результат
+                            best_author = author
+                            best_group_count = matched_groups
+                            best_pattern_desc = pattern_desc
             except Exception:
                 # Если проблема с regex - пропустить этот паттерн
                 continue
@@ -455,59 +453,63 @@ class RegenCSVService:
             True если успешно, False иначе
         """
         try:
-            print("\n" + "🚀 "*40, flush=True)
-            print("\n  📊 РЕГЕНЕРАЦИЯ CSV - 6-PASS СИСТЕМА", flush=True)
-            print(f"  📁 Рабочая папка: {self.work_dir}\n", flush=True)
-            print("🚀 "*40 + "\n", flush=True)
+            print("\n" + "="*80, flush=True)
+            print("\n  CSV REGENERATION - 6-PASS SYSTEM", flush=True)
+            print(f"  Work folder: {self.work_dir}\n", flush=True)
+            print("="*80 + "\n", flush=True)
             
-            self.logger.log("=== Начало регенерации CSV ===")
+            self.logger.log("=== Starting CSV regeneration ===")
             
             # PASS 1: Инициализация - чтение FB2 файлов и определение авторов
             self._pass1_read_fb2_files()
             if not self.records:
-                self.logger.log("❌ Нет найдено FB2 файлов")
+                self.logger.log("[X] No FB2 files found")
                 return False
             
-            self.logger.log(f"✅ PASS 1: Прочитано {len(self.records)} файлов")
+            self.logger.log(f"[OK] PASS 1: Read {len(self.records)} files")
             
-            # PASS 2: Извлечение автора из имени файла
+            # PASS 2: Extract authors from filename
             self._pass2_extract_from_filename()
-            self.logger.log(f"✅ PASS 2: Извлечение авторов из имён файлов")
+            self.logger.log(f"[OK] PASS 2: Authors extracted from filenames")
             
-            # PASS 3: Нормализация формата авторов
+            # PASS 2 Fallback: Если после PASS 1 + PASS 2 proposed_author еще пуст, используем metadata
+            self._pass2_fallback_to_metadata()
+            self.logger.log(f"[OK] PASS 2 Fallback: Metadata applied for remaining records")
+            
+            # PASS 3: Normalize author names
             self._pass3_normalize_authors()
-            self.logger.log(f"✅ PASS 3: Завершена нормализация авторов")
+            self.logger.log(f"[OK] PASS 3: Authors normalized")
             
-            # PASS 4: Применение консенсуса
+            # PASS 4: Apply consensus
             self._pass4_apply_consensus()
-            self.logger.log(f"✅ PASS 4: Завершено применение консенсуса")
+            self.logger.log(f"[OK] PASS 4: Consensus applied")
             
-            # PASS 5: Переприменение conversions
+            # PASS 5: Re-apply conversions
             self._pass5_apply_conversions()
-            self.logger.log(f"✅ PASS 5: Завершено переприменение conversions")
+            self.logger.log(f"[OK] PASS 5: Conversions re-applied")
             
-            # PASS 6: Раскрытие аббревиатур
+            # PASS 6: Expand abbreviations
             self._pass6_expand_abbreviations()
-            self.logger.log(f"✅ PASS 6: Завершено раскрытие аббревиатур")
+            self.logger.log(f"[OK] PASS 6: Abbreviations expanded")
             
-            # Сортировка авторов по алфавиту если их несколько
+            # Sort authors alphabetically when there are multiple
             self._sort_authors_in_records()
-            self.logger.log(f"✅ Авторы отсортированы по алфавиту")
+            self.logger.log(f"[OK] Authors sorted alphabetically")
             
-            # Сортировка записей: отдельные файлы по алфавиту, потом папки по алфавиту
+            # Sort records: single files alphabetically, then folders alphabetically
             self._sort_records()
-            self.logger.log(f"✅ Записи отсортированы")
+            self.logger.log(f"[OK] Records sorted")
             
             # Сохранение в CSV
             csv_path = output_csv or self._get_output_csv_path()
             self._save_csv(csv_path)
             
-            self.logger.log(f"✅ CSV сохранён: {csv_path}")
-            self.logger.log("=== Регенерация завершена успешно ===")
+            self.logger.log(f"[OK] CSV saved: {csv_path}")
+            self.logger.log("=== Regeneration completed successfully ===")
             
-            # Финальный вывод
+            # Final output
             print("="*80, flush=True)
-            print("✅ РЕГЕНЕРАЦИЯ УСПЕШНО ЗАВЕРШЕНА!", flush=True)
+            print("[OK] REGENERATION COMPLETED SUCCESSFULLY!", flush=True)
             print("="*80 + "\n", flush=True)
             
             return True
@@ -575,22 +577,47 @@ class RegenCSVService:
                         if author:
                             author = author.strip()
                             
-                            # НОВОЕ: Проверить есть ли второй автор (для папок типа "Author1, Author2")
+                            # НОВОЕ: Проверить есть ли второй автор (для папок типа "Author1, Author2" или "(Surname) (Name)")
                             if 'author2' in group_names and match.group('author2'):
                                 author2 = match.group('author2').strip()
                                 
-                                # Логика восстановления полного ФИ для второго автора
-                                # Если author2 - только одно слово (имя), добавить фамилию из author1
-                                author2_words = author2.split()
-                                if len(author2_words) == 1:
-                                    # author2 - только имя, добавить фамилию из author
-                                    author_words = author.split()
-                                    if author_words:
-                                        # Фамилия обычно первое слово в формате "Фамилия Имя"
-                                        surname = author_words[0]
-                                        author2 = surname + " " + author2  # "Белаш Людмила"
+                                pattern_name = pattern_dict.get('pattern', '')
                                 
-                                author = author + "; " + author2  # Объединить обоих авторов через ";"
+                                # Для паттерна "(Surname) (Name)" - проверить что оба слова похожи на авторские
+                                if pattern_name == "(Surname) (Name)":
+                                    # Оба слова должны быть похожи на имена/фамилии
+                                    # Либо оба содержать известные авторские слова, либо оба - капитализированные
+                                    author_looks_like_name = (
+                                        self._contains_author_name(author) or 
+                                        self._looks_like_author_name(author)
+                                    )
+                                    author2_looks_like_name = (
+                                        self._contains_author_name(author2) or 
+                                        self._looks_like_author_name(author2)
+                                    )
+                                    
+                                    # Если оба слова похожи на авторские - это вероятно Фамилия Имя
+                                    if not (author_looks_like_name and author2_looks_like_name):
+                                        # Одно или оба слова не похожи на авторские - пропустить
+                                        continue
+                                    
+                                    # Это ОДН автор в двух словах - объединяем с ПРОБЕЛОМ
+                                    author = author + " " + author2  # "Волков Тим" (один автор)
+                                else:
+                                    # Для других паттернов (Author, Author) - это два разных автора
+                                    # Логика восстановления полного ФИ для второго автора
+                                    # Если author2 - только одно слово (имя), добавить фамилию из author1
+                                    author2_words = author2.split()
+                                    if len(author2_words) == 1:
+                                        # author2 - только имя, добавить фамилию из author
+                                        author_words = author.split()
+                                        if author_words:
+                                            # Фамилия обычно первое слово в формате "Фамилия Имя"
+                                            surname = author_words[0]
+                                            author2 = surname + " " + author2  # "Белаш Людмила"
+                                    
+                                    # Объединить двух авторов через ";"
+                                    author = author + "; " + author2  # Разные авторы
                             
                             # Проверить что это действительно имя автора
                             # ПРИОРИТЕТ: 1) известное имя, 2) похоже на имя по структуре
@@ -1098,10 +1125,11 @@ class RegenCSVService:
         """Парсить одну top-level папку и найти все авторские папки (прямые подпапки).
         
         Логика:
-        1. Итерировать ВСЕ прямые подпапки top_dir (не рекурсивно)
-        2. Для каждой подпапки - применить conversions
-        3. Парсить название папки - если парсится как автор - это авторская папка
-        4. Добавить в результат
+        1. СНАЧАЛА проверить сам top_dir - парсится ли как автор? Если да - добавить
+        2. Если top_dir не автор - итерировать ВСЕ его прямые подпапки (не рекурсивно)
+        3. Для каждой подпапки - применить conversions
+        4. Парсить название папки - если парсится как автор - это авторская папка
+        5. Добавить в результат
         
         Args:
             top_dir: Одна из top-level папок (контейнер для всех авторов)
@@ -1113,70 +1141,160 @@ class RegenCSVService:
         result = {}
         
         try:
-            # Найти ВСЕ прямые подпапки (не рекурсивно!)
-            # Это папки авторов или контейнеры серий
-            direct_subdirs = sorted([d for d in top_dir.iterdir() if d.is_dir()])
-            
             conversions = self.settings.get_author_surname_conversions()
             
-            for subdir in direct_subdirs:
-                folder_name = subdir.name
+            # ЭТАП 1: Проверить сам top_dir - это авторская папка?
+            top_dir_name = top_dir.name
+            top_dir_name_to_parse = conversions.get(top_dir_name, top_dir_name)
+            top_author = self._parse_author_from_folder_name(top_dir_name_to_parse)
+            
+            if top_author:
+                # Сам top_dir это авторская папка!
+                result[top_dir] = top_author
+            else:
+                # ЭТАП 2: top_dir не авторская папка - проверить его подпапки
+                # Это папки авторов или контейнеры серий
+                direct_subdirs = sorted([d for d in top_dir.iterdir() if d.is_dir()])
                 
-                # Применить конвертацию к названию папки
-                # Например: "Гоблин (MeXXanik)" → "Гоблин MeXXanik"
-                folder_name_to_parse = conversions.get(folder_name, folder_name)
-                
-                # Проверить: парсится ли это как автор?
-                author_name = self._parse_author_from_folder_name(folder_name_to_parse)
-                
-                if author_name:
-                    # Нашли авторскую папку!
-                    result[subdir] = author_name
+                for subdir in direct_subdirs:
+                    folder_name = subdir.name
+                    
+                    # Применить конвертацию к названию папки
+                    # Например: "Гоблин (MeXXanik)" → "Гоблин MeXXanik"
+                    folder_name_to_parse = conversions.get(folder_name, folder_name)
+                    
+                    # Проверить: парсится ли это как автор?
+                    author_name = self._parse_author_from_folder_name(folder_name_to_parse)
+                    
+                    if author_name:
+                        # Нашли авторскую папку!
+                        result[subdir] = author_name
         
         except Exception as e:
             self.logger.log(f"[Структура] Ошибка при парсинге {top_dir}: {e}")
         
         return result
     
-    def _get_author_for_file(self, fb2_file: Path, folder_authors: Dict[Path, str]) -> tuple:
-        """Определить автора для конкретного файла используя структуру папок.
+    def _contains_known_author_words(self, text: str) -> bool:
+        """Проверить содержит ли текст слова из списка известных авторов.
         
-        Приоритет:
-        1. Если файл в авторской папке → используем автора из папки (folder_dataset)
-        2. Иначе → вызваем resolve_author_by_priority (параллельно filename и metadata)
+        Это повышает уверенность, что найденное имя - это действительно автор, 
+        а не случайное название серии.
+        
+        Args:
+            text: Текст для проверки
+            
+        Returns:
+            True если найдены известные авторские слова, False иначе
+        """
+        text_lower = text.lower()
+        # Нормализировать диакритику (Жеребьёв → жеребьев)
+        text_normalized = self._normalize_diacritics(text_lower)
+        
+        # Разбить на слова
+        words = re.split(r'[,\-\.\s«»();]+', text_normalized)
+        
+        # Проверить: найдены ли известные авторские слова?
+        for word in words:
+            word_clean = word.strip()
+            if word_clean and word_clean in self.author_names:
+                return True
+        
+        return False
+    
+    def _get_author_for_file(self, fb2_file: Path, folder_authors: Dict[Path, str], metadata_authors: str = "") -> tuple:
+        """Определить автора для конкретного файла, идя вверх по иерархии папок.
+        
+        Алгоритм:
+        1. Начинаем с папки файла
+        2. Проверяем эту папку - парсится ли как автор?
+        3. ВАЖНО: Если найденное имя есть в metadata_authors → это подтверждение, что это автор!
+        4. Если нет metadata - применяем фильтры (серия / не серия)
+        5. Если да - это авторская папка, возвращаем автора (source='folder_dataset')
+        6. Если нет - идем на уровень вверх
+        7. Повторяем до folder_parse_limit или пока не найдем авторскую папку
+        8. Если авторская папка не найдена - используем resolve_author_by_priority
         
         Args:
             fb2_file: путь к FB2 файлу
-            folder_authors: словарь авторских папок из _build_folder_structure()
+            folder_authors: словарь авторских папок из _build_folder_structure() (не используется)
+            metadata_authors: строка авторов из метаданных FB2 (разделены '; ')
             
         Returns:
             (author, source) где source in ['folder_dataset', 'filename', 'metadata', '']
         """
-        # Проверить: находится ли файл в авторской папке?
-        for author_folder, author_name in folder_authors.items():
+        conversions = self.settings.get_author_surname_conversions()
+        
+        # Разбить metadata_authors на отдельные значения для проверки
+        metadata_authors_list = []
+        if metadata_authors and metadata_authors != "[неизвестно]":
+            # Разбить по "; " и по ","
+            metadata_authors_list = [
+                a.strip() for a in re.split(r'[;,]', metadata_authors) 
+                if a.strip() and a.strip() != "[неизвестно]"
+            ]
+        
+        # Начинаем с родительской папки файла и идем вверх
+        current_dir = fb2_file.parent
+        parse_levels = 0
+        
+        while parse_levels < self.folder_parse_limit:
+            # Получить название папки
+            folder_name = current_dir.name
+            
+            # Применить conversions перед парсингом
+            folder_name_to_parse = conversions.get(folder_name, folder_name)
+            
+            # Проверить: парсится ли эта папка как автор?
+            author_name = self._parse_author_from_folder_name(folder_name_to_parse)
+            
+            if author_name:
+                # КЛЮЧЕВАЯ ПРОВЕРКА: Есть ли найденное имя в metadata_authors?
+                # Если да - это ПОДТВЕРЖДЕНИЕ, что это действительно автор!
+                is_in_metadata = False
+                if metadata_authors_list:
+                    # Проверить: содержится ли author_name в любом из metadata авторов?
+                    for meta_author in metadata_authors_list:
+                        meta_lower = meta_author.lower()
+                        author_lower = author_name.lower()
+                        # Проверяем содержание (автор может быть частью)
+                        if author_lower in meta_lower or meta_lower in author_lower:
+                            is_in_metadata = True
+                            break
+                
+                if is_in_metadata:
+                    # НАЙДЕНО В METADATA! Это 100% подтверждение, что это автор
+                    return author_name, 'folder_dataset'
+                
+                # Иначе применяем фильтры
+                # Интеллектуальная проверка: это действительно имя автора, а не название серии?
+                is_series_like = self._looks_like_series_name(author_name)
+                
+                if not is_series_like:
+                    # Не похоже на серию - это вероятно автор
+                    return author_name, 'folder_dataset'
+                # Иначе: это название серии, игнорируем и идем дальше вверх
+            
+            # Идем на уровень вверх
             try:
-                # Проверить: fb2_file в папке author_folder?
-                fb2_file.relative_to(author_folder)
-                # Да! Файл в авторской папке
-                
-                # Применить conversions к имени автора из папки
-                author_name_converted = author_name
-                conversions = self.settings.get_author_surname_conversions()
-                if author_name in conversions:
-                    author_name_converted = conversions[author_name]
-                
-                return author_name_converted, 'folder_dataset'
-            except ValueError:
-                # Нет, не в этой папке
-                continue
+                parent_dir = current_dir.parent
+                if parent_dir == current_dir:
+                    # Достигли корня файловой системы
+                    break
+                current_dir = parent_dir
+                parse_levels += 1
+            except Exception:
+                break
         
-        # Файл не в авторской папке → используем обычную логику
-        author, source = self.extractor.resolve_author_by_priority(
-            str(fb2_file),
-            folder_parse_limit=self.folder_parse_limit
-        )
+        # Авторская папка не найдена
+        # ВАЖНО: По архитектуре, PASS 1 должен быть консервативен:
+        # - PASS 1 ищет ТОЛЬКО в папке
+        # - Если папка не дала результата → возвращаем пусто
+        # - Filename-извлечение - это работа PASS 2, а не PASS 1
+        # - Metadata используется только для подтверждения найденного в папке
+        # - Fallback на metadata происходит только если PASS 1 + PASS 2 оба дали пусто
         
-        return author, source
+        return "", ""
     
     def _pass1_read_fb2_files(self) -> None:
         """PASS 1: Чтение FB2 файлов и определение авторов по приоритету.
@@ -1188,7 +1306,7 @@ class RegenCSVService:
         4. Если файл вне авторской папки → пробовать filename → metadata
         """
         print("\n" + "="*80, flush=True)
-        print("🔄 PASS 1: Сканирование FB2 файлов...", flush=True)
+        print("[PASS 1] Scanning FB2 files...", flush=True)
         print("="*80, flush=True)
         
         self.logger.log("[PASS 1] Начало сканирования FB2 файлов...")
@@ -1209,14 +1327,12 @@ class RegenCSVService:
                 if fb2_count <= 5 or fb2_count % 50 == 0:
                     print(f"  [{fb2_count:4d}] {rel_path}", flush=True)
                 
-                # Определить автора с использованием предварительно построенной структуры
-                author, source = self._get_author_for_file(fb2_file, folder_authors)
-                
-                # Извлечь заголовок из метаданных FB2
+                # Сначала получить все нужные метаданные из FB2 файла
                 title = self.extractor._extract_title_from_fb2(fb2_file)
-                
-                # Получить всех авторов из метаданных (все авторы из <title-info>)
                 metadata_authors = self.extractor._extract_all_authors_from_metadata(fb2_file)
+                
+                # Теперь определить автора, используя структуру папок и metadata для подтверждения
+                author, source = self._get_author_for_file(fb2_file, folder_authors, metadata_authors or "")
                 
                 # TODO: Извлечь серию из метаданных FB2 (пока пусто)
                 metadata_series = ""
@@ -1242,36 +1358,34 @@ class RegenCSVService:
                 error_count += 1
                 self.logger.log(f"⚠️  [PASS 1] Ошибка при чтении {fb2_file}: {e}")
         
-        print(f"\n✅ PASS 1 завершён: прочитано {fb2_count} файлов (ошибок: {error_count})\n", flush=True)
+        print(f"\n[OK] PASS 1 complete: {fb2_count} files read (errors: {error_count})\n", flush=True)
         self.logger.log(f"[PASS 1] Прочитано {fb2_count} файлов (ошибок: {error_count})")
     
     def _pass2_extract_from_filename(self) -> None:
-        """PASS 2: Извлечение авторов из имён файлов/папок с кешированием.
+        """PASS 2: Извлечение авторов из имён файлов.
         
-        ОПТИМИЗАЦИЯ: Папки парсятся один раз и кешируются для всех файлов внутри них.
+        Алгоритм:
+        1. Для каждого файла с пустым proposed_author (не найдёно в PASS 1)
+        2. Пытаемся извлечь автора из имени файла по паттернам
+        3. Используем extracted автора независимо от metadata confirmation
         
-        Для файлов, не определённых в PASS 1 (не folder_dataset):
-        1. Ищем автора в скобках в пути файла
-        2. Проверяем если это сборник (маркеры в имени + авторов > 2)
-        3. Если сборник - устанавливаем "Сборник", иначе применяем извлечённого автора
-        
-        Пропускаем файлы с author_source="folder_dataset" - они уже определены.
+        Файлы с author_source="folder_dataset" пропускаются (уже определены в PASS 1).
+        Сборники определяются по markers в имени + количеству авторов в metadata.
         """
         print("\n" + "="*80, flush=True)
-        print("📄 PASS 2: Извлечение авторов из имён файлов и папок...", flush=True)
+        print("[PASS 2] Extracting authors from filenames...", flush=True)
         print("="*80, flush=True)
         
-        self.logger.log("[PASS 2] Начало извлечения авторов из имён файлов/папок...")
-        
-        # КЕШИРОВАНИЕ ПАПОК: Для каждой уникальной папки парсим один раз
-        # Ключ: полный путь папки, Значение: извлечённый автор
-        folder_cache = {}
+        self.logger.log("[PASS 2] Starting extraction of authors from filenames...")
         
         extracted_count = 0
         collection_count = 0
         
+        # Получить conversions для применения перед парсингом
+        conversions = self.settings.get_author_surname_conversions()
+        
         for record in self.records:
-            # Пропустить файлы с folder_dataset - они уже определены надёжно
+            # Пропустить файлы с folder_dataset - они уже определены надёжно в PASS 1
             if record.author_source == "folder_dataset":
                 continue
             
@@ -1294,8 +1408,7 @@ class RegenCSVService:
                 collection_count += 1
                 continue
             
-            # Не сборник - попытаться найти автора в пути файла
-            # ПРИОРИТЕТ: имя_файла → папки
+            # Не сборник - попытаться найти автора в ИМЕНИ ФАЙЛА (PASS 2 работает только с filename)
             
             # Сначала попробовать извлечь из ИМЕНИ ФАЙЛА по паттернам
             extracted_author = self._extract_author_from_filename_by_patterns(file_name)
@@ -1308,76 +1421,72 @@ class RegenCSVService:
                 # Шаг 2: Обработать несколько авторов и убрать дубликаты
                 final_author = self._process_and_expand_authors(cleaned_author, record, self.records)
                 
-                # Шаг 3: ПОДТВЕРЖДЕНИЕ по метаданным!
-                # Проверить совпадает ли извлеченный автор с метаданными FB2
-                is_metadata_confirmed = True  # По умолчанию доверяем extraction
+                # ВАЖНО: Архитектура PASS 2
+                # - Извлечение из filename - это основной результат PASS 2
+                # - Metadata используется для подтверждения/расширения, но НЕ для отказа
+                # - Если extraction успешен → используем его, независимо от metadata
+                # - Metadata confirmation используется только для расширения (co-авторы)
                 
+                # Проверяем metadata для логирования/отладки
+                is_metadata_confirmed = False
                 if record.metadata_authors and record.metadata_authors not in ("Сборник", "[неизвестно]"):
-                    # Есть метаданные - проверим совпадение
                     metadata_lower = record.metadata_authors.lower()
                     final_author_lower = final_author.lower()
-                    
-                    # Проверяем совпадает ли:
-                    # 1. Точное совпадение: "Логинов" == "Логинов" в метаданных
-                    # 2. Частичное совпадение: "Логинов" содержится в "Анатолий Логинов"
-                    # 3. Обратное совпадение: "Анатолий" из метаданных содержится в "Логинов Анатолий"
-                    
                     is_in_metadata = (
-                        final_author_lower in metadata_lower or  # "Логинов" в "Анатолий Логинов"
-                        metadata_lower in final_author_lower or  # "Анатолий Логинов" в "Логинов Анатолий"
-                        any(word in metadata_lower for word in final_author_lower.split())  # Любое слово совпадает
+                        final_author_lower in metadata_lower or
+                        metadata_lower in final_author_lower or
+                        any(word in metadata_lower for word in final_author_lower.split())
                     )
-                    
                     is_metadata_confirmed = is_in_metadata
                 
-                # Если метаданные подтверждают - используем extracted author
-                if is_metadata_confirmed:
-                    record.proposed_author = final_author
-                    record.author_source = "filename"
-                    extracted_count += 1
-                    continue
-                
-                # Если метаданные НЕ подтверждают - не используем extraction
-                # Попробуем папки или metadata (пропускаем continue)
-            
-            # Если в имени файла не нашлось - проверить папки
-            # Используем кеш для избежания повторного парсинга одной папки
-            file_path = Path(record.file_path)
-            
-            # Проверить все части пути, начиная с самой близкой к файлу (справа)
-            # Идём вверх по иерархии папок
-            parts_to_check = []
-            
-            # Затем все папки в пути (от листа к корню)
-            for parent in file_path.parents:
-                parts_to_check.append(str(parent))
-            
-            # Попытаться парсить каждую папку, используя кеш
-            parsed_author = None
-            for folder_path in parts_to_check:
-                # Проверить кеш
-                if folder_path in folder_cache:
-                    parsed_author = folder_cache[folder_path]
-                    if parsed_author and parsed_author != "Сборник":
-                        break  # Нашли в кеше - используем
-                else:
-                    # Парсим папку в первый раз и кешируем результат
-                    folder_name = Path(folder_path).name
-                    parsed_author = self._parse_author_from_folder_name(folder_name)
-                    folder_cache[folder_path] = parsed_author  # Кешируем результат
-                    
-                    if parsed_author and parsed_author != "Сборник":
-                        break  # Нашли - используем этого автора
-            
-            # Если найдено в папке - применить
-            if parsed_author and parsed_author != "Сборник":
-                record.proposed_author = parsed_author
+                # ИСПОЛЬЗУЕМ extracted author независимо от metadata confirmation
+                # Metadata confirmation используется только для расширения, а не для отказа
+                record.proposed_author = final_author
                 record.author_source = "filename"
                 extracted_count += 1
+                continue
+            
+            # Если extraction из имени файла не сработал, остаётся пусто
+            # PASS 2 работает ТОЛЬКО с filename, не с папками
+            # Папки уже обработаны в PASS 1
+            # Fallback на metadata происходит после PASS 2
         
-        print(f"✅ PASS 2 завершён: {extracted_count} авторов + {collection_count} сборников извлечено\n", flush=True)
-        print(f"   Кешировано папок: {len(folder_cache)}\n", flush=True)
-        self.logger.log(f"[PASS 2] Извлечено {extracted_count} авторов и {collection_count} сборников (кеш: {len(folder_cache)} папок)")
+        print(f"[OK] PASS 2 complete: {extracted_count} authors + {collection_count} collections extracted\n", flush=True)
+        self.logger.log(f"[PASS 2] Извлечено {extracted_count} авторов и {collection_count} сборников")
+    
+    def _pass2_fallback_to_metadata(self) -> None:
+        """PASS 2 Fallback: Применить metadata как последний источник для файлов без автора.
+        
+        Если после PASS 1 + PASS 2 proposed_author остался пустым → используем metadata.
+        Metadata затем пройдет через PASS 3-6 вместе с остальными авторами.
+        
+        Это происходит ТОЛЬКО если оба основных PASS нашли ничего.
+        """
+        print("\n" + "="*80, flush=True)
+        print("[PASS 2 Fallback] Applying metadata for records without authors...", flush=True)
+        print("="*80, flush=True)
+        
+        self.logger.log("[PASS 2 Fallback] Применение metadata для файлов без автора...")
+        
+        fallback_count = 0
+        
+        for record in self.records:
+            # Пропустить если уже есть author
+            if record.proposed_author and record.proposed_author not in ("", "Сборник"):
+                continue
+            
+            # Пропустить "Сборник" - это финальное значение
+            if record.proposed_author == "Сборник":
+                continue
+            
+            # Применить metadata если он есть
+            if record.metadata_authors and record.metadata_authors not in ("[неизвестно]", "Сборник"):
+                record.proposed_author = record.metadata_authors
+                record.author_source = "metadata"
+                fallback_count += 1
+        
+        print(f"[OK] PASS 2 Fallback complete: {fallback_count} records using metadata\n", flush=True)
+        self.logger.log(f"[PASS 2 Fallback] Применено {fallback_count} записей с metadata")
     
     def _pass3_normalize_authors(self) -> None:
         """PASS 3: Нормализовать формат авторов.
@@ -1386,7 +1495,7 @@ class RegenCSVService:
         Использует AuthorName класс для логики.
         """
         print("\n" + "="*80, flush=True)
-        print("🔤 PASS 3: Нормализация формата авторов...", flush=True)
+        print("[PASS 3] Normalizing author formats...", flush=True)
         print("="*80, flush=True)
         
         self.logger.log("[PASS 3] Начало нормализации формата...")
@@ -1398,7 +1507,7 @@ class RegenCSVService:
             if record.proposed_author != original:
                 changed_count += 1
         
-        print(f"✅ PASS 3 завершён: {changed_count} авторов нормализовано\n", flush=True)
+        print(f"[OK] PASS 3 complete: {changed_count} authors normalized\n", flush=True)
         self.logger.log(f"[PASS 3] Изменено {changed_count} авторов")
     
     def _pass4_apply_consensus(self) -> None:
@@ -1408,7 +1517,7 @@ class RegenCSVService:
         Консенсус применяется только к файлам в одной папке с source="filename" или "metadata".
         """
         print("\n" + "="*80, flush=True)
-        print("🤝 PASS 4: Применение консенсуса к группам...", flush=True)
+        print("[PASS 4] Applying consensus to groups...", flush=True)
         print("="*80, flush=True)
         
         self.logger.log("[PASS 4] Начало применения консенсуса...")
@@ -1422,7 +1531,7 @@ class RegenCSVService:
         
         # Статистика
         consensus_count = sum(1 for r in self.records if r.author_source == "consensus")
-        print(f"✅ PASS 4 завершён: {consensus_count} файлов обработано консенсусом\n", flush=True)
+        print(f"[OK] PASS 4 complete: {consensus_count} files processed by consensus\n", flush=True)
         self.logger.log("[PASS 4] Завершено")
     
     def _pass5_apply_conversions(self) -> None:
@@ -1432,7 +1541,7 @@ class RegenCSVService:
         и нужно переприменить conversions для новой фамилии.
         """
         print("\n" + "="*80, flush=True)
-        print("🔄 PASS 5: Переприменение conversions после консенсуса...", flush=True)
+        print("[PASS 5] Re-applying conversions...", flush=True)
         print("="*80, flush=True)
         
         self.logger.log("[PASS 5] Начало переприменения conversions...")
@@ -1446,7 +1555,7 @@ class RegenCSVService:
             if record.proposed_author != original_authors.get(id(record)):
                 changed_count += 1
         
-        print(f"✅ PASS 5 завершён: {changed_count} авторов переприменены conversions\n", flush=True)
+        print(f"[OK] PASS 5 complete: {changed_count} authors re-applied conversions\n", flush=True)
         self.logger.log(f"[PASS 5] Переприменено conversions к {changed_count} авторам")
     
     def _pass6_expand_abbreviations(self) -> None:
@@ -1456,7 +1565,7 @@ class RegenCSVService:
         Требует построения словаря полных имён из всех авторов.
         """
         print("\n" + "="*80, flush=True)
-        print("📚 PASS 6: Раскрытие аббревиатур в именах...", flush=True)
+        print("[PASS 6] Expanding abbreviations...", flush=True)
         print("="*80, flush=True)
         
         self.logger.log("[PASS 6] Начало раскрытия аббревиатур...")
@@ -1469,7 +1578,7 @@ class RegenCSVService:
         # Раскрыть аббревиатуры
         expand_abbreviated_authors(self.records, authors_map, self.settings)
         
-        print(f"✅ PASS 6 завершён\n", flush=True)
+        print(f"[OK] PASS 6 complete\n", flush=True)
         self.logger.log("[PASS 6] Завершено")
     
     def _sort_authors_in_records(self) -> None:
@@ -1527,7 +1636,7 @@ class RegenCSVService:
             output_path: Путь к файлу для сохранения
         """
         print("\n" + "="*80, flush=True)
-        print("💾 Сохранение результатов в CSV файл...", flush=True)
+        print("[CSV] Saving results to CSV...", flush=True)
         print("="*80, flush=True)
         
         self.logger.log(f"[CSV] Сохранение CSV в {output_path}...")
@@ -1576,14 +1685,14 @@ class RegenCSVService:
             by_source[source] = by_source.get(source, 0) + 1
         
         # Вывод в консоль
-        print(f"\n✅ CSV сохранён успешно: {total} записей", flush=True)
+        print(f"\n[OK] CSV saved: {total} records", flush=True)
         print(f"   Путь: {output_path}", flush=True)
         print(f"\n   Статистика по источникам:", flush=True)
         for source, count in sorted(by_source.items()):
             print(f"   • {source:20s}: {count:4d} ({count*100//total}%)", flush=True)
         print()
         
-        self.logger.log(f"✅ [CSV] CSV сохранён: {total} записей")
+        self.logger.log(f"[OK] CSV saved: {total} records")
         for source, count in sorted(by_source.items()):
             self.logger.log(f"  [CSV] {source}: {count}")
     
