@@ -73,6 +73,11 @@ class RegenCSVService:
         
         self.records: List[BookRecord] = []
         
+        # КЭШИРОВАНИЕ АВТОРСКИХ ПАПОК: {Path: (author_name, confidence)}
+        # Например: Path("Орлов Андрей") → ("Орлов Андрей", "high")
+        # Используется для избежания повторного парсинга одних и тех же папок
+        self.author_folder_cache: Dict[Path, Tuple[str, str]] = {}
+        
         # Загрузить паттерны извлечения авторов из файла/папки
         self.author_patterns = self._load_author_patterns()
         
@@ -473,6 +478,10 @@ class RegenCSVService:
             print("="*80 + "\n", flush=True)
             
             self.logger.log("=== Starting CSV regeneration ===")
+            
+            # PRECACHE: Построить кэш авторских папок по иерархии
+            self._build_author_folder_cache()
+            self.logger.log("[OK] Author folder hierarchy cached")
             
             # PASS 1: Инициализация - чтение FB2 файлов и определение авторов
             self._pass1_read_fb2_files()
@@ -1221,77 +1230,32 @@ class RegenCSVService:
         return False
     
     def _get_author_for_file(self, fb2_file: Path, folder_authors: Dict[Path, str], metadata_authors: str = "") -> tuple:
-        """Определить автора для конкретного файла, идя вверх по иерархии папок.
+        """Определить автора для конкретного файла, используя кэш авторских папок.
         
         Алгоритм:
         1. Начинаем с папки файла
-        2. Проверяем эту папку - парсится ли как автор?
-        3. ВАЖНО: Если найденное имя есть в metadata_authors → это подтверждение, что это автор!
-        4. Если нет metadata - применяем фильтры (серия / не серия)
-        5. Если да - это авторская папка, возвращаем автора (source='folder_dataset')
-        6. Если нет - идем на уровень вверх
-        7. Повторяем до folder_parse_limit или пока не найдем авторскую папку
-        8. Если авторская папка не найдена - используем resolve_author_by_priority
+        2. Ищем в кэше авторских папок
+        3. Идом вверх до folder_parse_limit или пока не найдем авторскую папку
+        4. Возвращаем найденного автора
         
         Args:
             fb2_file: путь к FB2 файлу
-            folder_authors: словарь авторских папок из _build_folder_structure() (не используется)
+            folder_authors: словарь авторских папок (не используется, оставлено для совместимости)
             metadata_authors: строка авторов из метаданных FB2 (разделены '; ')
             
         Returns:
             (author, source) где source in ['folder_dataset', 'filename', 'metadata', '']
         """
-        conversions = self.settings.get_author_surname_conversions()
-        
-        # Разбить metadata_authors на отдельные значения для проверки
-        metadata_authors_list = []
-        if metadata_authors and metadata_authors != "[неизвестно]":
-            # Разбить по "; " и по ","
-            metadata_authors_list = [
-                a.strip() for a in re.split(r'[;,]', metadata_authors) 
-                if a.strip() and a.strip() != "[неизвестно]"
-            ]
-        
         # Начинаем с родительской папки файла и идем вверх
         current_dir = fb2_file.parent
         parse_levels = 0
         
         while parse_levels < self.folder_parse_limit:
-            # Получить название папки
-            folder_name = current_dir.name
-            
-            # Применить conversions перед парсингом
-            folder_name_to_parse = conversions.get(folder_name, folder_name)
-            
-            # Проверить: парсится ли эта папка как автор?
-            author_name = self._parse_author_from_folder_name(folder_name_to_parse)
-            
-            if author_name:
-                # КЛЮЧЕВАЯ ПРОВЕРКА: Есть ли найденное имя в metadata_authors?
-                # Если да - это ПОДТВЕРЖДЕНИЕ, что это действительно автор!
-                is_in_metadata = False
-                if metadata_authors_list:
-                    # Проверить: содержится ли author_name в любом из metadata авторов?
-                    for meta_author in metadata_authors_list:
-                        meta_lower = meta_author.lower()
-                        author_lower = author_name.lower()
-                        # Проверяем содержание (автор может быть частью)
-                        if author_lower in meta_lower or meta_lower in author_lower:
-                            is_in_metadata = True
-                            break
-                
-                if is_in_metadata:
-                    # НАЙДЕНО В METADATA! Это 100% подтверждение, что это автор
-                    return author_name, 'folder_dataset'
-                
-                # Иначе применяем фильтры
-                # Интеллектуальная проверка: это действительно имя автора, а не название серии?
-                is_series_like = self._looks_like_series_name(author_name)
-                
-                if not is_series_like:
-                    # Не похоже на серию - это вероятно автор
-                    return author_name, 'folder_dataset'
-                # Иначе: это название серии, игнорируем и идем дальше вверх
+            # ПРОВЕРИТЬ КЭШЬ: Есть ли эта папка в кэше авторских папок?
+            if current_dir in self.author_folder_cache:
+                author_name, confidence = self.author_folder_cache[current_dir]
+                # Нашли в кэше - возвращаем
+                return author_name, 'folder_dataset'
             
             # Идем на уровень вверх
             try:
@@ -1304,15 +1268,93 @@ class RegenCSVService:
             except Exception:
                 break
         
-        # Авторская папка не найдена
-        # ВАЖНО: По архитектуре, PASS 1 должен быть консервативен:
-        # - PASS 1 ищет ТОЛЬКО в папке
-        # - Если папка не дала результата → возвращаем пусто
-        # - Filename-извлечение - это работа PASS 2, а не PASS 1
-        # - Metadata используется только для подтверждения найденного в папке
-        # - Fallback на metadata происходит только если PASS 1 + PASS 2 оба дали пусто
-        
+        # Авторская папка не найдена в кэше
         return "", ""
+    
+    def _build_author_folder_cache(self) -> None:
+        """PRECACHE: Построить кэш авторских папок по иерархии.
+        
+        Алгоритм:
+        1. Рекурсивно пройти по всем папкам в work_dir
+        2. Для каждой папки попытаться парсить имя автора
+        3. Если папка содержит FB2 файлы → это авторская папка, кэшировать
+        4. Применить кэш ко всем подпапкам для ускорения поиска
+        """
+        print(f"\n[PRECACHE] Building author folder hierarchy...", flush=True)
+        conversions = self.settings.get_author_surname_conversions()
+        
+        # Рекурсивно обойти все папки
+        def scan_folder_hierarchy(folder: Path, depth: int = 0) -> Optional[Tuple[str, str]]:
+            """Рекурсивно сканировать папки и кэшировать авторов.
+            
+            Args:
+                folder: Папка для сканирования
+                depth: Текущая глубина (начиная с 0 для work_dir)
+                
+            Returns:
+                (author_name, confidence) если найдено, иначе None
+            """
+            if depth > self.folder_parse_limit:
+                return None
+            
+            # Получить название папки
+            folder_name = folder.name
+            if not folder_name or folder_name.startswith('.'):
+                return None
+            
+            # Проверить кэш - может быть уже обработано
+            if folder in self.author_folder_cache:
+                return self.author_folder_cache[folder]
+            
+            # Применить conversions перед парсингом
+            folder_name_to_parse = conversions.get(folder_name, folder_name)
+            
+            # Парсить имя папки
+            author_name = self._parse_author_from_folder_name(folder_name_to_parse)
+            
+            # Проверить содержит ли папка FB2 файлы
+            has_fb2_files = False
+            try:
+                for item in folder.iterdir():
+                    if item.is_file() and item.suffix.lower() == '.fb2':
+                        has_fb2_files = True
+                        break
+            except (PermissionError, OSError):
+                pass
+            
+            # Если это авторская папка с FB2 файлами AND имя парсится как автор
+            if author_name and has_fb2_files:
+                # Кэшировать с высокой уверенностью
+                result = (author_name, "high")
+                self.author_folder_cache[folder] = result
+                return result
+            
+            # Если папка НЕ авторская, но имя парсится → кэшировать для наследования подпапками
+            if author_name:
+                result = (author_name, "low")
+                self.author_folder_cache[folder] = result
+                # Но не возвращаем - продолжаем поиск в подпапках
+            
+            # Рекурсивно сканировать подпапки
+            try:
+                for subdir in folder.iterdir():
+                    if subdir.is_dir() and not subdir.name.startswith('.'):
+                        found_author = scan_folder_hierarchy(subdir, depth + 1)
+                        if found_author:
+                            # Найденный автор зафиксировался в кэше
+                            pass
+            except (PermissionError, OSError):
+                pass
+            
+            return None
+        
+        # Начать сканирование с work_dir
+        try:
+            scan_folder_hierarchy(self.work_dir, depth=0)
+            print(f"[PRECACHE] Cached {len(self.author_folder_cache)} author folders\n", flush=True)
+            self.logger.log(f"[PRECACHE] Cached {len(self.author_folder_cache)} folders in hierarchy")
+        except Exception as e:
+            self.logger.log(f"⚠️ Ошибка при построении кэша папок: {e}")
     
     def _pass1_read_fb2_files(self) -> None:
         """PASS 1: Чтение FB2 файлов и определение авторов по приоритету.
