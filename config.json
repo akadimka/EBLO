@@ -134,7 +134,7 @@
       "example": "Анисимов. Вариант «Бис» 2. Год мертвой змеи.fb2"
     },
     {
-      "pattern": "Author, Author. Title. (Series)",
+      "pattern": "Author, Author. Title (Series)",
       "example": "Живой, Прозоров. Легион (Легион 1-3).fb2"
     },
     {

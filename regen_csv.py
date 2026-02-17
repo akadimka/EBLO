@@ -367,8 +367,8 @@ class RegenCSVService:
                 r'^(?P<author>[^.]+\s*,\s*[^.]+)\.\s*(?P<title>.+?)(?:\(.+\))?$',
                 ['author', 'title']
             ),
-            "Author, Author. Title. (Series)": (
-                r'^(?P<author>[^.]+\s*,\s*[^.]+)\.\s*(?P<title>[^.]+)\.\s*\((?P<series>[^)]+)\)$',
+            "Author, Author. Title (Series)": (
+                r'^(?P<author>[^.]+\s*,\s*[^.]+)\.\s*(?P<title>[^(]+?)\s*\((?P<series>[^)]+)\)$',
                 ['author', 'title', 'series']
             ),
         }
@@ -674,7 +674,9 @@ class RegenCSVService:
         - Все слова известные нарицательные (не имена собственные)
         - Совпадает с существующими серийными паттернами
         
-        ⚠️ ВАЖНО: Одно слово (фамилия вроде "Жеребьёв") НЕ должно автоматически считаться серией!
+        ⚠️ ВАЖНО: 
+        - Одно слово (фамилия вроде "Жеребьёв") НЕ должно автоматически считаться серией!
+        - Текст с запятой (типа "Живой, Прозоров") это скорее всего "Author, Author", а не серия
         
         Args:
             text: Текст для проверки
@@ -683,6 +685,11 @@ class RegenCSVService:
             True если похоже на серию, False если на автора
         """
         if not text:
+            return False
+        
+        # ⭐ КЛЮЧЕВАЯ ЭВРИСТИКА: Если есть запятая - это likely "Author, Author" паттерн
+        # Серии обычно не содержат запятых ("Боевая фантастика", "Странник", etc)
+        if ',' in text:
             return False
         
         blacklist = self.settings.get_filename_blacklist()
