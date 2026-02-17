@@ -296,6 +296,10 @@ class RegenCSVService:
                 r'^(?P<series>[^(]+?)\s*\((?P<author>[^)]+)\)$',
                 ['series', 'author']
             ),
+            "Series (Author, Author)": (
+                r'^(?P<series>[^(]+?)\s*\((?P<author>[^,]+?)\s*,\s*(?P<author2>[^)]+)\)$',
+                ['series', 'author', 'author2']
+            ),
             "(Series) Author": (
                 r'^\((?P<series>[^)]+)\)\s*(?P<author>.+)$',
                 ['series', 'author']
@@ -571,6 +575,8 @@ class RegenCSVService:
         # Отслеживаем лучшее совпадение
         best_author = ""
         best_group_count = 0
+        best_pattern_desc = None
+        best_quality_score = (-1, 0)  # (pattern_quality, matched_groups)
         
         # Перебрать ВСЕ паттерны и выбрать наиболее полный
         for pattern_dict in self.folder_patterns:
@@ -594,8 +600,24 @@ class RegenCSVService:
                     # Считаем сколько групп совпадало (сколько информации извлекли)
                     matched_groups = len([g for g in match.groups() if g is not None])
                     
+                    # ⭐ НОВОЕ: Рассчитать "качество" совпадения для приоритизации
+                    # Паттерны с явной структурой (series, folder_name) более специфичны
+                    pattern_quality = 0
+                    if 'series' in group_names:
+                        # Паттерн с явной серией (типа "Series (Author)") - максимум специфичности
+                        pattern_quality = 100
+                    elif 'folder_name' in group_names:
+                        # Паттерн с явной папкой (типа "Author - Folder Name") - хорошо специфичный
+                        pattern_quality = 50
+                    else:
+                        # Простой паттерн (типа "Author, Author") - базовая специфичность
+                        pattern_quality = 10
+                    
+                    # Итоговая оценка: специфичность + количество групп (в качестве тай-брейка)
+                    quality_score = (pattern_quality, matched_groups)
+                    
                     # Если это лучше чем предыдущее совпадение - запомнить
-                    if matched_groups > best_group_count:
+                    if quality_score > best_quality_score:
                         author = match.group('author')
                         if author:
                             author = author.strip()
@@ -659,7 +681,8 @@ class RegenCSVService:
                                     continue
                                 
                                 best_author = author
-                                best_group_count = matched_groups
+                                best_quality_score = quality_score
+                                best_pattern_desc = pattern_desc
             except Exception:
                 # Если проблема с regex - пропустить этот паттерн
                 continue
