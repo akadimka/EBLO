@@ -269,6 +269,122 @@ class RegenCSVService:
         
         return patterns_map.get(pattern_desc)
     
+    def _generate_regex_from_pattern_desc(self, pattern_desc: str) -> Optional[Tuple[str, List[str]]]:
+        """Автоматически генерировать regex из описания паттерна для новых пользовательских паттернов.
+        
+        Позволяет пользователям добавлять новые паттерны через config.json без изменения кода.
+        
+        Пример преобразований:
+        - "Author, Author" → ^(?P<author>[^,]+?)\s*,\s*(?P<author2>.+)$
+        - "Series (Author)" → ^(?P<series>[^(]+?)\s*\((?P<author>[^)]+)\)$
+        - "Title (Author)" → ^(?P<title>[^()]+?)\s*\((?P<author>.+)\)$
+        
+        Args:
+            pattern_desc: Описание паттерна с placeholders (Author, Series, Title, Name, Surname, Folder Name)
+                
+        Returns:
+            Tuple (regex_pattern, group_names) или None если не получается сгенерировать
+        """
+        import re as re_module
+        
+        try:
+            # Маппинг типов полей на regex паттерны
+            field_patterns = {
+                'author': r'[^,\-()]+?',           # не запятые, дефисы, скобки
+                'series': r'[^()]+?',              # не скобки
+                'title': r'[^()]+?',               # не скобки
+                'name': r'\S+',                    # одно слово
+                'surname': r'\S+',                 # одно слово
+                'folder_name': r'.+?',             # всё остальное
+            }
+            
+            # Список известных placeholders
+            known_placeholders = ['Author', 'Series', 'Title', 'Name', 'Surname', 'Folder Name']
+            
+            working = pattern_desc
+            group_names = []
+            group_counter = {}
+            
+            # ШАГ 1: Заменить явные groups в скобках типа (GroupName) где GroupName известное слово
+            # Сохраняем скобки в рабочей версии!
+            def replace_explicit(match):
+                field_name = match.group(1).lower().replace(' ', '_')
+                if field_name not in group_counter:
+                    group_counter[field_name] = 0
+                group_counter[field_name] += 1
+                
+                count = group_counter[field_name]
+                group_id = field_name if count == 1 else f"{field_name}{count}"
+                group_names.append(group_id)
+                # Сохраняем скобки и вставляем маркер внутри них!
+                return f"(«{group_id}»)"
+            
+            # Найти ТОЛЬКО скобки с известными placeholders внутри
+            explicit_pattern = r'\((' + '|'.join(known_placeholders) + r')\)'
+            working = re_module.sub(explicit_pattern, replace_explicit, working, flags=re_module.IGNORECASE)
+            
+            # ШАГ 2: Найти обычные placeholders (Author, Series, Title, etc.) - ВНЕ скобок
+            def replace_plain(match):
+                field_name = match.group(0).lower().replace(' ', '_')
+                if field_name not in group_counter:
+                    group_counter[field_name] = 0
+                group_counter[field_name] += 1
+                
+                count = group_counter[field_name]
+                group_id = field_name if count == 1 else f"{field_name}{count}"
+                group_names.append(group_id)
+                return f"«{group_id}»"  # Маркер для замены
+            
+            # Найти все ключевые слова (не в скобках) - используем отрицательное lookbehind/lookahead
+            keywords = '|'.join(known_placeholders)
+            working = re_module.sub(f'\\b({keywords})\\b(?![^«]*»)', replace_plain, working, flags=re_module.IGNORECASE)
+            
+            # Если нет groups найдено - это просто series без параметров
+            if not group_names:
+                return (r'^(?P<series>.+)$', ['series'])
+            
+            # ШАГ 3: Построить final regex
+            regex = '^'
+            result_groups = []
+            
+            i = 0
+            while i < len(working):
+                if working[i:i+1] == '«':
+                    # Найти конец маркера
+                    end = working.find('»', i)
+                    if end != -1:
+                        field_id = working[i+1:end]
+                        # Извлечь тип (author, series, etc.)
+                        field_type = re_module.sub(r'\d+$', '', field_id)
+                        
+                        # Получить regex для этого типа
+                        field_regex = field_patterns.get(field_type, r'.+?')
+                        regex += f'(?P<{field_id}>{field_regex})'
+                        result_groups.append(field_id)
+                        i = end + 1
+                        continue
+                
+                # Обычный символ
+                char = working[i]
+                
+                # Экранировать специальные символы regex
+                if char in r'.^$*+?{}[]|()\-':
+                    regex += '\\' + char
+                elif char == ' ':
+                    regex += r'\s*'  # Пробелы → optional whitespace
+                else:
+                    regex += char
+                
+                i += 1
+            
+            regex += '$'
+            
+            return (regex, result_groups)
+            
+        except Exception as e:
+            self.logger.log(f"[WARNING] Could not auto-generate regex for pattern '{pattern_desc}': {e}")
+            return None
+
     def _folder_pattern_to_regex(self, pattern_desc: str) -> Optional[Tuple[str, List[str]]]:
         """Конвертировать описание паттерна ПАПКИ в regex с группами.
         
@@ -279,6 +395,7 @@ class RegenCSVService:
             Tuple (regex_pattern, group_names) или None если не распознан
         """
         # Маппинг описаний паттернов папок на regex с именованными группами
+        # Содержит оптимизированные и тестированные паттерны
         patterns_map = {
             "Author, Author": (
                 r'^(?P<author>[^,]+?)\s*,\s*(?P<author2>.+)$',
@@ -310,10 +427,17 @@ class RegenCSVService:
             ),
         }
         
-        return patterns_map.get(pattern_desc)
+        # Сначала пробовать найти в hardcoded паттернах
+        if pattern_desc in patterns_map:
+            return patterns_map[pattern_desc]
+        
+        # Иначе пробовать автогенерацию для новых паттернов
+        return self._generate_regex_from_pattern_desc(pattern_desc)
     
     def _file_pattern_to_regex(self, pattern_desc: str) -> Optional[Tuple[str, List[str]]]:
         """Конвертировать описание паттерна файла в regex с группами.
+        
+        Сначала пробует найти в hardcoded паттернах, затем пробует автогенерацию.
         
         Args:
             pattern_desc: Description like "Author - Title" or "Author - Title (Series. service_words)"
@@ -322,6 +446,7 @@ class RegenCSVService:
             Tuple (regex_pattern, group_names) или None если не распознан
         """
         # Маппинг описаний паттернов файлов на regex с именованными группами
+        # Это оптимизированные паттерны, которые были тестированы и шлифованы
         patterns_map = {
             "(Author) - Title": (
                 r'^\((?P<author>[^)]+)\)\s*-\s*(?P<title>.+)$',
@@ -377,7 +502,12 @@ class RegenCSVService:
             ),
         }
         
-        return patterns_map.get(pattern_desc)
+        # Сначала пробовать найти в hardcoded паттернах
+        if pattern_desc in patterns_map:
+            return patterns_map[pattern_desc]
+        
+        # Иначе пробовать автогенерацию для новых паттернов
+        return self._generate_regex_from_pattern_desc(pattern_desc)
     
     def _extract_author_from_filename_by_patterns(self, filename: str) -> Optional[str]:
         """Извлечь автора из имени файла, подбирая наиболее полное совпадение.

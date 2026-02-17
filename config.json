@@ -246,6 +246,10 @@
     {
       "pattern": "(N). (Surname)",
       "example": "С. Иванов"
+    },
+    {
+      "pattern": "(N).(Surname)",
+      "example": "С.Иванов"
     }
   ],
   "abbreviations_preserve_case": [
