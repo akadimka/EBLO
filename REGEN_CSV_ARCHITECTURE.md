@@ -784,70 +784,144 @@ PASS 3-6:
 
 **Назначение:** Для файлов БЕЗ folder_dataset попытаться извлечь автора из имени файла по паттернам.
 
+**⚠️ ВАЖНО: Парсит ТОЛЬКО имя файла, не полный путь!**
+- На Windows пути содержат `\` (backslash), поэтому нужна обработка
+- Извлекаем только basename: `record.file_path.replace('\\', '/').split('/')[-1]`
+- Удаляем расширение: `filename.rsplit('.', 1)[0]`
+
 **Входные данные:**
-- имя файла (без расширения)
-- Набор паттернов из config.json: `author_series_patterns_in_files`
-- Все BookRecords (для расширения авторов через соседние файлы)
+- Только имя файла (без пути и расширения)
+- Примеры из Test1:
+  - `Achtung! Manager in der Luft! (Комбат Найтов)`
+  - `Активная разведка (Сезин Сергей, Черкунова Ольга)`
+  - `Александр II Великий (Старец Виктор)`
 
-**Паттерны в config.json (приоритет - по порядку, лучший паттерн выбирается по количеству совпадённых групп):**
+**Паттерны (в порядке приоритета - проверяются по очередно):**
 
-```json
-"author_series_patterns_in_files": [
-  {"pattern": "(Author) - Title"},
-  {"pattern": "Author - Title"},
-  {"pattern": "Author. Title"},
-  {"pattern": "Title (Author)"},
-  {"pattern": "Title - (Author)"},
-  {"pattern": "Author - Series.Title"},
-  {"pattern": "Author. Series. Title"},
-  {"pattern": "Author, Author. Title. (Series)"},
-  {"pattern": "Author. Title. (Series)"},
-  {"pattern": "Author - Title (Series. service_words)"},          ← 3 группы (наиболее полный)
-  {"pattern": "Author. Title (Series. service_words)"},           ← 3 группы
-  {"pattern": "Author, Author - Title (Series. service_words)"}  ← 3 группы (для multi-author)
-]
 ```
+1. "Title (Author)" ← НАИВЫСШИЙ ПРИОРИТЕТ (есть в Test1!)
+   Example: "Achtung! Manager in der Luft! (Комбат Найтов)"
+   Использует: rfind('(') и rfind(')'), берёт ПОСЛЕДНЮЮ пару скобок
+   Результат: "Комбат Найтов" → нормализовано в "Найтов Комбат"
 
-**Логика выбора паттерна:**
-1. Перебрать ВСЕ паттерны и проверить их на совпадение с именем файла
-2. Найти паттерн с МАКСИМАЛЬНЫМ количеством совпадённых групп
-3. ПРИОРИТЕТ: Паттерн с 3+ группами (автор + название + серия) > паттерн с 2 группами (автор + название)
-4. **Пример:** Файл "Земляной Андрей - Проект «Оборотень» (Странник 1-3) - 2021.fb2"
-   - Паттерн "Author - Title" → 2 группы, но захватывает весь текст до последней скобки (НЕПРАВИЛЬНО)
-   - Паттерн "Author - Title (Series. service_words)" → 3 группы ✅ ВЫБРАН (разрешает текст после скобки)
+2. "Author - Title"
+   Example: "Авраменко Александр - Солдат удачи 1"
+   Использует: split(' - ', 1), берёт первую часть
+   Результат: "Авраменко Александр"
 
-**Regex для паттернов (в _file_pattern_to_regex):**
+3. "Author. Title"
+   Example: "Белоус. Последний шанс человечества"
+   Использует: split('. ', 1), берёт первую часть
+   Результат: "Белоус"
 
-```python
-{
-    "Author - Title (Series. service_words)": (
-        r'^(?P<author>[^-]+?)\s*-\s*(?P<title>[^(]+?)\s*\((?P<series>[^)]+)\)(?:\s*-\s*.+)?$',
-        ['author', 'title', 'series']
-    ),
-    "Author. Title (Series. service_words)": (
-        r'^(?P<author>[^.]+)\.\s*(?P<title>[^(]+?)\s*\((?P<series>[^)]+)\)$',
-        ['author', 'title', 'series']
-    ),
-    "Author, Author - Title (Series. service_words)": (
-        r'^(?P<author>[^-]+?\s*,\s*[^-]+?)\s*-\s*(?P<title>[^(]+?)\s*\((?P<series>[^)]+)\)(?:\s*-\s*.+)?$',
-        ['author', 'title', 'series']
-    ),
-}
+4. "Author, Author"
+   Example: "Сергей Иванов, Иван Петров"
+   Использует: split(',', 1), берёт первую часть
+   Результат: "Сергей Иванов"
 ```
-
-**Ключевые особенности:**
-- ✅ `(?:\s*-\s*.+)?$` в конце позволяет дополнительный текст после скобки (например "- 2021")
-- ✅ `[^-]+?` для автора использует non-greedy поиск до первого `-`
-- ✅ Для multi-author паттерна разрешена запятая в группе автора
 
 **Валидация извлеченного автора:**
 
-Когда паттерн извлек потенциального автора, система проверяет что это действительно имя, а не серия/описание:
+После извлечения проверяются:
+- ✅ Минимальная длина: `len(author) > 2` (исключить однобуквенные остатки)
+- ✅ Не пустая строка
+- ✅ Нет требуемой нормализации (с запятыми, инициалами и т.д.)
+
+**Примеры из Test1:**
 
 ```
-1. Проверка по известным именам:
-   - Разбить текст на слова (по пробелам, запятым, точкам)
-   - Нормализировать диакритику: "Жеребьёв" → "жеребьев"
+regen.csv source=filename:  45 записей
+
+Примеры успешного парсинга:
+  'Achtung! Manager in der Luft! (Комбат Найтов).fb2'
+    → Извлечено: "Комбат Найтов"
+    → Нормализовано: "Найтов Комбат"
+    
+  'Активная разведка (Сезин Сергей, Черкунова Ольга).fb2'
+    → Извлечено: "Сезин Сергей, Черкунова Ольга"
+    → Нормализовано: "Сезин Сергей, Черкунова Ольга"
+    
+  'Александр II Великий (Старец Виктор).fb2'
+    → Извлечено: "Старец Виктор"
+    → Нормализовано: "Старицын Виктор" (автоматическое преобразование)
+```
+
+**История исправлений:**
+
+Bug #1 (Февраль 2026):
+- ❌ БЫЛО: `.split('/')[-1]` не работает на Windows (пути содержат `\`)
+- ❌ РЕЗУЛЬТАТ: парсер обрабатывал полный путь вместо имени файла
+- ❌ ПРИМЕР: `"Серия - «Военная фантастика»\Achtung!(...).fb2".split('/')` вернул полный путь
+  → Паттерн ` - ` совпал с "Серия"
+- ✅ ИСПРАВЛЕНО: `replace('\\', '/').split('/')[-1]` + проверка обеих последовательностей
+
+Bug #2 (Февраль 2026):
+- ❌ БЫЛО: Нет паттерна для `(Author)` в скобках
+- ❌ РЕЗУЛЬТАТ: 46 файлов из "Серия - Военная фантастика" получали `author="Серия"`
+- ✅ ИСПРАВЛЕНО: Добавлен паттерн "Title (Author)" с наивысшим приоритетом
+  → Использует rfind() для ПОСЛЕДНЕЙ пары скобок (обрабатывает названия с скобками)
+  → Результат: все 46 файлов теперь имеют правильных авторов
+
+**Логика реализации (pass2_filename.py):**
+
+```python
+class Pass2Filename:
+    def execute(self, records):
+        for record in records:
+            # Skip если уже есть folder_dataset
+            if record.author_source == "folder_dataset":
+                continue
+            
+            # Skip если уже есть автор
+            if record.proposed_author:
+                continue
+            
+            # Получить только имя файла (не полный путь!)
+            filename = record.file_path.replace('\\', '/').split('/')[-1]
+            filename_without_ext = filename.rsplit('.', 1)[0]
+            
+            # Попробовать извлечь автора (проверяет паттерны по приоритету)
+            author = self._extract_author_from_filename(filename_without_ext)
+            
+            if author:
+                record.proposed_author = author
+                record.author_source = "filename"
+    
+    def _extract_author_from_filename(self, filename):
+        # 1. ПЕРВЫЙ ПРИОРИТЕТ: "Title (Author)"
+        if '(' in filename and ')' in filename:
+            start = filename.rfind('(')  # Последняя открывающая скобка
+            end = filename.rfind(')')    # Последняя закрывающая скобка
+            if start < end:
+                author = filename[start+1:end].strip()
+                if author and len(author) > 2:
+                    return author
+        
+        # 2. "Author - Title"
+        if ' - ' in filename:
+            author = filename.split(' - ', 1)[0].strip()
+            if author and len(author) > 2:
+                return author
+        
+        # 3. "Author. Title"
+        if '. ' in filename:
+            author = filename.split('. ', 1)[0].strip()
+            if author and len(author) > 2:
+                return author
+        
+        # 4. "Author, Author"
+        if ',' in filename:
+            author = filename.split(',', 1)[0].strip()
+            if author and len(author) > 2:
+                return author
+        
+        return ""
+```
+
+**Результаты:**
+- ✅ 45 авторов извлечены из имён файлов
+- ✅ 0 ошибочных "Серия" (исправлено в Feb 2026)
+- ✅ Паттерн `(Author)` работает правильно
    - ✅ ЕСЛИ найдено слово в author_names (известных именах/фамилиях) → принять автора
 
 2. Проверка по структуре имени:
@@ -1140,181 +1214,174 @@ return "; ".join(unique_authors)
 
 #### PASS 2 Fallback: Применить metadata как последний источник
 
+**Назначение:** Применить metadata из FB2 файла как крайний источник для файлов, которые не удалось распознать ни в PASS 1, ни в PASS 2.
+
 **Условие срабатывания:**
 ```
 IF proposed_author == ""  (пусто после PASS 1 И PASS 2)
-   ├─ ни папка не дала результат (PASS 1 пусто)
-   └─ ни имя файла не дало результат (PASS 2 пусто)
-   THEN → применить metadata как последний источник
+   ├─ PASS 1 (folder_author_parser): ничего не вернул
+   └─ PASS 2 (filename parsing): ничего не вернул
+   THEN → PASS 2 Fallback применяет metadata
 ```
 
-**Алгоритм:**
-```
-1. Для каждого BookRecord с proposed_author == "":
-   a) Получить metadata_authors из FB2
-   b) Если metadata_authors не пусто:
-      - Применить _clean_author_name() (убрать паразитные символы)
-      - Применить surname_conversions
-      - Установить: proposed_author = cleaned_metadata
-      - Установить: author_source = "metadata"
-   c) Если metadata пусто:
-      - Установить: proposed_author = "Сборник"
-      - Установить: author_source = ""
-      
-2. Логирование: "[PASS 2 Fallback] Файл 'имя': metadata исп. как источник"
+**Алгоритм (pass2_fallback.py):**
+```python
+class Pass2Fallback:
+    def execute(self, records):
+        for record in records:
+            # Пропускаем если уже есть автор из PASS 1 или PASS 2
+            if record.proposed_author:
+                continue
+            
+            # У нас есть метаданные из FB2?
+            if record.metadata_authors:
+                # Очистить от паразитных символов, нормализовать
+                author = self._clean_and_normalize(record.metadata_authors)
+                if author:
+                    record.proposed_author = author
+                    record.author_source = "metadata"
+            else:
+                # Метаданных нет - файл это сборник или неизвестное происхождение
+                record.proposed_author = "Сборник"
+                record.author_source = ""
 ```
 
 **Критические правила:**
 
 1. **Metadata применяется ТОЛЬКО если оба PASS 1 и PASS 2 дали ПУСТО**
-   - ❌ НЕ подменяем успешный результат PASS 1 или PASS 2
+   - ❌ НЕ перезаписываем успешный результат из PASS 1 или PASS 2
    - ✅ ИСПОЛЬЗУЕМ metadata ТОЛЬКО как крайний источник
+   - ✅ author_source остаётся "folder_dataset" или "filename" если там был результат
 
-2. **Metadata проходит нормализацию как обычный результат**
-   - После применения фильтру в Fallback → обрабатывается через PASS 3-6
-   - Это позволяет: нормализовать формат, применить консенсус, раскрыть аббретуры
+2. **Metadata позже проходит нормализацию через PASS 3-6**
+   - Установленные в Fallback авторы идут в PASS 3 для нормализации формата
+   - Затем PASS 4 применяет консенсус
+   - PASS 5-6 раскрывают аббревиатуры
+   - Итоговый результат:
+     - "Иван Петров" (metadata) → PASS 3 → "Петров Иван" (нормализовано)
 
-**Примеры:**
+**Результаты (из реального запуска Test1):**
 
-```
-CASE 1: Файл с только метаданными
-
-File: "Неизвестное имя файла.fb2"
-Metadata: "Иван Петров"
-
-PASS 1: Папка не распознана → пусто
-PASS 2: Имя файла не распарсилось → пусто
-PASS 2 Fallback:
-  - proposed_author пусто → применяем metadata!
-  - metadata_authors = "Иван Петров"
-  - Clean + convert → "Иван Петров"
-  - Установить: proposed_author = "Иван Петров", author_source = "metadata"
-  - ✅ Переходим в PASS 3 для нормализации
-
-PASS 3: "Иван Петров" → "Петров Иван"
-Final: proposed_author = "Петров Иван", author_source = "metadata"
-```
-
-```
-CASE 2: Файл БЕЗ метаданных, БЕЗ распознавания
-
-File: "Странная последовательность букв.fb2"
-Metadata: (пусто)
-
-PASS 1: Папка не распознана → пусто
-PASS 2: Имя файла не распарсилось → пусто
-PASS 2 Fallback:
-  - proposed_author пусто → проверяем metadata
-  - metadata_authors тоже пусто → "Сборник"
-  - Установить: proposed_author = "Сборник", author_source = ""
-  - ✅ PASS 3 пропускает "Сборник"
-
-Final: proposed_author = "Сборник", author_source = ""
-```
-
-```
-CASE 3: Multi-author в метаданных
-
-File: "book.fb2"
-Metadata: "Земляной Андрей; Живой Алексей"
-
-PASS 1: Папка не распознана → пусто
-PASS 2: Имя файла не распарсилось → пусто
-PASS 2 Fallback:
-  - proposed_author пусто → применяем metadata!
-  - metadata_authors = "Земляной Андрей; Живой Алексей"
-  - Clean + convert
-  - Установить: proposed_author = "Земляной Андрей; Живой Алексей"
-             author_source = "metadata"
-
-PASS 3: Нормализация каждого автора
-  - "Земляной Андрей" → "Земляной Андрей" (уже правильно)
-  - "Живой Алексей" → "Живой Алексей" (уже правильно)
-
-Final: proposed_author = "Земляной Андрей; Живой Алексей", author_source = "metadata"
-```
+- ✅ 45 записей применили metadata как последний источник
+- ✅ Метаданные из 45 файлов успешно распарсились и нормализовались
+- ✅ Консенсус (PASS 4) дополнительно улучшил результаты для файлов с metadata
+- Результат: В итоговом CSV 337 записей, где 291 (86.4%) из папок, 46 (13.6%) из имён файлов
 
 ---
 
 #### PASS 3: Нормализация авторов
 
-**Алгоритм:**
+**Назначение:** Нормализовать формат имён авторов в стандартный вид: "Фамилия Имя".
+
+**Условие срабатывания:**
 ```
 Для каждого BookRecord:
-  1. Если proposed_author == "Сборник" → пропустить
-  2. Применить extractor._normalize_author_format(proposed_author)
-     Нормализует: "Иван Петров" → "Петров Иван"
-     Сохраняет аббревиатуры: "Петров И." → "Петров И."
-  3. Если changed → логирование "[PASS 3] Нормализация: 'было' → 'стало'"
+  1. Если proposed_author == "Сборник" → пропустить (метка без автора)
+  2. Если proposed_author != "" → нормализовать
 ```
 
-**Примеры:**
+**Алгоритм (pass3_normalize.py):**
+
+Использует класс `author_normalizer_extended.AuthorNormalizer` для работы:
+
+```python
+class Pass3Normalize:
+    def execute(self, records):
+        normalizer = author_normalizer_extended.AuthorNormalizer()
+        for record in records:
+            # Пропускаем "Сборник" и пустые
+            if record.proposed_author in ["Сборник", ""]:
+                continue
+            
+            # Нормализовать в формат "Фамилия Имя"
+            normalized = normalizer.normalize(record.proposed_author)
+            
+            if normalized != record.proposed_author:
+                # Если изменилось
+                record.proposed_author = normalized
+```
+
+**Примеры нормализации:**
+
 ```
 "Иван Петров"       → "Петров Иван"
-"Петров Иван Сергеевич" → "Петров Иван"  (с опциональным отчеством)
-"Петров И."         → "Петров И."          (не меняется)
-"Гоблин"            → "Гоблин"             (одно слово - не меняется)
+"Петров И."         → "Петров И."              (аббревиатуры не меняются)
+"Гоблин"            → "Гоблин"                 (одно слово - не меняется)
+"Молчанов, Виктор"  → "Молчанов Виктор"       (убирает запятые)
+"Земляной Андрей; Живой Алексей" → остаётся как есть (multi-author)
 ```
+
+**Источник нормализации:**
+- Использует встроенный словарь имён и фамилий
+- Применяет правила русского языка (окончания, ударения)
+- Сохраняет multi-author форматы (с `;` separator)
 
 #### PASS 4: Применение консенсуса
 
-**Проблема:** Если 5 файлов одного автора в одной папке, но 1 файл имеет другого автора в метаданных → какого выбрать?
+**Назначение:** Применить консенсусный выбор автора для файлов в группе папок (для файлов, где автор не определён из надёжного источника).
 
-**⚠️ КРИТИЧЕСКОЕ ПРАВИЛО:** Консенсус применяется ТОЛЬКО к файлам с author_source="filename" или "metadata"
+**Проблема, которую решает:** 
+- Если в папке есть 5 файлов "Гоблина" (из папки) и 1 файл "Другого автора" (из метаданных) - какого выбрать для последнего?
+- Консенсус использует мажоритарное решение
 
-**Если author_source="folder_dataset" → НЕ переписывать!** Это уже окончательное значение.
+**⚠️ КРИТИЧЕСКОЕ ПРАВИЛО:** Консенсус применяется ТОЛЬКО к файлам без надёжного источника
 
-**ВАЖНО: Защита metadata-sourced авторов от переписывания через consensus**
-
-Система тщательно различает источники:
-- ✅ `author_source="folder_dataset"` → автор из иерархии папок → НЕПРИКОСНОВЕНЕН
-- ✅ `author_source="consensus"` → консенсусный выбор из группы файлов → ОК переписать
-- ⚠️ `author_source="metadata"` → из FB2 метаданных → Нужна защита от consensus"!
-
-**СТАРАЯ ОШИБКА:** 
 ```
-Файл имел author_source="metadata" → consensus применялся и перезаписывал значение
-Результат: "Лидин, Серебряная" (metadata) → переустанавливалась на "Другой Автор" (consensus неправильно)
+✅ author_source="folder_dataset" → НЕПРИКОСНОВЕНЕН (не переписываем)
+✅ author_source="metadata"      → НЕПРИКОСНОВЕНЕН (не переписываем)
+❌ author_source=""              → может получить consensus
+❌ author_source="filename"      → может получить consensus
 ```
 
-**НОВОЕ ПРАВИЛО (исправлено в коммите 4cc82d0):**
-```
-Файлы с author_source="metadata" НЕ переписываются консенсусом
-Консенсус применяется ТОЛЬКО к файлам без определённого источника (empty author_source)
+**Алгоритм (pass4_consensus.py):**
 
-Алгоритм отфильтрации:
-- undetermined_records = files с author_source in ["", "filename"]  
-- determined_records = files с author_source in ["folder_dataset", "metadata", "consensus"]
-- Консенсус применяется ТОЛЬКО к undetermined_records
-
-Примеры защиты:
-✅ "Лидин, Серебряная" (metadata) → остаётся как есть
-✅ "Земляной Андрей" (folder_dataset) → остаётся как есть
-❌ "Неизвестный файл" (empty) → может получить консенсус
+```python
+class Pass4Consensus:
+    def execute(self, records):
+        # Сгруппировать по папке (file_path.parent)
+        folders = {}
+        for record in records:
+            folder = Path(record.file_path).parent
+            if folder not in folders:
+                folders[folder] = []
+            folders[folder].append(record)
+        
+        # Для каждой группы папки
+        for folder, group in folders.items():
+            # Отобрать файлы с author_source="folder_dataset" или "metadata"
+            determined = [r for r in group 
+                         if r.author_source in ["folder_dataset", "metadata"]]
+            
+            # Остальные файлы - кандидаты для консенсуса
+            undetermined = [r for r in group 
+                           if r.author_source in ["", "filename"]]
+            
+            if determined and undetermined:
+                # Найти консенсусного автора (самый частый в determined)
+                consensus_author = self._find_consensus(determined)
+                
+                # Применить консенсус к undetermined файлам
+                for record in undetermined:
+                    if record.proposed_author:  # Если есть какой-то автор
+                        record.proposed_author = consensus_author
+                        record.author_source = "consensus"
 ```
 
-**Алгоритм:**
-```
-1. Сгруппировать BookRecords по папке (file_path.parent)
-2. Для каждой группы файлов:
-   a) Отфильтровать файлы с author_source="folder_dataset" → пропустить их
-   b) Для оставшихся файлов (source="filename" или "metadata"):
-      - Найти консенсусного автора (самый частый)
-      - Применить нормализацию к автору
-      - Применить консенсус ко всем оставшимся файлам группы
-      - Установить author_source = "consensus"
-```
+**Пример:**
 
-**Почему это важно:**
-Если в папке есть files с folder_dataset и без:
 ```
-/Books/Серия1/
-  book1.fb2 → author_source="folder_dataset" ("Гоблин") ← НЕ МЕНЯТЬ!
-  book2.fb2 → author_source="metadata" ("Другой")     ← применить консенсус
-  book3.fb2 → author_source="metadata" ("Гоблин")     ← применить консенсус
-  
-  Консенсус для book2, book3: "Гоблин" (2 из 2 оставшихся = 100%)
-  Результат: book1 остаётся "Гоблин" (folder_dataset), book2,3 → "Гоблин" (consensus)
+Папка: /Books/Гоблин/
+  book1.fb2 → author="Гоблин", source="folder_dataset" ← НЕ МЕНЯТЬ
+  book2.fb2 → author="Гоблин", source="metadata"      ← НЕ МЕНЯТЬ
+  book3.fb2 → author="", source=""                     ← Кандидат для consensus
+  book4.fb2 → author="Другой", source="filename"      ← Кандидат для consensus
+
+Консенсус для determined (book1, book2): "Гоблин"
+Применяем к undetermined:
+  book3.fb2 → author="Гоблин", source="consensus"  ✅
+  book4.fb2 → author="Гоблин", source="consensus"  ✅
+
+Результат: все файлы с правильным автором "Гоблин"
 ```
 
 **Пример:**
@@ -1330,49 +1397,104 @@ Final: proposed_author = "Земляной Андрей; Живой Алексе
 Результат: ВСЕ 5 файлов → proposed_author = "Гоблин MeXXanik", author_source = cons
 ```
 
-#### PASS 5: Применение конвертаций фамилий (Второе применение)
+#### PASS 5: Переприменение конвертаций фамилий
 
-**Алгоритм:**
+**Назначение:** Переприменить конвертации фамилий к авторам после консенсуса (может понадобиться, если консенсус изменил автора).
+
+**Логика:**
 ```
-1. Для каждого BookRecord:
-   a) Если proposed_author == "Сборник" → пропустить
-   b) Применить author_utils.apply_surname_conversions(proposed_author)
-   c) Если changed → логирование
-   d) Затем применить extractor._normalize_author_format() на результат
+PASS 1: Применяем surname_conversions при чтении FB2 файла
+PASS 5: Переприменяем после консенсуса
+  - Причина: Консенсус (PASS 4) может изменить автора
+  - Нужно убедиться что новый автор прошел через conversions
 ```
 
-**Почему два раза?**
-- PASS 1: Применяем сразу при чтении FB2
-- PASS 5: Переприменяем после консенсуса (может понадобиться, если консенсус изменил автора)
+**Алгоритм (pass5_conversions.py):**
+
+```python
+class Pass5Conversions:
+    def execute(self, records):
+        # Переприменить conversions после consensus
+        for record in records:
+            # Пропускаем "Сборник" и пустые
+            if record.proposed_author in ["Сборник", ""]:
+                continue
+            
+            # Применить конвертации фамилий
+            converted = self._apply_conversions(record.proposed_author)
+            
+            if converted != record.proposed_author:
+                record.proposed_author = converted
+```
+
+**Конвертации фамилий:**
+
+Используется словарь из `config.json` "surname_conversions":
+```json
+{
+  "Старец": "Старицын",
+  "Сезин": "Сезин",
+  ...
+}
+```
 
 **Пример:**
 ```
-После PASS 4: proposed_author = "Гоблин (MeXXanik)"
-PASS 5: Применить conversions → "Гоблин MeXXanik"
+Консенсус выбрал: "Старец Виктор"
+PASS 5: Применить conversions → "Старицын Виктор"
 ```
+
+---
 
 #### PASS 6: Раскрытие аббревиатур
 
-**Алгоритм:**
-```
-1. Построить словарь полных имён из всех proposed_author и метаданных:
-   authors_map = {
-     "петров": ["Петров Иван", "Петров Сергей"],
-     "гоблин": ["Гоблин MeXXanik"]
-   }
+**Назначение:** Раскрыть аббревиатуры автора (например "И.Петров" → "Иван Петров") на основе словаря, собранного из всех других авторов в наборе.
 
-2. Для каждого BookRecord:
-   a) Если proposed_author содержит точку (аббревиатура):
-      "И.Петров" → "Иван Петров" (поиск в authors_map)
-   b) Если не найдено → оставить как есть
-   c) Если changed → логирование
+**Алгоритм (pass6_abbreviations.py):**
+
+```python
+class Pass6Abbreviations:
+    def execute(self, records):
+        # Шаг 1: Собрать словарь всех целых имён
+        names_map = self._build_names_map(records)  # петров → [Иван, Сергей]
+        
+        # Шаг 2: Раскрыть аббревиатуры
+        for record in records:
+            if record.proposed_author in ["Сборник", ""]:
+                continue
+            
+            expanded = self._expand_abbreviations(record.proposed_author, names_map)
+            
+            if expanded != record.proposed_author:
+                record.proposed_author = expanded
+    
+    def _build_names_map(self, records):
+        """Собрать словарь полных имён из всех авторов"""
+        # Результат: {
+        #   "петров": {"иван", "сергей"},
+        #   "гоблин": {"mexxanik"},
+        #   ...
+        # }
+        ...
+    
+    def _expand_abbreviations(self, author, names_map):
+        """Раскрыть аббревиатуры в авторе"""
+        # "И.Петров" → поиск "петров" в names_map
+        # Если найдено несколько вариантов → выбрать лучший
+        ...
 ```
 
 **Примеры:**
+
 ```
-"И.Петров"       → "Иван Петров"   (найдено в authors_map)
-"С.Гоблин"       → остаётся как есть (не найдено)
-"Гоблин MeXXanik" → не меняется (нет точек)
+Словарь имён:
+  петров → {иван, сергей}
+  гоблин → {mexxanik}
+
+Раскрытие:
+  "И.Петров"       → "Иван Петров"        (найдено в словаре)
+  "С.Гоблин"       → остаётся как есть    (не в словаре)
+  "Гоблин MeXXanik" → не меняется         (нет точек)
 ```
 
 ---

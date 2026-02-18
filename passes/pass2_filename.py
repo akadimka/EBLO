@@ -37,8 +37,9 @@ class Pass2Filename:
             if record.proposed_author:
                 continue
             
-            # Try to extract from filename
-            filename = record.file_path.split('/')[-1]  # Get basename
+            # Try to extract from filename (NOT full path!)
+            # Handle both Windows (\) and Unix (/) path separators
+            filename = record.file_path.replace('\\', '/').split('/')[-1]  # Get basename only
             filename_without_ext = filename.rsplit('.', 1)[0]  # Remove extension
             
             author = self._extract_author_from_filename(filename_without_ext)
@@ -53,7 +54,8 @@ class Pass2Filename:
     def _extract_author_from_filename(self, filename: str) -> str:
         """Extract author name from filename using simple patterns.
         
-        Patterns:
+        Patterns (in order of priority):
+        - "Title (Author)" → Author (most common in Test1)
         - "Author - Title" → Author
         - "Author. Title" → Author
         - "Author, Author" → First Author
@@ -66,6 +68,16 @@ class Pass2Filename:
         """
         if not filename:
             return ""
+        
+        # Pattern: "Title (Author)" ← Most common in Test1
+        # Example: "Achtung! Manager in der Luft! (Комбат Найтов)"
+        if '(' in filename and ')' in filename:
+            start = filename.rfind('(')  # Find LAST opening parenthesis
+            end = filename.rfind(')')    # Find LAST closing parenthesis
+            if start < end and start != -1:
+                author = filename[start+1:end].strip()
+                if author and len(author) > 2:
+                    return author
         
         # Pattern: "Author - Title"
         if ' - ' in filename:
