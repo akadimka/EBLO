@@ -1,7 +1,9 @@
 {
   "library_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/EBook Library",
   "last_scan_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
+  "test_window_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
+  "folder_parse_limit": 3,
   "genre_association_method": "context_menu",
   "window_sizes": {
     "settings": "792x511+-2164+-2",
@@ -65,6 +67,37 @@
     "сборник",
     "шедевры фантастики",
     "ЛенИздат"
+  ],
+  "collection_keywords": [
+    "сборник",
+    "антология",
+    "коллекция",
+    "собрание сочинений",
+    "сборник сочинений",
+    "избранное",
+    "избранные произведения",
+    "лучшее",
+    "лучшие",
+    "шедевры",
+    "шедевры фантастики",
+    "хиты",
+    "популярные",
+    "топ",
+    "классика",
+    "легендарные",
+    "великие",
+    "полное собрание",
+    "собрание произведений",
+    "собрание сочинений",
+    "полное собрание сочинений",
+    "произведения",
+    "труды",
+    "best of",
+    "highlights",
+    "essentials",
+    "complete works",
+    "compilation",
+    "anthology"
   ],
   "service_words": [
     "том",
@@ -368,7 +401,6 @@
     "космическая",
     "научная"
   ],
-  "test_window_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
   "male_names": [
     "Августин",
     "Алекс",
@@ -508,6 +540,5 @@
     "Наталия",
     "Влада",
     "Морган"
-  ],
-  "folder_parse_limit": 3
+  ]
 }
