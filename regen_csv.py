@@ -98,7 +98,7 @@ class RegenCSVService:
             self.logger.log("[OK] PASS 2 Fallback: Metadata applied")
             
             # ===== PASS 3 =====
-            pass3 = Pass3Normalize(self.extractor, self.logger)
+            pass3 = Pass3Normalize(self.logger)
             pass3.execute(self.records)
             self.logger.log("[OK] PASS 3: Authors normalized")
             
@@ -108,7 +108,7 @@ class RegenCSVService:
             self.logger.log("[OK] PASS 4: Consensus applied")
             
             # ===== PASS 5 =====
-            pass5 = Pass5Conversions(self.settings, self.logger)
+            pass5 = Pass5Conversions(self.logger)
             pass5.execute(self.records)
             self.logger.log("[OK] PASS 5: Conversions re-applied")
             

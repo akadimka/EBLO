@@ -37,9 +37,10 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
         author = name.strip()
     
     elif pattern == "Series (Author, Author)":
-        # Content of first parentheses (authors)
+        # Content of first parentheses (authors) - normalize to '; ' separator
         if paren_contents:
-            author = paren_contents[0].strip()
+            # Convert ", " to "; " for unified processing in PASS 3
+            author = paren_contents[0].strip().replace(', ', '; ')
     
     elif pattern == "Series (Author)":
         # LAST parentheses ← KEY for МВП-2 (1) Одиссея (Чернов)

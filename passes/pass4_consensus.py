@@ -3,11 +3,21 @@ PASS 4: Apply consensus author to files in same folder.
 """
 
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
+from author_normalizer_extended import AuthorNormalizer
+from settings_manager import SettingsManager
 
 
 class Pass4Consensus:
-    """PASS 4: Apply consensus author to files in same folder."""
+    """PASS 4: Apply consensus author to files in same folder.
+    
+    For each folder group:
+    1. Identify "determined" files with reliable source (folder_dataset, metadata, consensus)
+    2. Identify "undetermined" files (empty or filename source)
+    3. Apply consensus author (most common) to undetermined files
+    
+    ⚠️ CRITICAL: Files with folder_dataset or metadata source are NEVER overwritten!
+    """
     
     def __init__(self, logger):
         """Initialize PASS 4.
@@ -16,6 +26,11 @@ class Pass4Consensus:
             logger: Logger instance
         """
         self.logger = logger
+        try:
+            self.settings = SettingsManager('config.json')
+        except:
+            self.settings = None
+        self.normalizer = AuthorNormalizer(self.settings)
     
     def execute(self, records: List) -> None:
         """Execute PASS 4: Apply consensus author.
@@ -40,17 +55,19 @@ class Pass4Consensus:
         
         # Process each group
         for folder, group_records in groups.items():
-            # Filter protected files (folder_dataset, metadata)
+            # Separate determined and undetermined files
+            determined = [r for r in group_records 
+                         if r.author_source in ["folder_dataset", "metadata", "consensus"]]
             undetermined = [r for r in group_records 
-                          if r.author_source in ["", "filename"]]
+                           if r.author_source in ["", "filename"]]
             
-            if len(undetermined) < 2:
+            if not determined or not undetermined:
                 continue
             
-            # Find consensus author
+            # Find consensus author from determined files  
             author_counts = {}
-            for record in undetermined:
-                if record.proposed_author:
+            for record in determined:
+                if record.proposed_author and record.proposed_author != "Сборник":
                     author_counts[record.proposed_author] = \
                         author_counts.get(record.proposed_author, 0) + 1
             
@@ -61,7 +78,14 @@ class Pass4Consensus:
             
             # Apply to all undetermined files
             for record in undetermined:
-                if not record.proposed_author:
+                if record.proposed_author and record.proposed_author != "Сборник":
+                    # Update if different from consensus
+                    if record.proposed_author != consensus_author:
+                        record.proposed_author = consensus_author
+                        record.author_source = "consensus"
+                        consensus_count += 1
+                elif not record.proposed_author:
+                    # Apply consensus to empty records
                     record.proposed_author = consensus_author
                     record.author_source = "consensus"
                     consensus_count += 1

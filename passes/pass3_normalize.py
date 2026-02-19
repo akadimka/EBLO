@@ -2,26 +2,37 @@
 PASS 3: Normalize author names to standard format.
 """
 
-from typing import List
+from typing import List, Optional
+from author_normalizer_extended import AuthorNormalizer
+from settings_manager import SettingsManager
 
 
 class Pass3Normalize:
-    """PASS 3: Normalize author names to standard format."""
+    """PASS 3: Normalize author names to standard format.
     
-    def __init__(self, extractor, logger):
+    Transform author names from various formats to standard "Фамилия Имя" format:
+    - "Иван Петров" → "Петров Иван"
+    - "А.Михайловский; А.Харников" → "Михайловский А., Харников А." (multi-author)
+    """
+    
+    def __init__(self, logger):
         """Initialize PASS 3.
         
         Args:
-            extractor: FB2AuthorExtractor instance
             logger: Logger instance
         """
-        self.extractor = extractor
         self.logger = logger
+        try:
+            self.settings = SettingsManager('config.json')
+        except:
+            self.settings = None
+        self.normalizer = AuthorNormalizer(self.settings)
     
     def execute(self, records: List) -> None:
         """Execute PASS 3: Normalize author names.
         
-        Apply extractor._normalize_author_format() to each author.
+        Transform author format and handle multi-author cases.
+        Handles both separators: '; ' (from folder parsing) and ', ' (from filename/metadata).
         
         Args:
             records: List of BookRecord objects to process
@@ -35,7 +46,17 @@ class Pass3Normalize:
                 continue
             
             original = record.proposed_author
-            normalized = self.extractor._normalize_author_format(original)
+            
+            # Check for multi-author cases with different separators
+            # '; ' comes from folder_author_parser (temporary separator)
+            # ', ' comes from filename or metadata
+            if '; ' in record.proposed_author or ', ' in record.proposed_author:
+                # Determine separator
+                sep = '; ' if '; ' in record.proposed_author else ', '
+                normalized = self.normalizer.normalize_format(original, record.metadata_authors)
+            else:
+                # Single author
+                normalized = self.normalizer.normalize_format(original, record.metadata_authors)
             
             if normalized and normalized != original:
                 record.proposed_author = normalized
