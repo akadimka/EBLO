@@ -25,8 +25,9 @@ class Pass2Fallback:
         self.logger = logger
         try:
             self.settings = SettingsManager('config.json')
-            self.collection_keywords = self.settings.get('collection_keywords', [])
-        except:
+            self.collection_keywords = self.settings.get_list('collection_keywords') or []
+        except Exception as e:
+            print(f"[PASS 2 Fallback] Warning: Could not load collection_keywords: {e}")
             self.collection_keywords = []
     
     def _is_collection_file(self, filename: str) -> bool:
@@ -93,8 +94,9 @@ class Pass2Fallback:
             # Check for collection: 3+ metadata authors + collection keywords in filename
             author_count = self._count_authors(record.metadata_authors)
             filename = os.path.basename(record.file_path) if record.file_path else ""
+            is_collection = self._is_collection_file(filename)
             
-            if author_count >= 3 and self._is_collection_file(filename):
+            if author_count >= 3 and is_collection:
                 # This is a collection/anthology
                 record.proposed_author = "Сборник"
                 record.author_source = "collection"
