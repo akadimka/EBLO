@@ -16,7 +16,12 @@ class Pass4Consensus:
     2. Identify "undetermined" files (empty or filename source)
     3. Apply consensus author (most common) to undetermined files
     
-    ⚠️ CRITICAL: Files with folder_dataset or metadata source are NEVER overwritten!
+    ⚠️ CRITICAL: Files with ANY successful source are NEVER overwritten!
+    - folder_dataset: Extracted from folder hierarchy
+    - filename: Successfully parsed from file name  
+    - metadata: From FB2 XML metadata
+    - consensus: Already has consensus from previous folder
+    - empty string: Only undetermined files get new consensus
     """
     
     def __init__(self, logger):
@@ -56,10 +61,12 @@ class Pass4Consensus:
         # Process each group
         for folder, group_records in groups.items():
             # Separate determined and undetermined files
+            # DETERMINED: files with ANY successful source (folder_dataset, metadata, consensus, filename)
+            # UNDETERMINED: files with empty source only
             determined = [r for r in group_records 
-                         if r.author_source in ["folder_dataset", "metadata", "consensus"]]
+                         if r.author_source in ["folder_dataset", "metadata", "consensus", "filename"]]
             undetermined = [r for r in group_records 
-                           if r.author_source in ["", "filename"]]
+                           if r.author_source == ""]
             
             if not determined or not undetermined:
                 continue
@@ -76,10 +83,10 @@ class Pass4Consensus:
             
             consensus_author = max(author_counts, key=author_counts.get)
             
-            # Apply to all undetermined files
+            # Apply to all undetermined files (only empty ones)
             for record in undetermined:
                 if record.proposed_author and record.proposed_author != "Сборник":
-                    # Update if different from consensus
+                    # Update with consensus
                     if record.proposed_author != consensus_author:
                         record.proposed_author = consensus_author
                         record.author_source = "consensus"
@@ -88,6 +95,7 @@ class Pass4Consensus:
                     # Apply consensus to empty records
                     record.proposed_author = consensus_author
                     record.author_source = "consensus"
+                    consensus_count += 1
                     consensus_count += 1
         
         self.logger.log(f"[PASS 4] Applied consensus to {consensus_count} records")
