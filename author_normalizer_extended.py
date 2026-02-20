@@ -71,8 +71,9 @@ class AuthorNormalizer:
         """Нормализовать формат автора.
         
         "Иван Петров" → "Петров Иван"
-        Если несколько авторов разделены '; ' → нормализует каждого и разделяет запятой
+        Если несколько авторов разделены '; ' или ', ' → нормализует каждого и разделяет запятой
         "А.Михайловский; А.Харников" → "Михайловский А., Харников А."
+        "Дмитрий Зурков, Игорь Черепнев" → "Зурков Дмитрий, Черепнев Игорь"
         
         Если автор содержит неполное ФИ (только имя), использует metadata_authors для восстановления.
         Пример: "Белаш Александр; Людмила" + metadata_authors="Людмила Белаш; Александр Белаш"
@@ -90,15 +91,24 @@ class AuthorNormalizer:
         if not author or author == "Сборник":
             return author
         
-        # Проверить есть ли несколько авторов разделённых '; '
+        # Determine separator: '; ' (from folder_author_parser) or ', ' (from filename/metadata)
+        separator = None
         if '; ' in author:
-            authors = author.split('; ')
+            separator = '; '
+        elif ', ' in author:
+            separator = ', '
+        
+        # Проверить есть ли несколько авторов
+        if separator:
+            authors = author.split(separator)
             normalized_authors = []
             
             # Парсируем metadata_authors для восстановления неполных ФИ
             metadata_authors_list = []
             if metadata_authors:
-                metadata_authors_list = [a.strip() for a in metadata_authors.replace(';', ',').split(',')]
+                # Normalize metadata_authors to list (handle both '; ' and ', ')
+                meta_str = metadata_authors.replace('; ', ',').replace(';', ',')
+                metadata_authors_list = [a.strip() for a in meta_str.split(',')]
             
             for single_author in authors:
                 single_author = single_author.strip()
