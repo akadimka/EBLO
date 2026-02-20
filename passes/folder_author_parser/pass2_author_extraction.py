@@ -57,8 +57,15 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
             author = name.split(' - ')[0].strip()
     
     elif pattern == "Series":
-        # Fallback: text before parentheses or entire name
+        # Fallback: if there are NO parentheses with AUTHORS, don't extract anything
+        # This is just a series name, not an author name
+        # Only extract if text_before_first has something meaningful (like before parentheses)
         text_before_first = struct_info['text_before_first']
-        author = text_before_first.strip() or name.strip()
+        if text_before_first and struct_info['paren_count'] > 0:
+            # Text before brackets: "Максим Шаттам - Собрание сочинений" → extract "Максим Шаттам"
+            author = text_before_first.strip()
+        else:
+            # No parentheses with author info, don't parse the folder name
+            author = ""
     
     return author.strip() if author else ""

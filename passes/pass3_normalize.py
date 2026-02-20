@@ -50,13 +50,18 @@ class Pass3Normalize:
             # Check for multi-author cases with different separators
             # '; ' comes from folder_author_parser (temporary separator)
             # ', ' comes from filename or metadata
+            # 
+            # IMPORTANT: If author_source is folder_dataset, do NOT use metadata_authors
+            # because it would add co-authors from metadata, violating priority logic
+            metadata_for_normalization = "" if record.author_source == "folder_dataset" else record.metadata_authors
+            
             if '; ' in record.proposed_author or ', ' in record.proposed_author:
                 # Determine separator
                 sep = '; ' if '; ' in record.proposed_author else ', '
-                normalized = self.normalizer.normalize_format(original, record.metadata_authors)
+                normalized = self.normalizer.normalize_format(original, metadata_for_normalization)
             else:
                 # Single author
-                normalized = self.normalizer.normalize_format(original, record.metadata_authors)
+                normalized = self.normalizer.normalize_format(original, metadata_for_normalization)
             
             if normalized and normalized != original:
                 record.proposed_author = normalized
