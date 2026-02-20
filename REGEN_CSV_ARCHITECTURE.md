@@ -1,10 +1,41 @@
-# Архитектура системы регенерации CSV (Версия 2.2)
+# Архитектура системы регенерации CSV (Версия 2.3)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
 **📋 Полная история изменений и исправлений:** см. [CHANGELOG.md](CHANGELOG.md)
 
 ## 🔧 ИСПРАВЛЕНИЯ КРИТИЧЕСКИХ БАГОВ (Февраль 20, 2026)
+
+### Баг 4: Priority Logic - PASS 3 добавляла metadata авторов к folder_dataset
+
+**Проблема:** Когда автор найден из иерархии папок (author_source="folder_dataset"), PASS 3 нормализация добавляла соавторов из FB2 метаданных, нарушая приоритет `folder > filename > metadata`.
+
+**Пример бага:**
+```
+Файл: Волков Тим\Бездна.fb2
+metadata_authors: "Тим Волков; Ян Кулагин" (2 автора из FB2)
+PASS 1 результат: author_source="folder_dataset", proposed_author="Волков Тим" (1 автор)
+PASS 3 БУГ: proposed_author="Волков Тим, Кулагин Ян" ❌ (добавлен второй автор из metadata!)
+```
+
+**Причина:** `normalize_format()` в `author_normalizer_extended.py` была тонкая логика по восстановлению потеряных ФИ - когда слова из proposed_author совпадали с metadata авторами, она добавляла ВСЕХ авторов из metadata. Это правильно для случая "неполное ФИ" но неправильно для confident folder-derived author.
+
+**Решение** (Commit a1f3cfd):
+```python
+# pass3_normalize.py
+# Было: normalized = self.normalizer.normalize_format(original, record.metadata_authors)
+# Теперь: 
+metadata_for_normalization = "" if record.author_source == "folder_dataset" else record.metadata_authors
+normalized = self.normalizer.normalize_format(original, metadata_for_normalization)
+```
+Если author_source="folder_dataset", передаем пустую строку для metadata_authors, предотвращая слияние авторов.
+
+**Результат:**
+- ✅ 420 записей обработано (autor-organized dataset)
+- ✅ Все записи сохранили author_source="folder_dataset" без загрязнения metadata авторов
+- ✅ Приоритет соблюдается: `folder > filename > metadata`
+
+---
 
 ### Баг 1: Lowercase case-sensitivity в PRECACHE name validation
 

@@ -4,6 +4,53 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.3] - 2026-02-20
+
+### 🔴 CRITICAL PRIORITY BUG FIX
+
+#### Fix 4: PASS 3 Metadata Pollution - Violates Author Priority
+**Commit:** `a1f3cfd`
+- **Problem:** When author_source="folder_dataset", PASS 3 normalization was merging co-authors from FB2 metadata, violating the fundamental priority: `folder > filename > metadata`
+- **Root Cause:** `normalize_format()` in `author_normalizer_extended.py` detects word overlap between proposed_author and metadata_authors, then adds ALL metadata authors. This was designed for recovering incomplete names but was incorrectly applied to folder-derived authors.
+- **Impact:** Records with single confident folder-derived author were corrupted with metadata co-authors
+- **Example Bug:**
+  ```
+  File: Волков Тим\Бездна.fb2
+  
+  BEFORE FIX:
+    metadata_authors: "Тим Волков; Ян Кулагин"
+    proposed_author: "Волков Тим" (from PRECACHE folder)
+    author_source: "folder_dataset"
+           ↓ PASS 3 corruption
+    proposed_author: "Волков Тим, Кулагин Ян" ❌ (added Ян Кулагин from metadata!)
+  
+  AFTER FIX:
+    proposed_author: "Волков Тим" ✓ (only folder author preserved)
+  ```
+- **Solution:** In PASS 3, when processing records with `author_source="folder_dataset"`, pass empty string for `metadata_authors` parameter to `normalize_format()`, preventing metadata merging
+- **Files Changed:** `passes/pass3_normalize.py`
+- **Test Results:**
+  ```
+  - Dataset: 420 files (author-organized hierarchy)
+  - Before: Many records had unwanted metadata co-author merging
+  - After: All 420 records maintain single folder-derived author
+  - All records show author_source="folder_dataset" (correct priority)
+  
+  Samples verified:
+    "Волков Тим\Бездна.fb2" → "Волков Тим" ✓
+    "Волков Тим\ISCARIOT\1. Выжить любой.fb2" → "Волков Тим" ✓
+    "Волков Тим\Ай да Пушкин!\1. Бояръ-Аниме..." → "Волков Тим" ✓
+  ```
+- **Priority Logic (Now Correct):**
+  ```
+  PASS 1: PRECACHE → folder_dataset (highest priority)
+  PASS 2: Filename pattern → filename (fallback if no folder match)
+  PASS 2 Fallback: Metadata → metadata (last resort if 1 & 2 empty)
+  PASS 3: Normalize ONLY from current author, never add from metadata if source is folder_dataset
+  ```
+
+---
+
 ## [2.2] - 2026-02-20
 
 ### 🔴 CRITICAL BUG FIXES
