@@ -29,10 +29,11 @@ class Precache:
         self._load_name_sets()
     
     def _load_name_sets(self) -> None:
-        """Load male and female name lists from config."""
+        """Load male and female name lists from config (convert to lowercase for consistent validation)."""
         try:
-            self.male_names = set(self.settings.get_male_names())
-            self.female_names = set(self.settings.get_female_names())
+            # Load names and convert to lowercase for case-insensitive validation
+            self.male_names = set(name.lower() for name in self.settings.get_male_names())
+            self.female_names = set(name.lower() for name in self.settings.get_female_names())
             print(f"[PRECACHE] Loaded {len(self.male_names)} male names, "
                   f"{len(self.female_names)} female names for validation")
         except Exception as e:
