@@ -272,19 +272,25 @@ class Pass2Filename:
         if not has_letter:
             return False
         
-        # SBORNIK DETECTION: Verify extracted text contains at least one known name
+        # SBORNIK DETECTION: Verify extracted text looks like author name, not collection title
         # This prevents collection titles like "Боевая фантастика" from being extracted as authors
-        # Only check if name lists are available (from PRECACHE)
-        if self.male_names or self.female_names:
-            text_normalized = text.lower()
-            # Split text into words and check if ANY word is a known male/female name
-            text_words_check = set(text_normalized.split())
-            has_known_name = any(
-                word in self.male_names or word in self.female_names
-                for word in text_words_check
-            )
-            if not has_known_name:
-                return False  # Not an author name - likely a collection title
+        # Strategy:
+        # 1. Single word (just surname) → always allow (e.g., "Демченко")
+        # 2. Multiple words → require at least one known first name (e.g., "Демченко Антон")
+        # This way surnames like "Демченко" pass, but collection titles don't
+        text_normalized = text.lower()
+        text_words = text_normalized.split()
+        
+        if len(text_words) > 1:  # Multi-word - likely "FirstName LastName" or "Title Words"
+            # Require at least one known first name to filter out collection titles
+            if self.male_names or self.female_names:
+                has_known_name = any(
+                    word in self.male_names or word in self.female_names
+                    for word in text_words
+                )
+                if not has_known_name:
+                    return False  # Not an author name - likely a collection title
+        # Single word always passes (it's a surname, which is valid author name)
         
         return True
     
@@ -321,8 +327,9 @@ class Pass2Filename:
         skipped_count = 0
         
         for i, record in enumerate(records):
-            # Skip files with folder_dataset source (PASS 1 already handled)
-            if record.author_source == "folder_dataset":
+            # Skip files with folder_dataset source ONLY if fallback is NOT needed
+            # needs_filename_fallback = True means folder parse found NOTHING, try filename anyway
+            if record.author_source == "folder_dataset" and not getattr(record, 'needs_filename_fallback', False):
                 skipped_count += 1
                 continue
             
@@ -352,6 +359,7 @@ class Pass2Filename:
                 # This OVERRIDES metadata (FILE -> METADATA priority)
                 record.proposed_author = author
                 record.author_source = "filename"
+                record.needs_filename_fallback = False  # Clear the fallback flag since we found something
                 processed_count += 1
                 
                 # BUILD AUTHOR CACHE: Track this extraction for future abbreviation expansion

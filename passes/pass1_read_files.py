@@ -18,6 +18,7 @@ class BookRecord:
     metadata_series: str        # Original series from FB2 XML (immutable)
     proposed_series: str        # Final series after all PASS
     series_source: str          # Source of series
+    needs_filename_fallback: bool = False  # True if folder parse found nothing, need filename PASS 2
 
 
 class Pass1ReadFiles:
@@ -79,7 +80,8 @@ class Pass1ReadFiles:
                     author_source=author_source or "",
                     metadata_series="",
                     proposed_series="",
-                    series_source=""
+                    series_source="",
+                    needs_filename_fallback=(author == "")  # If no folder author found, need filename PASS 2
                 )
                 
                 records.append(record)
