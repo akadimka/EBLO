@@ -43,14 +43,23 @@ class Precache:
     def _contains_valid_name(self, author_name: str) -> bool:
         """Check if author_name contains at least one valid person name.
         
+        Handles both full names ("Олег Сапфир") and abbreviated names ("О.Сапфир" or "А.Михайловский").
+        
         Args:
-            author_name: Author name to validate (e.g., "Олег Сапфир")
+            author_name: Author name to validate (e.g., "Олег Сапфир" or "А.Михайловский")
             
         Returns:
-            True if at least one word is found in male_names or female_names
+            True if at least one word is found in male_names or female_names, OR
+            if the name contains surname-like pattern (Initial.Surname)
         """
         if not author_name:
             return False
+        
+        # Check for abbreviated name pattern: "А.Михайловский" or "А. Михайловский"
+        # Pattern: single capital letter (optional dot and space) followed by capitalized word
+        import re
+        if re.search(r'[А-Я]\.*\s*[А-Я][а-яё]+', author_name):
+            return True  # Matches abbreviated name pattern
         
         # Split author name into words
         words = author_name.split()
