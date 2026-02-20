@@ -244,11 +244,11 @@ class AuthorName:
     
     @classmethod
     def _get_known_names(cls) -> Set[str]:
-        """Load known male and female names from config file.
+        """Load known male and female names from config file (with normalization).
         
-        Загрузить известные мужские и женские имена из конфига.
+        Загрузить известные мужские и женские имена из конфига с нормализацией.
         
-        Returns: Set of known names (lowercase)
+        Returns: Set of known names (lowercase, with ё replaced by е)
         """
         if cls._known_names_cache is None:
             try:
@@ -258,8 +258,10 @@ class AuthorName:
                         config = json.load(f)
                         male_names = config.get('male_names', [])
                         female_names = config.get('female_names', [])
+                        # Normalize: lowercase + replace ё with е for consistent matching
                         cls._known_names_cache = set(
-                            w.lower() for w in (male_names + female_names) if w
+                            w.lower().replace('ё', 'е') 
+                            for w in (male_names + female_names) if w
                         )
                 else:
                     cls._known_names_cache = set()
@@ -289,8 +291,8 @@ class AuthorName:
         if not self.is_valid:
             return (None, None, None)
         
-        # EXCEPTION 1: Check for "Surname I.O." format
-        pattern_surname_initials = r'^([А-Яа-яЁё]+)\s+([А-Яа-яЁё]\.?)\s*([А-Яа-яЁё]\.?)$'
+        # EXCEPTION 1: Check for "Surname I.O." format (requires dots for initials)
+        pattern_surname_initials = r'^([А-Яа-яЁё]+)\s+([А-Яа-яЁё]\.)\s*([А-Яа-яЁё]\.)?$'
         if re.match(pattern_surname_initials, self.raw_name):
             return (self.raw_name, None, None)
         
