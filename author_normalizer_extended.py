@@ -91,6 +91,13 @@ class AuthorNormalizer:
         if not author or author == "Сборник":
             return author
         
+        # Parse metadata_authors first
+        metadata_authors_list = []
+        if metadata_authors:
+            # Normalize metadata_authors to list (handle both '; ' and ', ')
+            meta_str = metadata_authors.replace('; ', ',').replace(';', ',')
+            metadata_authors_list = [a.strip() for a in meta_str.split(',') if a.strip()]
+        
         # Determine separator: '; ' (from folder_author_parser) or ', ' (from filename/metadata)
         separator = None
         if '; ' in author:
@@ -98,17 +105,10 @@ class AuthorNormalizer:
         elif ', ' in author:
             separator = ', '
         
-        # Проверить есть ли несколько авторов
+        # Проверить есть ли несколько авторов в author или восстановить из metadata
         if separator:
             authors = author.split(separator)
             normalized_authors = []
-            
-            # Парсируем metadata_authors для восстановления неполных ФИ
-            metadata_authors_list = []
-            if metadata_authors:
-                # Normalize metadata_authors to list (handle both '; ' and ', ')
-                meta_str = metadata_authors.replace('; ', ',').replace(';', ',')
-                metadata_authors_list = [a.strip() for a in meta_str.split(',')]
             
             for single_author in authors:
                 single_author = single_author.strip()
@@ -130,12 +130,37 @@ class AuthorNormalizer:
                     normalized = name_obj.normalized if name_obj.is_valid else single_author
                     normalized_authors.append(normalized)
             
+            # Sort authors alphabetically before joining
+            normalized_authors.sort()
             # Объединить через запятую
             return ', '.join(normalized_authors)
         
-        # Одиночный автор
+        # Одиночный автор - проверить версию в metadata
         name_obj = AuthorName(author)
-        return name_obj.normalized if name_obj.is_valid else author
+        normalized = name_obj.normalized if name_obj.is_valid else author
+        
+        # Если в metadata есть несколько авторов И основной автор совпадает с одним из них
+        # → используем всех авторов из metadata (восстановление потерянных соавторов)
+        if metadata_authors_list and len(metadata_authors_list) > 1:
+            # Проверить: есть ли слова из author в metadata авторах?
+            author_words = set(author.lower().split())
+            metadata_normalized = []
+            
+            # Нормализовать всех авторов из metadata
+            for meta_author in metadata_authors_list:
+                meta_words = set(meta_author.lower().split())
+                # Если есть пересечение слов - это тот же автор
+                if author_words & meta_words:  # intersection
+                    # Используем всех авторов из metadata
+                    for meta_author_full in metadata_authors_list:
+                        meta_name_obj = AuthorName(meta_author_full)
+                        meta_normalized = meta_name_obj.normalized if meta_name_obj.is_valid else meta_author_full
+                        metadata_normalized.append(meta_normalized)
+                    # Sort authors alphabetically by surname (first component after normalization)
+                    metadata_normalized.sort()
+                    return ', '.join(metadata_normalized)
+        
+        return normalized
     
     def apply_conversions(self, author: str) -> str:
         """Применить conversions к имени автора.
