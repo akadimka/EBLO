@@ -33,21 +33,33 @@ class Pass6Abbreviations:
         self.normalizer = AuthorNormalizer(self.settings)
     
     def execute(self, records: List) -> None:
-        """Execute PASS 6: Expand abbreviations.
+        """Execute PASS 6: Expand abbreviations and incomplete author names.
+        
+        Two-pass algorithm:
+        1. First pass: Build complete authors_map from ALL records
+        2. Second pass: Expand abbreviations and incomplete names using full map
+        
+        This allows forward references: a file can be expanded using information
+        from files that appear later in the list.
+        
+        Two operations:
+        1. Expand abbreviations: "Петров И." → "Петров Иван"
+        2. Expand incomplete names: "Живой" → "Живой Алексей" (using cache from other files)
         
         Args:
             records: List of BookRecord objects to process
         """
-        print("[PASS 6] Expanding abbreviations...")
+        print("[PASS 6] Expanding abbreviations and incomplete names...")
         
-        # Build authors map from all records
+        # PASS 1: Build complete authors map from ALL records
+        print("[PASS 6]   Building author cache from all records...")
         authors_map = self._build_authors_map(records)
         
-        # Expand abbreviations
+        # PASS 2: Expand abbreviations and incomplete names
         expanded_count = 0
         
         for record in records:
-            if record.proposed_author == "Сборник" or "." not in record.proposed_author:
+            if record.proposed_author == "Сборник":
                 continue
             
             original = record.proposed_author
@@ -55,19 +67,60 @@ class Pass6Abbreviations:
             # Check for multi-author case with both separators ('; ' from folder, ', ' from filename)
             if '; ' in record.proposed_author:
                 authors = record.proposed_author.split('; ')
-                expanded_authors = [self.normalizer.expand_abbreviation(a, authors_map) for a in authors]
+                expanded_authors = [self._expand_author(a, authors_map) for a in authors]
                 record.proposed_author = '; '.join(expanded_authors)
             elif ', ' in record.proposed_author:
                 authors = record.proposed_author.split(', ')
-                expanded_authors = [self.normalizer.expand_abbreviation(a, authors_map) for a in authors]
+                expanded_authors = [self._expand_author(a, authors_map) for a in authors]
                 record.proposed_author = ', '.join(expanded_authors)
             else:
-                record.proposed_author = self.normalizer.expand_abbreviation(original, authors_map)
+                record.proposed_author = self._expand_author(original, authors_map)
             
             if record.proposed_author != original:
                 expanded_count += 1
         
-        self.logger.log(f"[PASS 6] Expanded {expanded_count} abbreviations")
+        self.logger.log(f"[PASS 6] Expanded {expanded_count} author names")
+    
+    def _expand_author(self, author: str, authors_map: Dict[str, List[str]]) -> str:
+        """Expand a single author name using authors_map.
+        
+        Handles two cases:
+        1. Abbreviations: "Петров И." → "Петров Иван"
+        2. Incomplete names: "Живой" → "Живой Алексей" (single word)
+        
+        Selects the FULLEST name (most words) from alternatives for better quality.
+        
+        Args:
+            author: Single author name (not multi-author)
+            authors_map: Dictionary {surname.lower(): [full_names]}
+            
+        Returns:
+            Expanded author name or original if no expansion found
+        """
+        author = author.strip()
+        if not author:
+            return author
+        
+        # Try abbreviation expansion first (has priority)
+        if '.' in author:
+            return self.normalizer.expand_abbreviation(author, authors_map)
+        
+        # Check if this is an incomplete name (single word)
+        words = author.split()
+        if len(words) == 1:
+            # Single word - try to expand using authors_map
+            surname_lower = words[0].lower()
+            if surname_lower in authors_map:
+                # Found matching surnames - pick the FULLEST name (most words)
+                full_names = authors_map[surname_lower]
+                best_name = max(full_names, key=lambda x: len(x.split()))
+                
+                if len(best_name.split()) > 1:  # Only expand if found a fuller version
+                    return best_name
+        
+        # No expansion needed or found
+        return author
+    
     
     def _build_authors_map(self, records: List) -> Dict[str, List[str]]:
         """Build dictionary of full author names for abbreviation expansion.
@@ -100,6 +153,7 @@ class Pass6Abbreviations:
                                     authors_map[key] = []
                                 authors_map[key].append(single_author)
                                 seen.add(single_author)
+
                 else:
                     # Single author
                     if '.' not in author:
@@ -109,6 +163,7 @@ class Pass6Abbreviations:
                                 authors_map[key] = []
                             authors_map[key].append(author)
                             seen.add(author)
+
             
             # Collect from metadata_authors (original source - best for abbreviation expansion)
             if record.metadata_authors and record.metadata_authors != "Сборник":
@@ -127,6 +182,7 @@ class Pass6Abbreviations:
                                     authors_map[key] = []
                                 authors_map[key].append(normalized)
                                 seen.add(normalized)
+
                 else:
                     # Single author
                     normalized = self.normalizer.normalize_format(author)
@@ -135,6 +191,8 @@ class Pass6Abbreviations:
                         if key not in authors_map:
                             authors_map[key] = []
                         authors_map[key].append(normalized)
+                        seen.add(normalized)
+
                         seen.add(normalized)
         
         return authors_map
