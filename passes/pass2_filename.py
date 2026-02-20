@@ -333,7 +333,12 @@ class Pass2Filename:
             
             # Debug: Log first 3 files
             if i < 3:
-                print(f"[PASS 2 DEBUG] File {i+1}: {filename_without_ext}")
+                # Encode safely for Windows console
+                try:
+                    print(f"[PASS 2 DEBUG] File {i+1}: {filename_without_ext}")
+                except UnicodeEncodeError:
+                    # Fallback: skip printing if encoding fails
+                    pass
             
             # Construct full FB2 path for metadata validation
             fb2_path = None

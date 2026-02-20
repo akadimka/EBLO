@@ -57,7 +57,7 @@ class Precache:
         
         # Check if any word is in our name sets
         for word in words:
-            word_clean = word.strip('.,;:!?')  # Remove punctuation
+            word_clean = word.strip('.,;:!?').lower()  # Remove punctuation and convert to lowercase
             if word_clean in self.male_names or word_clean in self.female_names:
                 return True
         
