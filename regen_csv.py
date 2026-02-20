@@ -88,7 +88,9 @@ class RegenCSVService:
             self.logger.log(f"[OK] PASS 1: Read {len(self.records)} files")
             
             # ===== PASS 2 =====
-            pass2 = Pass2Filename(self.settings, self.logger)
+            pass2 = Pass2Filename(self.settings, self.logger, self.work_dir,
+                                male_names=precache.male_names,
+                                female_names=precache.female_names)
             pass2.execute(self.records)
             self.logger.log("[OK] PASS 2: Authors extracted from filenames")
             
