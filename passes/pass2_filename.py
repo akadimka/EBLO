@@ -338,15 +338,6 @@ class Pass2Filename:
             filename = record.file_path.replace('\\', '/').split('/')[-1]  # Get basename only
             filename_without_ext = filename.rsplit('.', 1)[0]  # Remove extension
             
-            # Debug: Log first 3 files
-            if i < 3:
-                # Encode safely for Windows console
-                try:
-                    print(f"[PASS 2 DEBUG] File {i+1}: {filename_without_ext}")
-                except UnicodeEncodeError:
-                    # Fallback: skip printing if encoding fails
-                    pass
-            
             # Construct full FB2 path for metadata validation
             fb2_path = None
             if self.work_dir:
@@ -366,14 +357,156 @@ class Pass2Filename:
                 # This helps expand abbreviated names in subsequent files
                 # e.g., if we extract "Живой Алексей", cache that we've seen this full form
                 self._build_author_cache_from_extraction(author)
-                
-                if i < 3:
-                    print(f"[PASS 2 DEBUG]   -> Extracted: {author}")
-            elif i < 3:
-                print(f"[PASS 2 DEBUG]   -> No match")
             # else: keep existing (might be metadata or empty)
         
         print(f"[PASS 2] Extracted {processed_count} authors from filenames, skipped {skipped_count} folder_dataset records")
+    
+    def _extract_by_pattern(self, filename: str, pattern: str, struct: dict) -> str:
+        """Extract author from filename based on matched pattern.
+        
+        Args:
+            filename: Full filename without extension
+            pattern: Matched pattern string
+            struct: Analyzed structure
+        
+        Returns:
+            Author name or empty string
+        """
+        
+        author = ""
+        
+        # Pattern: "(Author) - Title"
+        if pattern == "(Author) - Title":
+            if ' - ' in filename:
+                before_dash = filename.split(' - ', 1)[0]
+                author = before_dash.strip().strip('()')
+                # If author contains a dot, take only the part before it
+                if '. ' in author:
+                    author = author.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author - Title"
+        elif pattern == "Author - Title":
+            if ' - ' in filename:
+                author = filename.split(' - ', 1)[0].strip()
+                # If author contains a dot, take only the part before it (e.g., "Жеребьёв. Я" -> "Жеребьёв")
+                if '. ' in author:
+                    author = author.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author - Series.Title"
+        elif pattern == "Author - Series.Title":
+            if ' - ' in filename:
+                author = filename.split(' - ', 1)[0].strip()
+                # If author contains a dot, take only the part before it
+                if '. ' in author:
+                    author = author.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author. Title"
+        elif pattern == "Author. Title":
+            if '. ' in filename:
+                author = filename.split('. ', 1)[0].strip()
+        
+        # Pattern: "Title (Author)"
+        elif pattern == "Title (Author)":
+            if '(' in filename and ')' in filename:
+                start = filename.rfind('(')
+                end = filename.rfind(')')
+                if start < end:
+                    author = filename[start+1:end].strip()
+        
+        # Pattern: "Title - (Author)"
+        elif pattern == "Title - (Author)":
+            if ' - (' in filename:
+                parts = filename.split(' - (')
+                if len(parts) == 2:
+                    author = parts[1].rstrip(')').strip()
+                    # If author contains a dot, take only the part before it
+                    if '. ' in author:
+                        author = author.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author. Series. Title"
+        elif pattern == "Author. Series. Title":
+            if '. ' in filename:
+                author = filename.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author, Author. Title (Series)"
+        elif pattern == "Author, Author. Title (Series)":
+            if ', ' in filename:
+                # Extract both authors separated by comma
+                before_period = filename.split('. ', 1)[0].strip()
+                authors = [a.strip() for a in before_period.split(', ')]
+                author = ', '.join(authors)  # Return both: "Author1, Author2"
+        
+        # Pattern: "Author. Title. (Series)"
+        elif pattern == "Author. Title. (Series)":
+            if '. ' in filename:
+                author = filename.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author - Title (Series)" (NO service words)
+        elif pattern == "Author - Title (Series)":
+            if ' - ' in filename:
+                author = filename.split(' - ', 1)[0].strip()
+                # If author contains a dot, take only the part before it
+                if '. ' in author:
+                    author = author.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author - Title. Title (Series)" (with dot in title)
+        elif pattern == "Author - Title. Title (Series)":
+            if ' - ' in filename:
+                author = filename.split(' - ', 1)[0].strip()
+                # If author contains a dot, take only the part before it
+                if '. ' in author:
+                    author = author.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author. Title (Series)" (NO service words)
+        elif pattern == "Author. Title (Series)":
+            if '. ' in filename:
+                author = filename.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author, Author - Title (Series)" (NO service words)
+        elif pattern == "Author, Author - Title (Series)":
+            if ', ' in filename:
+                # Extract both authors separated by comma
+                before_dash = filename.split(' - ', 1)[0].strip()
+                # If any author contains a dot, take only the part before it
+                authors = []
+                for a in before_dash.split(', '):
+                    a = a.strip()
+                    if '. ' in a:
+                        a = a.split('. ', 1)[0].strip()
+                    authors.append(a)
+                author = ', '.join(authors)  # Return both: "Author1, Author2"
+        
+        # Pattern: "Author - Title (Series. service_words)"
+        elif pattern == "Author - Title (Series. service_words)":
+            if ' - ' in filename:
+                author = filename.split(' - ', 1)[0].strip()
+                # If author contains a dot, take only the part before it
+                if '. ' in author:
+                    author = author.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author. Title (Series. service_words)"
+        elif pattern == "Author. Title (Series. service_words)":
+            if '. ' in filename:
+                author = filename.split('. ', 1)[0].strip()
+        
+        # Pattern: "Author, Author - Title (Series. service_words)"
+        elif pattern == "Author, Author - Title (Series. service_words)":
+            if ', ' in filename:
+                # Extract both authors separated by comma
+                before_dash = filename.split(' - ', 1)[0].strip()
+                # If any author contains a dot, take only the part before it
+                authors = []
+                for a in before_dash.split(', '):
+                    a = a.strip()
+                    if '. ' in a:
+                        a = a.split('. ', 1)[0].strip()
+                    authors.append(a)
+                author = ', '.join(authors)  # Return both: "Author1, Author2"
+        
+        # Return only if non-empty and valid author name
+        if author and len(author) > 2:
+            return author
+        return ""
     
     def _extract_author_from_filename(self, filename: str, fb2_path: Optional[Path] = None) -> str:
         """Extract author name from filename using structural pattern matching.
@@ -444,123 +577,9 @@ class Pass2Filename:
             elif author:
                 # Extracted but failed validation
                 self.logger.log(f"[PASS 2 DEBUG] Extracted '{author}' from '{filename}' but failed validation")
-            else:
-                self.logger.log(f"[PASS 2 DEBUG] Extraction failed for pattern '{best_pattern}' (score={best_score:.2f})")
         else:
-            self.logger.log(f"[PASS 2 DEBUG] No pattern match {'(score=' + str(best_score) + ')' if best_score > 0 else ''}")
+            self.logger.log(f"[PASS 2 DEBUG] Extraction failed for pattern '{best_pattern}' (score={best_score:.2f})")
         
-        return ""
-    
-    def _extract_by_pattern(self, filename: str, pattern: str, struct: dict) -> str:
-        """Extract author from filename based on matched pattern.
+        self.logger.log(f"[PASS 2 DEBUG] No pattern match {'(score=' + str(best_score) + ')' if best_score > 0 else ''}")
         
-        Args:
-            filename: Full filename without extension
-            pattern: Matched pattern string
-            struct: Analyzed structure
-        
-        Returns:
-            Author name or empty string
-        """
-        
-        author = ""
-        
-        # Pattern: "(Author) - Title"
-        if pattern == "(Author) - Title":
-            if ' - ' in filename:
-                before_dash = filename.split(' - ', 1)[0]
-                author = before_dash.strip().strip('()')
-        
-        # Pattern: "Author - Title"
-        elif pattern == "Author - Title":
-            if ' - ' in filename:
-                author = filename.split(' - ', 1)[0].strip()
-        
-        # Pattern: "Author - Series.Title"
-        elif pattern == "Author - Series.Title":
-            if ' - ' in filename:
-                author = filename.split(' - ', 1)[0].strip()
-        
-        # Pattern: "Author. Title"
-        elif pattern == "Author. Title":
-            if '. ' in filename:
-                author = filename.split('. ', 1)[0].strip()
-        
-        # Pattern: "Title (Author)"
-        elif pattern == "Title (Author)":
-            if '(' in filename and ')' in filename:
-                start = filename.rfind('(')
-                end = filename.rfind(')')
-                if start < end:
-                    author = filename[start+1:end].strip()
-        
-        # Pattern: "Title - (Author)"
-        elif pattern == "Title - (Author)":
-            if ' - (' in filename:
-                parts = filename.split(' - (')
-                if len(parts) == 2:
-                    author = parts[1].rstrip(')').strip()
-        
-        # Pattern: "Author. Series. Title"
-        elif pattern == "Author. Series. Title":
-            if '. ' in filename:
-                author = filename.split('. ', 1)[0].strip()
-        
-        # Pattern: "Author, Author. Title (Series)"
-        elif pattern == "Author, Author. Title (Series)":
-            if ', ' in filename:
-                # Extract both authors separated by comma
-                before_period = filename.split('. ', 1)[0].strip()
-                authors = [a.strip() for a in before_period.split(', ')]
-                author = ', '.join(authors)  # Return both: "Author1, Author2"
-        
-        # Pattern: "Author. Title. (Series)"
-        elif pattern == "Author. Title. (Series)":
-            if '. ' in filename:
-                author = filename.split('. ', 1)[0].strip()
-        
-        # Pattern: "Author - Title (Series)" (NO service words)
-        elif pattern == "Author - Title (Series)":
-            if ' - ' in filename:
-                author = filename.split(' - ', 1)[0].strip()
-        
-        # Pattern: "Author - Title. Title (Series)" (with dot in title)
-        elif pattern == "Author - Title. Title (Series)":
-            if ' - ' in filename:
-                author = filename.split(' - ', 1)[0].strip()
-        
-        # Pattern: "Author. Title (Series)" (NO service words)
-        elif pattern == "Author. Title (Series)":
-            if '. ' in filename:
-                author = filename.split('. ', 1)[0].strip()
-        
-        # Pattern: "Author, Author - Title (Series)" (NO service words)
-        elif pattern == "Author, Author - Title (Series)":
-            if ', ' in filename:
-                # Extract both authors separated by comma
-                before_dash = filename.split(' - ', 1)[0].strip()
-                authors = [a.strip() for a in before_dash.split(', ')]
-                author = ', '.join(authors)  # Return both: "Author1, Author2"
-        
-        # Pattern: "Author - Title (Series. service_words)"
-        elif pattern == "Author - Title (Series. service_words)":
-            if ' - ' in filename:
-                author = filename.split(' - ', 1)[0].strip()
-        
-        # Pattern: "Author. Title (Series. service_words)"
-        elif pattern == "Author. Title (Series. service_words)":
-            if '. ' in filename:
-                author = filename.split('. ', 1)[0].strip()
-        
-        # Pattern: "Author, Author - Title (Series. service_words)"
-        elif pattern == "Author, Author - Title (Series. service_words)":
-            if ', ' in filename:
-                # Extract both authors separated by comma
-                before_dash = filename.split(' - ', 1)[0].strip()
-                authors = [a.strip() for a in before_dash.split(', ')]
-                author = ', '.join(authors)  # Return both: "Author1, Author2"
-        
-        # Return only if non-empty and valid author name
-        if author and len(author) > 2:
-            return author
         return ""
