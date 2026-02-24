@@ -51,9 +51,26 @@ class Pass3Normalize:
             # '; ' comes from folder_author_parser (temporary separator)
             # ', ' comes from filename or metadata
             # 
-            # IMPORTANT: If author_source is folder_dataset or filename, do NOT use metadata_authors
-            # because it would add co-authors from metadata, violating priority logic
-            metadata_for_normalization = "" if record.author_source in ("folder_dataset", "filename") else record.metadata_authors
+            # Metadata handling strategy:
+            # - folder_dataset: never use metadata (folder extraction is authoritative)
+            # - filename (multi-author): never use metadata (don't replace with list)
+            # - filename (single-word): allow metadata (for expanding incomplete names)
+            # - metadata source: always use metadata (for normalization/conversions)
+            
+            if record.author_source == "folder_dataset":
+                metadata_for_normalization = ""
+            elif record.author_source == "filename":
+                # For filename: only use metadata if single incomplete name
+                author_words = len(record.proposed_author.strip().split())
+                has_separator = ', ' in record.proposed_author or '; ' in record.proposed_author
+                
+                # Use metadata only for single-word names (incomplete) without separators
+                if author_words == 1 and not has_separator:
+                    metadata_for_normalization = record.metadata_authors
+                else:
+                    metadata_for_normalization = ""
+            else:
+                metadata_for_normalization = record.metadata_authors
             
             if '; ' in record.proposed_author or ', ' in record.proposed_author:
                 # Determine separator
