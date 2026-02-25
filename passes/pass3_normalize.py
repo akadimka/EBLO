@@ -57,6 +57,22 @@ class Pass3Normalize:
             # - filename (single-word): allow metadata (for expanding incomplete names)
             # - metadata source: always use metadata (for normalization/conversions)
             
+            # Special case: filename extraction of shared surname (like "Белаш")
+            # If proposed_author is single word (surname only) and metadata has multiple
+            # authors with this surname, restore them all
+            if (record.author_source == "filename" and 
+                len(record.proposed_author.strip().split()) == 1 and
+                record.metadata_authors and ', ' in record.metadata_authors):
+                # Check if metadata authors share the same surname
+                surname_candidate = record.proposed_author.strip()
+                metadata_authors_list = [a.strip() for a in record.metadata_authors.split(', ')]
+                matching_authors = [a for a in metadata_authors_list if a.startswith(surname_candidate)]
+                
+                # If multiple authors with this surname in metadata, restore them
+                if len(matching_authors) > 1:
+                    # Use all matching authors from metadata, separated by '; '
+                    record.proposed_author = '; '.join(matching_authors)
+            
             if record.author_source == "folder_dataset":
                 metadata_for_normalization = ""
             elif record.author_source == "filename":
