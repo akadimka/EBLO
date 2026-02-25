@@ -32,12 +32,32 @@ def select_pattern(struct_info: dict) -> Optional[str]:
     
     pattern = None
     
-    # 1. "Author, Author" (100) - comma without brackets
+    # 1. "SurnamePlural FirstName и SecondName" (105) - highest priority
+    # Format: "Живовы Георгий и Геннадий" → 2 authors with shared surname
+    if pattern is None:
+        if (not paren_count and 
+            ' и ' in name):  # Has " и " (Russian "and")
+            parts = name.split(' и ')
+            if len(parts) == 2:
+                first_part = parts[0].strip()
+                second_part = parts[1].strip()
+                words_first = first_part.split()
+                words_second = second_part.split()
+                # Check: first part is "Surname Name", second part is single "Name"
+                if len(words_first) >= 2 and len(words_second) == 1:
+                    # Extract surname from first part (usually first word)
+                    surname = words_first[0]
+                    first_name = ' '.join(words_first[1:])
+                    second_name = second_part
+                    # Construct as "Surname FirstName; Surname SecondName"
+                    pattern = "SurnamePlural FirstName и SecondName"
+    
+    # 2. "Author, Author" (100) - comma without brackets
     if pattern is None:
         if not paren_count and has_comma:
             pattern = "Author, Author"
     
-    # 2. "(Surname) (Name)" (100) - exactly 2 words, no brackets
+    # 3. "(Surname) (Name)" (100) - exactly 2 words, no brackets
     if pattern is None:
         if not paren_count:
             words = name.split()

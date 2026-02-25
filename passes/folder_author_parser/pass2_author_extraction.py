@@ -7,6 +7,35 @@ Extracts author name from folder name based on selected pattern and structural i
 from typing import Optional
 
 
+def _singularize_surname(surname: str) -> str:
+    """Convert plural Russian surname to singular form.
+    
+    Examples:
+        "Живовы" → "Живов"
+        "Петровы" → "Петров"
+        "Сафины" → "Сафин"
+        
+    Args:
+        surname: Surname (possibly in plural form)
+        
+    Returns:
+        Singular form of surname
+    """
+    if not surname or len(surname) < 2:
+        return surname
+    
+    # Common plural endings for Russian surnames
+    if surname.endswith('ы'):
+        # Живовы → Живов
+        return surname[:-1]
+    elif surname.endswith('и'):
+        # Сафины → Сафин
+        return surname[:-1]
+    
+    # Already singular or doesn't match pattern
+    return surname
+
+
 def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
     """
     Extracts author name based on pattern and structural information.
@@ -28,7 +57,25 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
     
     author = ""
     
-    if pattern == "Author, Author":
+    if pattern == "SurnamePlural FirstName и SecondName":
+        # Format: "Живовы Георгий и Геннадий"
+        # Extract and construct: "Живов Георгий; Живов Геннадий"
+        if ' и ' in name:
+            parts = name.split(' и ')
+            if len(parts) == 2:
+                first_part = parts[0].strip()  # "Живовы Георгий"
+                second_part = parts[1].strip()  # "Геннадий"
+                # Extract surname from first part
+                first_words = first_part.split()
+                if len(first_words) >= 2:
+                    plural_surname = first_words[0]
+                    singular_surname = _singularize_surname(plural_surname)
+                    first_name = ' '.join(first_words[1:])
+                    second_name = second_part
+                    # Construct with singular surname, separated by "; "
+                    author = f"{singular_surname} {first_name}; {singular_surname} {second_name}"
+    
+    elif pattern == "Author, Author":
         # Both authors separated by comma, normalize to "; " separator
         # "Земляной Андрей, Орлов Борис" → "Земляной Андрей; Орлов Борис"
         author = name.replace(', ', '; ')
