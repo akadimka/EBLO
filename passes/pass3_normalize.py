@@ -96,15 +96,23 @@ class Pass3Normalize:
             if record.author_source == "folder_dataset":
                 metadata_for_normalization = ""
             elif record.author_source == "filename":
-                # For filename: only use metadata if single incomplete name
-                author_words = len(record.proposed_author.strip().split())
+                # For filename: use metadata strategy depends on structure
                 has_separator = ', ' in record.proposed_author or '; ' in record.proposed_author
                 
-                # Use metadata only for single-word names (incomplete) without separators
-                if author_words == 1 and not has_separator:
+                if has_separator:
+                    # Co-authors from filename: DO use metadata to expand surnames to full names
+                    # Example: "Демидова, Конторович" + metadata → can become "Демидова Нина, Конторович Александр"
                     metadata_for_normalization = record.metadata_authors
                 else:
-                    metadata_for_normalization = ""
+                    # Single author from filename: only use metadata if incomplete (single word)
+                    # This handles surname-only extractions that might be restored in lines 63-92
+                    author_words = len(record.proposed_author.strip().split())
+                    if author_words == 1:
+                        # Single incomplete name - can use metadata for expansion
+                        metadata_for_normalization = record.metadata_authors
+                    else:
+                        # Full author name already extracted - don't override with metadata
+                        metadata_for_normalization = ""
             else:
                 metadata_for_normalization = record.metadata_authors
             
