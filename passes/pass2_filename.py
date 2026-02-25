@@ -180,6 +180,9 @@ class Pass2Filename:
         3. Compare with FB2 metadata authors to find matching record
         4. If found with better form (fuller name), use and cache that instead
         
+        SPECIAL CASE: If extracted is single word (surname) and metadata has multiple
+        authors with this surname, DON'T expand here - leave for PASS 3 restoration.
+        
         Args:
             extracted_author: Author name extracted from filename
             fb2_path: Path to FB2 file for metadata validation
@@ -206,6 +209,21 @@ class Pass2Filename:
                 if fb2_authors_str:
                     # Parse FB2 authors (separated by '; ')
                     fb2_authors = [a.strip() for a in fb2_authors_str.split(';') if a.strip()]
+                    
+                    # SPECIAL CASE: If extracted is single word and metadata has multiple co-authors
+                    # with this word, DON'T expand - leave surname-only for PASS 3 restoration
+                    if len(extracted_author.split()) == 1 and len(fb2_authors) > 1:
+                        # Check if this single word matches multiple FB2 authors
+                        extracted_words = {extracted_lower}
+                        matching_count = 0
+                        for fb2_author in fb2_authors:
+                            fb2_words = set(fb2_author.lower().split())
+                            if extracted_words.issubset(fb2_words):
+                                matching_count += 1
+                        
+                        # If matches multiple authors, don't expand
+                        if matching_count > 1:
+                            return extracted_author  # Return surname-only, let PASS 3 handle restoration
                     
                     # Exact match - return as is
                     for fb2_author in fb2_authors:

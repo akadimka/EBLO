@@ -62,16 +62,36 @@ class Pass3Normalize:
             # authors with this surname, restore them all
             if (record.author_source == "filename" and 
                 len(record.proposed_author.strip().split()) == 1 and
-                record.metadata_authors and ', ' in record.metadata_authors):
+                record.metadata_authors):
                 # Check if metadata authors share the same surname
                 surname_candidate = record.proposed_author.strip()
-                metadata_authors_list = [a.strip() for a in record.metadata_authors.split(', ')]
-                matching_authors = [a for a in metadata_authors_list if a.startswith(surname_candidate)]
+                # Handle both separators: '; ' and ', '
+                if '; ' in record.metadata_authors:
+                    metadata_authors_list = [a.strip() for a in record.metadata_authors.split('; ')]
+                elif ', ' in record.metadata_authors:
+                    metadata_authors_list = [a.strip() for a in record.metadata_authors.split(', ')]
+                else:
+                    metadata_authors_list = [record.metadata_authors.strip()]
+                
+                matching_authors = []
+                for a in metadata_authors_list:
+                    # Check if surname is in the author name (can be "Name Surname" or "Surname Name")
+                    # Split author into words and check if surname_candidate is one of them
+                    author_words = a.split()
+                    if surname_candidate in author_words:
+                        matching_authors.append(a)
                 
                 # If multiple authors with this surname in metadata, restore them
                 if len(matching_authors) > 1:
-                    # Use all matching authors from metadata, separated by '; '
-                    record.proposed_author = '; '.join(matching_authors)
+                    # Sort authors alphabetically before joining
+                    sorted_authors = sorted(matching_authors)
+                    record.proposed_author = '; '.join(sorted_authors)
+                    # Mark that this record was restored from metadata - skip normalization
+                    record.skip_normalization = True
+                else:
+                    record.skip_normalization = False
+            else:
+                record.skip_normalization = False
             
             if record.author_source == "folder_dataset":
                 metadata_for_normalization = ""
@@ -91,12 +111,17 @@ class Pass3Normalize:
             if '; ' in record.proposed_author or ', ' in record.proposed_author:
                 # Determine separator
                 sep = '; ' if '; ' in record.proposed_author else ', '
-                normalized = self.normalizer.normalize_format(original, metadata_for_normalization)
+                # Only normalize if not restored from metadata (which are already correct)
+                if not getattr(record, 'skip_normalization', False):
+                    normalized = self.normalizer.normalize_format(record.proposed_author, metadata_for_normalization)
+                else:
+                    # Already restored from metadata with correct format, don't transform
+                    normalized = record.proposed_author
             else:
                 # Single author
-                normalized = self.normalizer.normalize_format(original, metadata_for_normalization)
+                normalized = self.normalizer.normalize_format(record.proposed_author, metadata_for_normalization)
             
-            if normalized and normalized != original:
+            if normalized and normalized != record.proposed_author:
                 record.proposed_author = normalized
                 normalized_count += 1
         
