@@ -145,20 +145,12 @@ class AuthorNormalizer:
             def get_surname_key(author_str):
                 words = author_str.split()
                 if len(words) <= 1:
-                    return author_str.lower()
-                # Try to detect surname position
-                # Russian surnames often end with: -ов, -ев, -ич, -ович, -ский, -ева, -ина, -ш (for surnames like Белаш)
-                first_word = words[0]
-                if first_word.lower().endswith(('ов', 'ев', 'ич', 'ович', 'ский', 'цкий', 'ова', 'ева', 'ина', 'янь', 'ень', 'ш')):
-                    # First word is surname, use it as primary key, rest as secondary
-                    surname = first_word.lower()
-                    rest = ' '.join(words[1:]).lower()
-                    return (surname, rest)
-                else:
-                    # Last word is surname
-                    surname = words[-1].lower()
-                    rest = ' '.join(words[:-1]).lower()
-                    return (surname, rest)
+                    return (author_str.lower(), "")  # Return tuple consistently
+                # After normalization in PASS 3, first word is ALWAYS the surname
+                # No need to detect by endings - just use first word
+                surname = words[0].lower()
+                rest = ' '.join(words[1:]).lower()
+                return (surname, rest)
             
             normalized_authors.sort(key=get_surname_key)
             # Объединить через запятую
