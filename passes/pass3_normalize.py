@@ -57,7 +57,7 @@ class Pass3Normalize:
             # - filename (single-word): allow metadata (for expanding incomplete names)
             # - metadata source: always use metadata (for normalization/conversions)
             
-            # Special case: filename extraction of shared surname (like "Белаш")
+            # Special case: filename extraction of shared surname (like "Белаш", "Каменские")
             # If proposed_author is single word (surname only) and metadata has multiple
             # authors with this surname, restore them all
             if (record.author_source == "filename" and 
@@ -73,12 +73,43 @@ class Pass3Normalize:
                 else:
                     metadata_authors_list = [record.metadata_authors.strip()]
                 
+                def extract_surname_root(name: str):
+                    """Extract surname root for fuzzy matching.
+                    
+                    Handles Russian surname variations:
+                    - "Каменские" → "Камен"
+                    - "Каменский" → "Камен"
+                    - "Каменская" → "Камен"
+                    """
+                    words = name.split()
+                    if not words:
+                        return name.lower()
+                    
+                    # Get last word (likely surname after normalization or as-is from filename)
+                    surname = words[-1] if len(words) > 1 else words[0]
+                    surname_lower = surname.lower()
+                    
+                    # Remove common Russian surname endings
+                    for ending in ('ские', 'ский', 'ского', 'скому', 'ским', 'ске',
+                                   'ская', 'скую', 'ской',
+                                   'ое', 'ого', 'ому', 'ым', 'ом',
+                                   'ий', 'ого', 'ому', 'ым', 'ом'):
+                        if surname_lower.endswith(ending):
+                            return surname_lower[:-len(ending)]
+                    
+                    return surname_lower
+                
                 matching_authors = []
+                candidate_root = extract_surname_root(surname_candidate)
+                
                 for a in metadata_authors_list:
-                    # Check if surname is in the author name (can be "Name Surname" or "Surname Name")
-                    # Split author into words and check if surname_candidate is one of them
+                    # Check if surname root matches
+                    # Support both exact word match and root-based matching
                     author_words = a.split()
-                    if surname_candidate in author_words:
+                    author_root = extract_surname_root(a)
+                    
+                    # Match if: exact word found OR root matches
+                    if surname_candidate in author_words or author_root == candidate_root:
                         matching_authors.append(a)
                 
                 # If multiple authors with this surname in metadata, restore them
