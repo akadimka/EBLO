@@ -128,10 +128,39 @@ class AuthorNormalizer:
                     
                     name_obj = AuthorName(single_author)
                     normalized = name_obj.normalized if name_obj.is_valid else single_author
+                    
+                    # If not normalized despite is_valid=True, try manual swap as fallback
+                    # This handles cases where AuthorName recognizes the name as valid but doesn't swap
+                    if normalized == single_author and len(single_author.split()) == 2:
+                        # Name wasn't swapped - might be "Name Surname" format not recognized
+                        words = single_author.split()
+                        last_word = words[-1]
+                        if last_word.lower().endswith(('ов', 'ев', 'ич', 'ович', 'ский', 'цкий', 'ова', 'ева', 'ина', 'янь', 'ень', 'ань', 'ш')):
+                            # Looks like "Name Surname", swap to "Surname Name"
+                            normalized = f"{last_word} {words[0]}"
+                    
                     normalized_authors.append(normalized)
             
-            # Sort authors alphabetically before joining
-            normalized_authors.sort()
+            # Sort authors alphabetically by surname, then by name
+            def get_surname_key(author_str):
+                words = author_str.split()
+                if len(words) <= 1:
+                    return author_str.lower()
+                # Try to detect surname position
+                # Russian surnames often end with: -ов, -ев, -ич, -ович, -ский, -ева, -ина, -ш (for surnames like Белаш)
+                first_word = words[0]
+                if first_word.lower().endswith(('ов', 'ев', 'ич', 'ович', 'ский', 'цкий', 'ова', 'ева', 'ина', 'янь', 'ень', 'ш')):
+                    # First word is surname, use it as primary key, rest as secondary
+                    surname = first_word.lower()
+                    rest = ' '.join(words[1:]).lower()
+                    return (surname, rest)
+                else:
+                    # Last word is surname
+                    surname = words[-1].lower()
+                    rest = ' '.join(words[:-1]).lower()
+                    return (surname, rest)
+            
+            normalized_authors.sort(key=get_surname_key)
             # Объединить через запятую
             return ', '.join(normalized_authors)
         

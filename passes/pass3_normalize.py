@@ -83,11 +83,21 @@ class Pass3Normalize:
                 
                 # If multiple authors with this surname in metadata, restore them
                 if len(matching_authors) > 1:
-                    # Sort authors alphabetically before joining
-                    sorted_authors = sorted(matching_authors)
-                    record.proposed_author = '; '.join(sorted_authors)
-                    # Mark that this record was restored from metadata - skip normalization
-                    record.skip_normalization = True
+                    # Normalize each author to "Фамилия Имя" format and sort by surname
+                    normalized_authors = []
+                    for author in matching_authors:
+                        normalized = self.normalizer.normalize_format(author)
+                        normalized_authors.append(normalized)
+                    
+                    # Sort by surname (first word for Russian names after normalization)
+                    def get_surname_key(author_str):
+                        words = author_str.split()
+                        return words[0].lower() if words else author_str.lower()
+                    
+                    normalized_authors.sort(key=get_surname_key)
+                    record.proposed_author = '; '.join(normalized_authors)
+                    # Mark that this was restored - don't skip normalization as it's already done
+                    record.skip_normalization = False
                 else:
                     record.skip_normalization = False
             else:
