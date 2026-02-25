@@ -135,7 +135,13 @@ class Pass3Normalize:
                 record.skip_normalization = False
             
             if record.author_source == "folder_dataset":
-                metadata_for_normalization = ""
+                # For folder_dataset with multi-author, use metadata to fix incomplete names
+                # Example: "Белаш Александр, Людмила" + metadata → "Белаш Александр, Белаш Людмила"
+                has_separator = ', ' in record.proposed_author or '; ' in record.proposed_author
+                if has_separator:
+                    metadata_for_normalization = record.metadata_authors
+                else:
+                    metadata_for_normalization = ""
             elif record.author_source == "filename":
                 # For filename: use metadata strategy depends on structure
                 has_separator = ', ' in record.proposed_author or '; ' in record.proposed_author
