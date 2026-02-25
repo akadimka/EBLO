@@ -29,8 +29,9 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
     author = ""
     
     if pattern == "Author, Author":
-        # First author
-        author = name.split(',')[0].strip()
+        # Both authors separated by comma, normalize to "; " separator
+        # "Земляной Андрей, Орлов Борис" → "Земляной Андрей; Орлов Борис"
+        author = name.replace(', ', '; ')
     
     elif pattern == "(Surname) (Name)":
         # Both words as is
