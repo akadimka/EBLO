@@ -37,16 +37,22 @@ class Pass2SeriesFilename:
         # Получить списки из config.json
         self.collection_keywords = self.settings.get_list('collection_keywords')
         self.service_words = self.settings.get_list('service_words')
+        
+        # Получить паттерны из конфига
+        self.file_patterns = self.settings.get_list('author_series_patterns_in_files') or []
     
     def execute(self, records: List[BookRecord]) -> None:
         """
         Попытаться извлечь серию из имена файла.
         
-        Логика приоритета для файлов БЕЗ folder_dataset series:
-        1. Парсим имя файла по паттернам
-        2. Если в файле найдено совпадает с началом metadata → берем metadata целиком
-        3. Если в файле не найдено → используем metadata_series (если есть)
-        4. Всегда проверяем на BL и валидность
+        ОГРАНИЧЕНИЕ: Парсит series только для файлов в подпапках автора (Author/Series/File).
+        Для файлов прямо в папке автора (Author/File) используется ТОЛЬКО metadata_series.
+        
+        Логика приоритета:
+        1. Если глубина < 3 (Author/File) → использовать ТОЛЬКО metadata_series 
+        2. Если глубина >= 3 (Author/Series/File) → парсить файл + сравнивать с metadata
+        3. Если в файле найдено совпадает с началом metadata → берем metadata целиком
+        4. Fallback на metadata_series если в имени не найдено
         """
         for record in records:
             # Пропускаем если серия уже установлена из папок
@@ -57,6 +63,20 @@ class Pass2SeriesFilename:
             if record.proposed_series:
                 continue
             
+            # Проверяем глубину файла в структуре папок
+            file_path_parts = Path(record.file_path).parts
+            file_depth = len(file_path_parts)
+            
+            # Если файл прямо в папке автора (глубина 2) - используем ТОЛЬКО metadata
+            if file_depth == 2:
+                if record.metadata_series:
+                    series = record.metadata_series.strip()
+                    if self._is_valid_series(series):
+                        record.proposed_series = series
+                        record.series_source = "metadata"
+                continue
+            
+            # Если файл в подпапке (глубина >= 3) - парсим имя файла
             # ШАГ 1: Попытаться извлечь из имени файла
             series_from_filename = self._extract_series_from_filename(record.file_path)
             
@@ -87,35 +107,37 @@ class Pass2SeriesFilename:
     
     def _extract_series_from_filename(self, file_path: str) -> str:
         """
-        Извлечь серию из имени файла по паттернам.
+        Извлечь серию из имени файла, используя паттерны из конфига.
         
-        Паттерны (в порядке приоритета):
-        1. "[Серия]" или "«Серия»" в маркерах
-        2. "Название (Серия №1)" - серия в скобках в конце
-        3. "Серия. Название" - серия в начале
+        Применяет следующие правила (в порядке приоритета):
+        1. [Серия] - квадратные скобки в начале
+        2. Серия (лат. буквы/цифры) - скобки в конце с сервис-словами
+        3. Серия. Название - точка как разделитель в начале
         """
         filename = Path(file_path).name
         name_without_ext = filename.rsplit('.', 1)[0]
         
-        # Паттерн 1: [Серия] в квадратных скобках
+        # Правило 1: [Серия] в квадратных скобках в начале
+        # Из паттернов конфига ищем примеры с [...]
         match = re.search(r'^\[([^\[\]]+)\]', name_without_ext)
         if match:
             series = match.group(1).strip()
             if self._is_valid_series(series):
                 return series
         
-        # Паттерн 2: Название (Серия) - поиск в скобках в КОНЦЕ
+        # Правило 2: Серия в скобках в КОНЦЕ 
+        # Из паттернов конфига: "Author - Title (Series. service_words)"
+        # Ищем скобку в конце, может быть с сервис-словами перед ней
         if '(' in name_without_ext and ')' in name_without_ext:
-            # Ищем скобку в конце после сервис-слова (том, книга) или просто скобку
-            match = re.search(r'(?:(?:том|книга|выпуск|ч|кн)\s*)?\(?([^)]+)\)\s*$', name_without_ext, re.IGNORECASE)
-            
+            # Сначала ищем простую скобку в конце
+            match = re.search(r'\(?([^)]+)\)\s*$', name_without_ext)
             if match:
                 potential_series = match.group(1).strip()
-                # Убедиться что это СЕРИЯ, а не описание или автор
                 if self._is_valid_series(potential_series):
                     return potential_series
         
-        # Паттерн 3: Серия. Название
+        # Правило 3: Серия. Название (точка как разделитель в начале)
+        # Из паттернов конфига: "Series. Title" и "Author - Series.Title"
         if '. ' in name_without_ext:
             potential_series = name_without_ext.split('. ')[0].strip()
             if self._is_valid_series(potential_series):
