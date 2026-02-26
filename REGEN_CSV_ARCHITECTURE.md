@@ -9,7 +9,11 @@
 - ✅ PASS 2 для серий: из структуры папок + из имён файлов
 - ✅ PASS 3 для серий: нормализация названий с word boundaries
 - ✅ Извлечение series из FB2 метаданных `<sequence>` в PASS 1
-- 📄 Полная документация: раздел 6 "SERIES EXTRACTION SYSTEM"
+- ✅ **НОВОЕ:** PASS 4 для серий - селективный консенсус (Февраль 26)
+  - Консенсус по `extracted_series_candidate` (depth >= 2 файлы)
+  - Консенсус по `metadata_series` (files с одинаковой series в metadata)
+  - Предотвращает over-application к нежелательным файлам
+- 📄 Полная документация: раздел 7 "SERIES EXTRACTION SYSTEM" (включая 7.8 PASS 4 Consensus)
 
 ## 🎯 FALLBACK ARCHITECTURE С ФЛАГОМ FALLBACK (Февраль 20, 2026)
 
@@ -2627,6 +2631,158 @@ passes/
 fb2_author_extractor.py
 ├── _extract_series_from_metadata()   ← Новый метод! Парсинг <sequence> из FB2
 ```
+
+### 7.8 PASS 4: Применение консенсуса к сериям (Февраль 26, 2026)
+
+**Класс:** `Pass4Consensus` (passes/pass4_consensus.py)
+
+**Назначение:** Применить консенсус-серии к файлам БЕЗ proposed_series в одной папке.
+
+**Проблема, которую решает:**
+- Файл "Неандертальский параллакс (сборник)" извлекает серию из имени, но заблокирован blacklist'ом
+- Другие файлы в папке "Гоминиды", "Люди", "Гибриды" имеют ту же серию в метаданных
+- **Решение:** Применить консенсус ТОЛЬКО к файлам, чьи `extracted_series_candidate` совпадают с найденным консенсусом
+
+**Архитектура (2-уровневый consensus):**
+
+**Уровень 1: Консенсус на основе extracted_series_candidate (для depth ≥ 2 файлов)**
+
+Процедура:
+```python
+for folder, group_records in groups.items():
+    # Шаг 1: Посчитать сколько раз встречается каждый candidate
+    candidates_count = {}
+    for record in group_records:
+        if record.extracted_series_candidate:
+            candidate = record.extracted_series_candidate
+            candidates_count[candidate] = candidates_count.get(candidate, 0) + 1
+    
+    # Шаг 2: Только candidates which appear 2+ times (true consensus)
+    consensus_candidates = {
+        candidate: count 
+        for candidate, count in candidates_count.items() 
+        if count >= 2
+    }
+    
+    # Шаг 3: Apply ONLY to files whose extracted_series_candidate matches consensus
+    for record in group_records:
+        if (not record.proposed_series and 
+            record.extracted_series_candidate in consensus_candidates):
+            record.proposed_series = record.extracted_series_candidate
+            record.series_source = "consensus"
+```
+
+**Ключевое правило:** Консенсус применяется **ТОЛЬКО** если:
+1. ✅ Файл НЕ имеет `proposed_series` (пусто)
+2. ✅ Файл имеет `extracted_series_candidate`
+3. ✅ Этот candidate встречается 2+ раза в группе папок
+
+**Это предотвращает:** Применение "Неандертальский параллакс" к файлу "Ката Бинду" который имеет другой candidate или вообще его не имеет.
+
+**Уровень 2: Консенсус на основе metadata_series (для depth 2 файлов без candidates)**
+
+Процедура:
+```python
+for folder, group_records in groups.items():
+    # Шаг 1: Посчитать сколько раз встречается каждый metadata_series
+    metadata_series_count = {}
+    for record in group_records:
+        # Только series которые уже привели к proposed_series
+        if record.metadata_series and record.proposed_series == record.metadata_series:
+            series = record.metadata_series
+            metadata_series_count[series] = metadata_series_count.get(series, 0) + 1
+    
+    # Шаг 2: Only series that appear 2+ times
+    consensus_metadata_series = {
+        series: count 
+        for series, count in metadata_series_count.items() 
+        if count >= 2
+    }
+    
+    # Шаг 3: Apply to files with empty proposed_series if they have matching metadata_series
+    for record in group_records:
+        if (not record.proposed_series and 
+            record.metadata_series in consensus_metadata_series):
+            record.proposed_series = record.metadata_series
+            record.series_source = "consensus"
+```
+
+**Примеры работы консенсуса:**
+
+**Пример 1: Сойер - консенсус с extracted_series_candidate**
+```
+Папка: Роберт Дж. Сойер (45 файлов)
+
+Файлы:
+├─ Неандертальский параллакс (сборник).fb2
+│  ├─ extracted_series_candidate: "Неандертальский параллакс"  ← extracted!
+│  ├─ metadata_series: ""  ← collection keyword блокирует
+│  ├─ proposed_series: ""  ← было пусто
+│  └─ [ПОСЛЕ PASS 4] → proposed_series: "Неандертальский параллакс" (consensus!)
+
+├─ Гоминиды.fb2
+│  ├─ extracted_series_candidate: "Неандертальский параллакс"
+│  ├─ metadata_series: "Неандертальский параллакс"
+│  └─ proposed_series: "Неандертальский параллакс"  ← было
+
+├─ Люди.fb2
+│  ├─ extracted_series_candidate: "Неандертальский параллакс"
+│  ├─ metadata_series: "Неандертальский параллакс"
+│  └─ proposed_series: "Неандертальский параллакс"  ← было
+
+├─ Ката Бинду.fb2
+│  ├─ extracted_series_candidate: "Ката Бинду"  ← ДРУГОЙ candidate!
+│  ├─ metadata_series: ""
+│  ├─ proposed_series: ""
+│  └─ [ПОСЛЕ PASS 4] → proposed_series: ""  ← НЕ применён (другой candidate)
+```
+
+**Статистика:** 
+- Консенсус найдена "Неандертальский параллакс" (встречается 3+ раза)
+- Применена только к сборнику (whose candidate matches)
+- "Ката Бинду" осталась пустой (her candidate не совпадает)
+✅ **Результат:** Правильное разграничение серий
+
+**Пример 2: Группа файлов с одинаковой metadata_series**
+```
+Папка: Волков Тим
+
+Файлы:
+├─ ISCARIOT 01.fb2
+│  ├─ proposed_series: "ISCARIOT" (из папки)
+│  └─ metadata_series: "ISCARIOT"
+
+├─ ISCARIOT 02.fb2
+│  ├─ proposed_series: "ISCARIOT" (из папки)
+│  └─ metadata_series: "ISCARIOT"
+
+├─ Сборник.fb2
+│  ├─ proposed_series: ""  ← сборник заблокирован
+│  ├─ metadata_series: "ISCARIOT"  ← но metadata есть!
+│  └─ [ПОСЛЕ PASS 4] → proposed_series: "ISCARIOT" (consensus по metadata!)
+```
+
+**Внутренняя структура BookRecord:**
+
+```python
+@dataclass
+class BookRecord:
+    # ... другие поля ...
+    
+    # Series fields
+    metadata_series: str = ""           # Из FB2 <sequence>
+    proposed_series: str = ""           # Финальная серия (эволюция)
+    series_source: str = ""             # Источник: folder_dataset/filename/metadata/consensus
+    
+    # Internal field для consensus
+    extracted_series_candidate: str = ""  # Серия извлечённая из filename (БЕЗ валидации)
+                                           # Заполняется в PASS 2, используется в PASS 4
+```
+
+**Файлы, затронутые PASS 4:**
+- `passes/pass4_consensus.py` - Добавлены две процедуры консенсуса (extracted + metadata)
+- `passes/pass2_series_filename.py` - Установка `extracted_series_candidate` для depth 2 файлов
+- `passes/pass1_read_files.py` - Добавление `extracted_series_candidate` поля в BookRecord
 
 ---
 
