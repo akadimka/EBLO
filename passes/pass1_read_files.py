@@ -64,6 +64,7 @@ class Pass1ReadFiles:
                 # Extract metadata
                 title = self.extractor._extract_title_from_fb2(fb2_file)
                 metadata_authors = self.extractor._extract_all_authors_from_metadata(fb2_file)
+                metadata_series = self.extractor._extract_series_from_metadata(fb2_file)
                 
                 # Determine author from folder hierarchy cache
                 author, author_source = self._get_author_for_file(fb2_file)
@@ -78,7 +79,7 @@ class Pass1ReadFiles:
                     metadata_authors=metadata_authors or "[unknown]",
                     proposed_author=author or "",
                     author_source=author_source or "",
-                    metadata_series="",
+                    metadata_series=metadata_series or "",
                     proposed_series="",
                     series_source="",
                     needs_filename_fallback=(author == "")  # If no folder author found, need filename PASS 2

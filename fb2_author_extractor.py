@@ -1986,6 +1986,54 @@ class FB2AuthorExtractor:
         self.settings.load()
         self.author_processor.reload_patterns()
 
+    def _extract_series_from_metadata(self, fb2_path: Path) -> str:
+        """
+        Извлечь серию из метаданных FB2 файла.
+        
+        Ищет элемент <sequence> в блоке <title-info>.
+        Если несколько series, берёт первую.
+        
+        Пример FB2 структуры:
+            <sequence name="Война в Космосе" number="1"/>
+        
+        Args:
+            fb2_path: Путь к FB2 файлу
+        
+        Returns:
+            Название серии из атрибута 'name', или пустая строка
+        """
+        try:
+            import re
+            
+            # Использовать функцию автоматического определения кодировки
+            content = self._detect_correct_encoding(fb2_path)
+            
+            if not content:
+                return ''
+            
+            # Найти весь <title-info>...</title-info> блок
+            title_info_match = re.search(r'<(?:fb:)?title-info>.*?</(?:fb:)?title-info>', content, re.DOTALL)
+            
+            if not title_info_match:
+                return ''
+            
+            # Работаем только с содержимым title-info
+            title_info_content = title_info_match.group(0)
+            
+            # Найти первый элемент <sequence> с атрибутом name
+            # Паттерн: <sequence name="Название" .../>
+            sequence_pattern = r'<sequence\s+[^>]*name=["\']([^"\']+)["\'][^>]*/?>'
+            match = re.search(sequence_pattern, title_info_content, re.IGNORECASE)
+            
+            if match:
+                series_name = match.group(1).strip()
+                if series_name:
+                    return series_name
+        except Exception:
+            pass
+        
+        return ''
+
 
 if __name__ == '__main__':
     # Простой тест
