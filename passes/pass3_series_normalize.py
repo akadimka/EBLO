@@ -38,6 +38,12 @@ class Pass3SeriesNormalize:
             self.series_conversions = self.settings.settings.get('series_conversions', {})
         except (AttributeError, KeyError):
             self.series_conversions = {}
+        
+        # Load cleanup patterns from config
+        try:
+            self.cleanup_patterns = self.settings.settings.get('series_cleanup_patterns', [])
+        except (AttributeError, KeyError):
+            self.cleanup_patterns = []
     
     def execute(self, records: List[BookRecord]) -> None:
         """
@@ -66,7 +72,16 @@ class Pass3SeriesNormalize:
         # "Странник (тетралогия)" → "Странник"
         series = re.sub(r'\s*\([^)]*\d[^)]*\)\s*$', '', series)
         
-        # Шаг 3: Убрать лишние служебные слова в конце
+        # Шаг 3: Убрать скобки с информацией об авторстве/сотрудничестве
+        # "Лорд Системы (соавтор Яростный Мики)" → "Лорд Системы"
+        # "Title (with author X)" → "Title"
+        for pattern in self.cleanup_patterns:
+            series = re.sub(pattern, ' ', series, flags=re.IGNORECASE)
+        
+        # Уберем несколько пробелов если они появились после удаления скобок
+        series = ' '.join(series.split())
+        
+        # Шаг 4: Убрать лишние служебные слова в конце
         # "Война и Мир том 1" → "Война и Мир"
         # ВАЖНО: Использовать word boundaries \b чтобы "т" не совпадал с последней буквой слова
         service_words = self.settings.get_list('service_words')
@@ -75,7 +90,7 @@ class Pass3SeriesNormalize:
             pattern = r'\s*\b' + re.escape(word) + r'\b(\s+\d+)?\s*$'
             series = re.sub(pattern, '', series, flags=re.IGNORECASE)
         
-        # Шаг 4: Применить conversions из config (если настроены)
+        # Шаг 5: Применить conversions из config (если настроены)
         for old_name, new_name in self.series_conversions.items():
             if series.lower() == old_name.lower():
                 series = new_name

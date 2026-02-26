@@ -139,6 +139,14 @@
     "\\d+ book",
     "\\d+ part"
   ],
+  "series_cleanup_patterns": [
+    "\\s*\\(соавтор[ы]?[^)]*\\)\\s*",
+    "\\s*\\(автор[ы]?[^)]*\\)\\s*",
+    "\\s*\\(с участием[^)]*\\)\\s*",
+    "\\s*\\(co-?author[s]?[^)]*\\)\\s*",
+    "\\s*\\(with [^)]*\\)\\s*",
+    "\\s*\\(by [^)]*\\)\\s*"
+  ],
   "author_series_patterns_in_files": [
     {
       "pattern": "(Author) - Title",
