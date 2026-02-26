@@ -110,15 +110,58 @@ class Pass2SeriesFilename:
                             # "Солдат удачи. Тетралогия" → "Солдат удачи"
                             # "Странник. Пенталогия" → "Странник"
                             # "Страна Арманьяк 1-3" → "Страна Арманьяк"
-                            if '. ' in content_in_brackets:
-                                series_candidate = content_in_brackets.split('. ')[0].strip()
-                            else:
-                                # Может быть просто "Series Name" или "Series Name 1-3"
-                                series_candidate = content_in_brackets.strip()
+                            # "Романы + из цикла «Отрок»" → "Отрок"
+                            # "Отрок 2. Сотник 1-3" → "Отрок"
                             
-                            # Удаляем числовые суффиксы (номера томов)
-                            # Паттерны: "1-3", "1-6", "01, 02", "№1", "No. 1" и т.д.
-                            series_candidate = re.sub(r'\s*[\d\-,•.\s]+$', '', series_candidate).strip()
+                            series_candidate = content_in_brackets.strip()
+                            
+                            # Сначала проверяем паттерн "из цикла" или "из серии"
+                            # "Романы + из цикла «Отрок»" → "Отрок"
+                            # "Романы из цикла «Ведьма с Летающей ведьмы»" → "Ведьма с Летающей ведьмы"
+                            cycle_match = re.search(r'из\s+(?:цикла|серии)\s+(.+)', content_in_brackets, re.IGNORECASE)
+                            if cycle_match:
+                                series_candidate = cycle_match.group(1).strip()
+                                # Удаляем внешние кавычки в зависимости от структуры
+                                # "«Отрок»" → "Отрок" (1 « и 1 »)
+                                # "«Ведьма с «Летающей ведьмы»»" → "Ведьма с «Летающей ведьмы»" (2 « и 2 »)  
+                                # "«Ведьма с «Летающей ведьмы»" → "Ведьма с «Летающей ведьмы»" (2 « и 1 », первая « это внешняя)
+                                open_count = series_candidate.count('«')
+                                close_count = series_candidate.count('»')
+                                
+                                # Если количество кавычек совпадает - удаляем первую и последнюю как парн
+                                if (open_count > 0 and open_count == close_count and 
+                                    series_candidate.startswith('«') and series_candidate.endswith('»')):
+                                    series_candidate = series_candidate[1:-1]
+                                # Если открывающих больше чем закрывающих, но первый символ - открывающая
+                                # это значит первая « это внешняя, остальные внутренние
+                                elif open_count > close_count and series_candidate.startswith('«'):
+                                    series_candidate = series_candidate[1:]
+                                    
+                                series_candidate = series_candidate.strip()
+                            # Иначе пытаемся извлечь по точке - но ТОЛЬКО если после точки идет служебное слово
+                            # "Солдат удачи. Тетралогия" → "Солдат удачи"
+                            # "Отрок 2. Сотник 1-3" → сохраняем как есть (это иерархия серий)
+                            elif '. ' in content_in_brackets:
+                                parts = content_in_brackets.split('. ')
+                                after_dot = parts[1].lower() if len(parts) > 1 else ''
+                                # Проверяем, является ли часть после точки служебным словом
+                                is_service_word_after_dot = any(
+                                    after_dot.startswith(sw.lower()) 
+                                    for sw in ['том', 'дилогия', 'трилогия', 'тетралогия', 'пенталогия', 'роман-эпопея']
+                                )
+                                if is_service_word_after_dot:
+                                    # Это служебное слово - берем только первую часть
+                                    series_candidate = parts[0].strip()
+                                # иначе оставляем всю строку (иерархия: "Отрок 2. Сотник")
+                            
+                            # Удаляем номер тома в начале: "Отрок 2." или "2. "
+                            # Паттерн: "Серия NN." или "Серия NN " в начале
+                            series_candidate = re.sub(r'^\s*\d+\s*[.,]?\s*', '', series_candidate).strip()
+                            
+                            # Удаляем числовые суффиксы (номера томов в конце)
+                            # Паттерны: "1-3", "1-6", "01, 02", "№1" и т.д.
+                            # ВАЖНО: не удаляем точки, т.к. они разделяют серии ("Отрок 2. Сотник 1-3" → "Отрок 2. Сотник")
+                            series_candidate = re.sub(r'\s*[\d\-,•]+\s*$', '', series_candidate).strip()
                             # Удаляем оставшиеся служебные слова в конце (т, т., том и т.д.)
                             for service_word in self.service_words:
                                 pattern = r'\s*' + re.escape(service_word.lower()) + r'\s*$'
