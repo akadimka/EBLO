@@ -37,6 +37,7 @@ class Pass2SeriesFilename:
         # Получить списки из config.json
         self.collection_keywords = self.settings.get_list('collection_keywords')
         self.service_words = self.settings.get_list('service_words')
+        self.filename_blacklist = self.settings.get_list('filename_blacklist')
         
         # Получить паттерны из конфига
         self.file_patterns = self.settings.get_list('author_series_patterns_in_files') or []
@@ -148,23 +149,33 @@ class Pass2SeriesFilename:
     def _is_valid_series(self, text: str) -> bool:
         """
         Проверить что text выглядит как название серии, не как другое.
-        Использует AuthorName ТОЛЬКО для проверки что это не автор!
+        Проверяет против:
+        - filename_blacklist (список запрещенных слов)
+        - collection_keywords (сборники, антологии)
+        - service_words (том, книга, выпуск)
+        - AuthorName (не похоже на имя автора)
         """
         if not text or len(text) < 2:
             return False
         
-        # Исключить очевидные сборники/антологии
         text_lower = text.lower()
+        
+        # ПРОВЕРКА 1: filename_blacklist - запрещенные слова
+        for bl_word in self.filename_blacklist:
+            if bl_word.lower() in text_lower:
+                return False
+        
+        # ПРОВЕРКА 2: Исключить очевидные сборники/антологии
         for keyword in self.collection_keywords:
             if keyword.lower() in text_lower:
                 return False
         
-        # Исключить сервис-слова (том, книга, выпуск)
+        # ПРОВЕРКА 3: Исключить сервис-слова (том, книга, выпуск)
         for service_word in self.service_words:
             if text_lower.startswith(service_word.lower()):
                 return False
         
-        # ✅ ПРОВЕРКА: Убедиться что это НЕ похоже на автора!
+        # ПРОВЕРКА 4: Убедиться что это НЕ похоже на автора!
         try:
             author = AuthorName(text, [])
             if author.is_valid_author():

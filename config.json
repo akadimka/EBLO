@@ -66,7 +66,8 @@
     "собрание сочинений",
     "сборник",
     "шедевры фантастики",
-    "ЛенИздат"
+    "ЛенИздат",
+    "библиотека"
   ],
   "collection_keywords": [
     "сборник",
@@ -186,26 +187,6 @@
     {
       "pattern": "Author, Author - Title (Series. service_words)",
       "example": "Земляной Андрей, Орлов Борис - Академик (Странник 4-5) - 2022.fb2"
-    }
-  ],
-  "series_filename_patterns": [
-    {
-      "name": "brackets_start",
-      "pattern": "^\\[([^\\[\\]]+)\\]",
-      "description": "[Серия] в квадратных скобках в начале",
-      "example": "[War in Space] First Book.fb2"
-    },
-    {
-      "name": "parentheses_end",
-      "pattern": "(?:(?:том|книга|выпуск|ч|кн)\\s*)?\\(?([^)]+)\\)\\s*$",
-      "description": "Серия в скобках в конце файла",
-      "example": "Book Title (Странник 4-5).fb2"
-    },
-    {
-      "name": "dot_separator",
-      "pattern": "^([^.]+)\\. ",
-      "description": "Серия перед точкой в начале",
-      "example": "Пленники Зоны. Кровь цвета хаки.fb2"
     }
   ],
   "author_name_patterns": [
