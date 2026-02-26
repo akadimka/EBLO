@@ -87,19 +87,19 @@ class Pass2SeriesFilename:
                 
                 if is_series_folder:
                     # Это файл в папке-коллекции серий, обрабатываем как depth 1 файл
-                    # ПРИОРИТЕТ:
-                    # 1. Сначала пытаемся извлечь из имени файла с паттернами (это более точно)
-                    # 2. Если паттерны не нашли - пытаемся извлечь из скобок
+                    # ПРИОРИТЕТ: папка > файл > метаданные
                     
                     filename = Path(record.file_path).name
                     
-                    # ШАГ 1: Попробуем использовать паттерны из конфига (более точный способ)
-                    series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
+                    # ШАГ 1: Попробуем использовать паттерны из конфига
+                    series_from_patterns = self._extract_series_from_filename(record.file_path, validate=False)
                     
-                    if series_candidate:
-                        record.extracted_series_candidate = series_candidate
-                        if self._is_valid_series(series_candidate):
-                            record.proposed_series = series_candidate
+                    if series_from_patterns:
+                        record.extracted_series_candidate = series_from_patterns
+                        
+                        # Используем то что нашли в filename
+                        if self._is_valid_series(series_from_patterns):
+                            record.proposed_series = series_from_patterns
                             record.series_source = "filename"
                         continue  # Обработка завершена, переходим к следующему файлу
                     
@@ -324,7 +324,14 @@ class Pass2SeriesFilename:
                             best_score = score
         
         if best_series:
-            return best_series
+            # Проверка: если best_series - это serve_word, не возвращаем его
+            # Serve_words это служебные слова, не названия серий
+            best_series_lower = best_series.lower().strip()
+            if any(best_series_lower.startswith(sw.lower()) for sw in self.service_words):
+                # Это serve_word, игнорируем этот результат
+                best_series = None
+            else:
+                return best_series
         
         # Правило 1: [Серия] в квадратных скобках в начале
         # Из паттернов конфига ищем примеры с [...]
@@ -338,10 +345,12 @@ class Pass2SeriesFilename:
         # Из паттернов конфига: "Author - Title (Series. service_words)"
         # Ищем скобку в конце, может быть с сервис-словами перед ней
         if '(' in name_without_ext and ')' in name_without_ext:
-            # Сначала ищем простую скобку в конце
-            match = re.search(r'\(?([^)]+)\)\s*$', name_without_ext)
+            # Ищем закрытую скобку в конце, которой предшествует открытая скобка
+            match = re.search(r'\(([^)]+)\)\s*$', name_without_ext)
             if match:
-                potential_series = match.group(1).strip()
+                content_in_brackets = match.group(1).strip()
+                # Используем логику из _extract_series_from_brackets для cleanup
+                potential_series = self._extract_series_from_brackets(content_in_brackets)
                 if not validate or self._is_valid_series(potential_series):
                     return potential_series
         
@@ -583,5 +592,17 @@ class Pass2SeriesFilename:
         # Штраф за слишком короткие результаты из многомерных паттернов
         if word_count == 1 and ' - ' in pattern and ' - ' in filename and len(filename) > 30:
             score -= 3  # Вероятно мы неправильно разпарсили
+        
+        # УРОВЕНЬ 4: КРИТИЧНО - если результат сам является служебным словом
+        # Это ловушка: паттерн может извлечь "Тетралогия" вместо реальной серии
+        # Нужно отдавать предпочтение результатам, которые НЕ serve_words
+        extracted_lower = extracted_series.lower().strip()
+        if any(extracted_lower.startswith(sw.lower()) for sw in self.service_words):
+            # БОЛЬШОЙ штраф - это служебное слово, не серия!
+            score = max(0, score - 50)
+        
+        # УРОВЕНЬ 5: Штраф за single-word результаты
+        # Single-word результаты из сложных паттернов = вероятно Title, не Series
+        # Например: "Охотник" из файла "Янковский - Охотник (Тетралогия)"
         
         return max(0, score)  # Минимум 0
