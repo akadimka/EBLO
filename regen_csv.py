@@ -25,6 +25,9 @@ from passes import (
     Pass5Conversions,
     Pass6Abbreviations,
 )
+from passes.pass2_series_filename import Pass2SeriesFilename
+from passes.pass3_series_normalize import Pass3SeriesNormalize
+from passes.folder_series_parser import parse_series_from_folder_name
 
 
 class RegenCSVService:
@@ -98,6 +101,42 @@ class RegenCSVService:
             pass2_fallback = Pass2Fallback(self.logger)
             pass2_fallback.execute(self.records)
             self.logger.log("[OK] PASS 2 Fallback: Metadata applied")
+            
+            # ===== SERIES EXTRACTION: From Folders =====
+            print("\n[SERIES] Extracting series from folder structure...")
+            for record in self.records:
+                if record.proposed_series:
+                    continue  # Skip if series already set
+                
+                # Extract series from file path structure
+                file_path_parts = Path(record.file_path).parts
+                if len(file_path_parts) >= 3:
+                    # Assume structure: Author_Folder / Series_Folder / filename
+                    # So series is in the second-to-last position
+                    potential_series_folder = file_path_parts[-2]
+                    if '.' not in potential_series_folder:  # Not a filename
+                        series, source = parse_series_from_folder_name(
+                            potential_series_folder,
+                            known_authors=set(),
+                            service_words=self.settings.get_list('service_words')
+                        )
+                        if series:
+                            record.proposed_series = series
+                            record.series_source = source
+            
+            self.logger.log("[OK] Series extracted from folder structure")
+            
+            # ===== SERIES PASS 2 =====
+            print("[SERIES] Extracting series from filenames...")
+            pass2_series = Pass2SeriesFilename(self.logger)
+            pass2_series.execute(self.records)
+            self.logger.log("[OK] Series PASS 2: Extracted from filenames")
+            
+            # ===== SERIES PASS 3 =====
+            print("[SERIES] Normalizing series names...")
+            pass3_series = Pass3SeriesNormalize(self.logger)
+            pass3_series.execute(self.records)
+            self.logger.log("[OK] Series PASS 3: Normalized series names")
             
             # ===== PASS 3 =====
             pass3 = Pass3Normalize(self.logger)
