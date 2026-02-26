@@ -113,16 +113,17 @@ class RegenCSVService:
                 
                 # Logic:
                 # If depth >= 3 (Author/Series/File.fb2) -> series is folder name, take as-is
-                # If depth == 2 (Author/File.fb2) -> series from file parsing or metadata (handled in PASS2)
+                # If depth == 2 (Author/File.fb2) -> no series from folder (handled in PASS2)
                 
                 if len(file_path_parts) >= 3:
                     # Structure: Author_Folder / Series_Folder / filename
-                    # Series folder is second-to-last
-                    potential_series_folder = file_path_parts[-2]
-                    if '.' not in potential_series_folder:  # Not a filename
-                        # Take folder name as-is (no parsing) - it's a series folder
-                        record.proposed_series = potential_series_folder
-                        record.series_source = "folder_dataset"
+                    # parts[-1] = filename
+                    # parts[-2] = Series_Folder (THIS IS ALWAYS A FOLDER, not a file!)
+                    series_folder_name = file_path_parts[-2]
+                    
+                    # Take folder name as-is, it's the series
+                    record.proposed_series = series_folder_name
+                    record.series_source = "folder_dataset"
             
             self.logger.log("[OK] Series extracted from folder structure")
             
