@@ -379,10 +379,14 @@ class Pass2SeriesFilename:
         # Основные шаблоны
         if pattern == "Author - Series (service_words)":
             # "Садов Сергей - Горе победителям (Дилогия)"
+            # "Валериев Игорь - 2. Ермак. Поход (Ермак 4-6)"
             # Извлекаем: группу 2 (Series) - части до скобок
             match = re.match(r'^(.+?)\s*-\s*([^()]+?)\s*\(', filename)
             if match:
-                return match.group(2).strip()
+                series = match.group(2).strip()
+                # Удаляем префикс книги: "1. ", "2. ", "3. " и т.д.
+                series = re.sub(r'^\s*\d+\s*[.,]\s*', '', series).strip()
+                return series
         
         elif pattern == "Author - Title (Series. service_words)":
             # "Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия)"
@@ -422,6 +426,15 @@ class Pass2SeriesFilename:
             match = re.search(r'\(\s*([^)]+)\)', filename)
             if match:
                 content_in_brackets = match.group(1).strip()
+                return self._extract_series_from_brackets(content_in_brackets)
+        
+        elif pattern == "Author - Title (Series service_words)":
+            # "Валериев Игорь - 2. Ермак. Поход (Ермак 4-6)"
+            # Similar to "Author - Title (Series. service_words)" but without dot
+            # Content in brackets: "Ермак 4-6" (space before number)
+            match = re.match(r'^(.+?)\s*-\s*(.+?)\s*\(\s*([^)]+)\)', filename)
+            if match:
+                content_in_brackets = match.group(3).strip()
                 return self._extract_series_from_brackets(content_in_brackets)
         
         return ""

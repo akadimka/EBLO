@@ -199,6 +199,10 @@
     {
       "pattern": "Author, Author - Title (Series. service_words)",
       "example": "Земляной Андрей, Орлов Борис - Академик (Странник 4-5) - 2022.fb2"
+    },
+    {
+      "pattern": "Author - Title (Series service_words)",
+      "example": "Валериев Игорь - 2. Ермак. Поход (Ермак 4-6).fb2"
     }
   ],
   "author_name_patterns": [
