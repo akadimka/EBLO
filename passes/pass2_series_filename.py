@@ -42,22 +42,48 @@ class Pass2SeriesFilename:
         """
         Попытаться извлечь серию из имена файла.
         
-        Пропускает файлы которые уже имеют folder_dataset серию.
+        Логика приоритета для файлов БЕЗ folder_dataset series:
+        1. Парсим имя файла по паттернам
+        2. Если в файле найдено совпадает с началом metadata → берем metadata целиком
+        3. Если в файле не найдено → используем metadata_series (если есть)
+        4. Всегда проверяем на BL и валидность
         """
         for record in records:
             # Пропускаем если серия уже установлена из папок
             if record.series_source == "folder_dataset":
                 continue
             
-            # Пропускаем если уже есть какая-то серия
+            # Пропускаем если уже есть валидная серия
             if record.proposed_series:
                 continue
             
-            series = self._extract_series_from_filename(record.file_path)
+            # ШАГ 1: Попытаться извлечь из имени файла
+            series_from_filename = self._extract_series_from_filename(record.file_path)
             
-            if series:
-                record.proposed_series = series
-                record.series_source = "filename"
+            if series_from_filename:
+                # Найдено в имени файла
+                # ШАГ 2: Проверить совпадает ли с metadata
+                if record.metadata_series and record.metadata_series.strip():
+                    metadata_series = record.metadata_series.strip()
+                    # Если найденное в файле - это начало metadata, берем metadata целиком (может быть более полной)
+                    if metadata_series.lower().startswith(series_from_filename.lower()):
+                        # Предпочитаем metadata версию (более полная)
+                        record.proposed_series = metadata_series
+                        record.series_source = "metadata"
+                    else:
+                        # Они не совпадают, берем то что нашли в файле
+                        record.proposed_series = series_from_filename
+                        record.series_source = "filename"
+                else:
+                    # Нет metadata, берем то что нашли в файле
+                    record.proposed_series = series_from_filename
+                    record.series_source = "filename"
+            elif record.metadata_series:
+                # FALLBACK: Используем metadata_series если в имени файла не найдено
+                series = record.metadata_series.strip()
+                if self._is_valid_series(series):
+                    record.proposed_series = series
+                    record.series_source = "metadata"
     
     def _extract_series_from_filename(self, file_path: str) -> str:
         """
