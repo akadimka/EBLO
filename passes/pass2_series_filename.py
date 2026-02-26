@@ -87,7 +87,23 @@ class Pass2SeriesFilename:
                 
                 if is_series_folder:
                     # Это файл в папке-коллекции серий, обрабатываем как depth 1 файл
+                    # ПРИОРИТЕТ:
+                    # 1. Сначала пытаемся извлечь из имени файла с паттернами (это более точно)
+                    # 2. Если паттерны не нашли - пытаемся извлечь из скобок
+                    
                     filename = Path(record.file_path).name
+                    
+                    # ШАГ 1: Попробуем использовать паттерны из конфига (более точный способ)
+                    series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
+                    
+                    if series_candidate:
+                        record.extracted_series_candidate = series_candidate
+                        if self._is_valid_series(series_candidate):
+                            record.proposed_series = series_candidate
+                            record.series_source = "filename"
+                        continue  # Обработка завершена, переходим к следующему файлу
+                    
+                    # ШАГ 2: Fallback - извлекаем из скобок если паттерны не сработали
                     name_without_ext = filename.rsplit('.', 1)[0]
                     
                     # Ищем скобки - сначала попробуем найти в конце (основной случай)
@@ -275,10 +291,11 @@ class Pass2SeriesFilename:
         """
         Извлечь серию из имени файла, используя паттерны из конфига.
         
-        Применяет следующие правила (в порядке приоритета):
-        1. [Серия] - квадратные скобки в начале
-        2. Серия (лат. буквы/цифры) - скобки в конце с сервис-словами
-        3. Серия. Название - точка как разделитель в начале
+        Применяет (в порядке приоритета):
+        1. Паттерны из конфига (author_series_patterns_in_files)
+        2. [Серия] - квадратные скобки в начале
+        3. Серия (лат. буквы/цифры) - скобки в конце с сервис-словами
+        4. Серия. Название - точка как разделитель в начале
         
         Args:
             file_path: Путь к файлу
@@ -286,6 +303,28 @@ class Pass2SeriesFilename:
         """
         filename = Path(file_path).name
         name_without_ext = filename.rsplit('.', 1)[0]
+        
+        # ШАГ 0: Найти ЛУЧШИЙ паттерн на основе оценки соответствия
+        best_series = None
+        best_score = -1
+        
+        if self.file_patterns:
+            for pattern_obj in self.file_patterns:
+                pattern_str = pattern_obj.get('pattern', '')
+                series_candidate = self._apply_config_pattern(pattern_str, name_without_ext)
+                
+                if series_candidate:
+                    # Оценить соответствие паттерна структуре файла
+                    score = self._score_pattern_match(pattern_str, name_without_ext, series_candidate)
+                    
+                    # Если это лучший результат - запомнить
+                    if score > best_score:
+                        if not validate or self._is_valid_series(series_candidate):
+                            best_series = series_candidate
+                            best_score = score
+        
+        if best_series:
+            return best_series
         
         # Правило 1: [Серия] в квадратных скобках в начале
         # Из паттернов конфига ищем примеры с [...]
@@ -314,6 +353,119 @@ class Pass2SeriesFilename:
                 return potential_series
         
         return ""
+    
+    def _apply_config_pattern(self, pattern: str, filename: str) -> str:
+        """
+        Применить паттерн из конфига к имени файла и извлечь Series.
+        
+        Паттерны используют метаметки: (Author), (Series), (Title) и т.д.
+        
+        Args:
+            pattern: Паттерн из конфига, напр. "Author - Series (service_words)"
+            filename: Имя файла без расширения
+            
+        Returns:
+            Извлеченное имя серии или пустая строка
+        """
+        # Основные шаблоны
+        if pattern == "Author - Series (service_words)":
+            # "Садов Сергей - Горе победителям (Дилогия)"
+            # Извлекаем: группу 2 (Series) - части до скобок
+            match = re.match(r'^(.+?)\s*-\s*([^()]+?)\s*\(', filename)
+            if match:
+                return match.group(2).strip()
+        
+        elif pattern == "Author - Title (Series. service_words)":
+            # "Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия)"
+            # Нужно извлечь Series из скобок
+            match = re.match(r'^(.+?)\s*-\s*(.+?)\s*\(\s*([^)]+)\)', filename)
+            if match:
+                content_in_brackets = match.group(3).strip()
+                # From "(Солдат удачи. Тетралогия)" extract "Солдат удачи"
+                return self._extract_series_from_brackets(content_in_brackets)
+        
+        elif pattern == "Author - Series.Title":
+            # "Авраменко Александр - Солдат удачи 1. Солдат удачи"
+            # Извлекаем часть после " - " и до цифры/точки
+            match = re.match(r'^(.+?)\s*-\s*([^0-9\(\)]+?)[\s\.\d]', filename)
+            if match:
+                return match.group(2).strip()
+        
+        elif pattern == "Author. Series. Title":
+            # "Анисимов. Вариант «Бис» 2. Год мертвой змеи"
+            # Формат: Author. Series. Title
+            parts = filename.split('. ')
+            if len(parts) >= 3:
+                # parts[1] должна быть Series
+                return parts[1].strip()
+        
+        elif pattern == "Author, Author - Title (Series. service_words)":
+            # "Земляной Андрей, Орлов Борис - Академик (Странник 4-5)"
+            # Извлекаем Series из скобок
+            match = re.search(r'\(\s*([^)]+)\)', filename)
+            if match:
+                content_in_brackets = match.group(1).strip()
+                return self._extract_series_from_brackets(content_in_brackets)
+        
+        elif pattern == "Author. Title (Series. service_words)":
+            # "Демченко. Хольмградские истории (Хольмградские истории. Трилогия)"
+            # Извлекаем Series из скобок
+            match = re.search(r'\(\s*([^)]+)\)', filename)
+            if match:
+                content_in_brackets = match.group(1).strip()
+                return self._extract_series_from_brackets(content_in_brackets)
+        
+        return ""
+    
+    def _extract_series_from_brackets(self, content: str) -> str:
+        """
+        Извлечь имя серии из содержимого скобок.
+        Обрабатывает:
+        - "Серия. service_words" → "Серия"
+        - "Серия N-M" → "Серия"
+        - "Романы из цикла «Серия»" → "Серия"
+        
+        Args:
+            content: Содержимое скобок без скобок
+            
+        Returns:
+            Извлеченное имя серии
+        """
+        # Сначала попробуем паттерн "из цикла" или "из серии"
+        # "Романы из цикла «Отрок»" → "Отрок"
+        cycle_match = re.search(r'из\s+(?:цикла|серии)\s+(.+)', content, re.IGNORECASE)
+        if cycle_match:
+            series_candidate = cycle_match.group(1).strip()
+            # Удаляем внешние кавычки
+            open_count = series_candidate.count('«')
+            close_count = series_candidate.count('»')
+            
+            if (open_count > 0 and open_count == close_count and 
+                series_candidate.startswith('«') and series_candidate.endswith('»')):
+                series_candidate = series_candidate[1:-1]
+            elif open_count > close_count and series_candidate.startswith('«'):
+                series_candidate = series_candidate[1:]
+                
+            return series_candidate.strip()
+        
+        # Если есть точка - берем до неё (это Series. service_words)
+        if '. ' in content:
+            parts = content.split('. ')
+            after_dot = parts[1].lower() if len(parts) > 1 else ''
+            
+            # Проверка служебных слов
+            is_service_word = any(
+                after_dot.startswith(sw.lower()) 
+                for sw in ['том', 'дилогия', 'трилогия', 'тетралогия', 'пенталогия', 'роман-эпопея']
+            )
+            
+            if is_service_word:
+                return parts[0].strip()
+        
+        # Если есть числовой диапазон (1-3, 4-6), берем до него
+        series_candidate = re.sub(r'\s*[\d\-]+\s*$', '', content).strip()
+        
+        return series_candidate if series_candidate else ""
     
     def _is_valid_series(self, text: str) -> bool:
         """
@@ -369,3 +521,67 @@ class Pass2SeriesFilename:
             pass  # Если парсинг не сработал - это вероятно серия
         
         return True
+    
+    def _score_pattern_match(self, pattern: str, filename: str, extracted_series: str) -> int:
+        """
+        Оценить степень соответствия паттерна структуре файла.
+        Выбирает ЛУЧШИЙ паттерн из нескольких кандидатов.
+        
+        Критерии оценки:
+        1. Специфичность паттерна (более специфичные выше)
+        2. Совпадение структурных элементов с файлом
+        3. Качество результата (количество слов в серии)
+        
+        Args:
+            pattern: Паттерн из конфига
+            filename: Имя файла без расширения
+            extracted_series: Извлеченная серия
+            
+        Returns:
+            Оценка (чем выше, тем лучше совпадение). -1 = нет результата.
+        """
+        if not extracted_series:
+            return -1
+        
+        score = 0
+        
+        # УРОВЕНЬ 1: Специфичность паттерна (более специфичные = более надежные)
+        # Паттерны со скобками и serve_words очень специфичные
+        if 'service_words' in pattern:
+            score += 20  # Наивысший приоритет - это точный паттерн
+        
+        # Паттерны со скобками хорошие
+        if '(' in pattern and ')' in pattern:
+            score += 10
+        
+        # Паттерны с тире
+        if ' - ' in pattern:
+            score += 5
+        
+        # Паттерны с точкой
+        if '. ' in pattern:
+            score += 3
+        
+        # УРОВЕНЬ 2: Совпадение структуры файла с паттерном структурой
+        # Если в файле есть то же что в паттерне - это хороший знак
+        if ' - ' in pattern and ' - ' in filename:
+            score += 8
+        
+        if '(' in pattern and '(' in filename and ')' in filename:
+            score += 8
+        
+        if '. ' in pattern and '. ' in filename:
+            score += 4
+        
+        # УРОВЕНЬ 3: Качество результата
+        word_count = len(extracted_series.split())
+        if word_count > 1:
+            score += word_count * 2  # Мультисловные результаты ценятся выше
+        elif word_count == 0:
+            score -= 30  # Пустой результат = плохо
+        
+        # Штраф за слишком короткие результаты из многомерных паттернов
+        if word_count == 1 and ' - ' in pattern and ' - ' in filename and len(filename) > 30:
+            score -= 3  # Вероятно мы неправильно разпарсили
+        
+        return max(0, score)  # Минимум 0
