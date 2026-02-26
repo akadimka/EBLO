@@ -68,8 +68,79 @@ class Pass2SeriesFilename:
             file_path_parts = Path(record.file_path).parts
             file_depth = len(file_path_parts)
             
-            # Если файл прямо в папке автора (глубина 2) - используем ТОЛЬКО metadata временно
-            # Но извлекаем candidate из filename для consensus в PASS 4
+            # Если файл находится на глубине 2: может быть либо Автор/file.fb2, либо SeriesFolder/file.fb2
+            # Нужно отличить их по имени папки
+            if file_depth == 2:
+                parent_folder = file_path_parts[0]  # Первая папка в пути
+                
+                # Проверить - это папка серии коллекции (т.е. напрямую Series folder без Author subfolder)
+                # Такие папки обычно начинаются со слов: "Серия", "Series", "Collection", "Сборник"
+                # Или содержат слово в скобках, как "Серия - «Name»"
+                is_series_folder = (
+                    parent_folder.startswith('Серия') or
+                    parent_folder.startswith('Series') or
+                    parent_folder.startswith('Collection') or
+                    parent_folder.startswith('Сборник') or
+                    'Серия' in parent_folder or
+                    'Collection' in parent_folder
+                )
+                
+                if is_series_folder:
+                    # Это файл в папке-коллекции серий, обрабатываем как depth 1 файл
+                    filename = Path(record.file_path).name
+                    name_without_ext = filename.rsplit('.', 1)[0]
+                    
+                    # Ищем скобки - сначала попробуем найти в конце (основной случай)
+                    # "Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия)"
+                    # Но также поддерживаем структуру с информацией после скобок
+                    # "Проект «Оборотень» (Странник. Пенталогия) - 2010"
+                    series_match = re.search(r'\(([^)]+)\)', name_without_ext)
+                    if series_match:
+                        content_in_brackets = series_match.group(1).strip()
+                        
+                        # Если в скобках есть слово в конце (типов/дилогия/коллекция)
+                        # "Сборник" и подобное - нужно пропустить
+                        content_lower = content_in_brackets.lower()
+                        skip_keywords = ['сборник', 'сборник', 'авторский', 'собрание', 'антология']
+                        if any(kw in content_lower for kw in skip_keywords):
+                            # Это сборник, не серия - пропускаем
+                            pass
+                        else:
+                            # Извлекаем series из скобок
+                            # "Солдат удачи. Тетралогия" → "Солдат удачи"
+                            # "Странник. Пенталогия" → "Странник"
+                            # "Страна Арманьяк 1-3" → "Страна Арманьяк"
+                            if '. ' in content_in_brackets:
+                                series_candidate = content_in_brackets.split('. ')[0].strip()
+                            else:
+                                # Может быть просто "Series Name" или "Series Name 1-3"
+                                series_candidate = content_in_brackets.strip()
+                            
+                            # Удаляем числовые суффиксы (номера томов)
+                            # Паттерны: "1-3", "1-6", "01, 02", "№1", "No. 1" и т.д.
+                            series_candidate = re.sub(r'\s*[\d\-,•.\s]+$', '', series_candidate).strip()
+                            # Удаляем оставшиеся служебные слова в конце (т, т., том и т.д.)
+                            for service_word in self.service_words:
+                                pattern = r'\s*' + re.escape(service_word.lower()) + r'\s*$'
+                                series_candidate = re.sub(pattern, '', series_candidate, flags=re.IGNORECASE).strip()
+                            
+                            if series_candidate:
+                                record.extracted_series_candidate = series_candidate
+                                # Для файлов в series коллекции - используем extracted candidate как proposed series
+                                if self._is_valid_series(series_candidate):
+                                    record.proposed_series = series_candidate
+                                    record.series_source = "filename"
+                    
+                    # Если из filename ничего не нашли, но есть metadata - используем её
+                    if not record.proposed_series and record.metadata_series:
+                        series = record.metadata_series.strip()
+                        if self._is_valid_series(series):
+                            record.proposed_series = series
+                            record.series_source = "metadata"
+                    continue
+            
+            # Если файл находится на глубине 2 и это папка автора (не папка серии коллекции) - используем ТОЛЬКО metadata
+            # Или на остальные случаи depth==2
             if file_depth == 2:
                 filename = Path(record.file_path).name
                 name_without_ext = filename.rsplit('.', 1)[0]
@@ -226,9 +297,25 @@ class Pass2SeriesFilename:
                 return False
         
         # ПРОВЕРКА 3: Исключить сервис-слова (том, книга, выпуск)
+        # Но только если они в начале как отдельное слово, не как часть названия!
+        # "том 1" → исключить, "Томск" → сохранить
         for service_word in self.service_words:
-            if text_lower.startswith(service_word.lower()):
-                return False
+            service_word_lower = service_word.lower()
+            # Проверяем если service_word это одна буква - только если это слово целиком
+            if len(service_word_lower) == 1:
+                # Для однобуквенных сокращений требуем точку после них: "т. " или "т."
+                if text_lower.startswith(service_word_lower + ' ') or \
+                   text_lower.startswith(service_word_lower + '.'):
+                    return False
+            else:
+                # Для многобуквенных слов проверяем начало строки
+                if text_lower.startswith(service_word_lower + ' ') or \
+                   text_lower.startswith(service_word_lower):
+                    # Но требуем чтобы это было целое слово в начале
+                    # "том фантастика" → исключить, но "томск" → сохранить
+                    words = text_lower.split()
+                    if words and words[0] == service_word_lower:
+                        return False
         
         # ПРОВЕРКА 4: Убедиться что это НЕ похоже на автора!
         try:
