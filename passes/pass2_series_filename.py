@@ -97,10 +97,55 @@ class Pass2SeriesFilename:
                     if series_from_patterns:
                         record.extracted_series_candidate = series_from_patterns
                         
-                        # Используем то что нашли в filename
-                        if self._is_valid_series(series_from_patterns):
-                            record.proposed_series = series_from_patterns
-                            record.series_source = "filename"
+                        # Применяем очистку и metadata валидирование
+                        clean_candidate = self._clean_series_name(series_from_patterns)
+                        
+                        # Проверим валидность очищенной версии
+                        if not self._is_valid_series(clean_candidate):
+                            # Candidate заблочен - используем metadata если есть
+                            if record.metadata_series:
+                                series = record.metadata_series.strip()
+                                if self._is_valid_series(series):
+                                    record.proposed_series = series
+                                    record.series_source = "metadata"  # Метаданные как основной источник
+                        else:
+                            # Clean candidate валиден - сравниваем с metadata
+                            if record.metadata_series and record.metadata_series.strip():
+                                metadata_series = record.metadata_series.strip()
+                                
+                                # СРАВНИВАЕМ ОЧИЩЕННУЮ версию кандидата с metadata
+                                if clean_candidate.lower() == metadata_series.lower():
+                                    # Точное совпадение - используем metadata значение, но source = filename
+                                    record.proposed_series = metadata_series
+                                    record.series_source = "filename"  # Источник - filename (мета только уточнила)
+                                
+                                elif metadata_series.lower().startswith(clean_candidate.lower()):
+                                    # Metadata это расширение пользователя
+                                    # "Солдат удачи" в файле, а в metadata "Солдат удачи. Цикл"
+                                    record.proposed_series = metadata_series
+                                    record.series_source = "filename"  # Источник filename (мета расширила)
+                                
+                                elif clean_candidate.lower().startswith(metadata_series.lower()):
+                                    # Clean candidate это расширение metadata
+                                    # Используем metadata как более чистый источник
+                                    record.proposed_series = metadata_series
+                                    record.series_source = "filename"  # Все равно из filename берем основу
+                                
+                                elif self._matches_with_tolerance(clean_candidate, metadata_series, tolerance=0.80):
+                                    # Существенное совпадение с tolerance
+                                    record.proposed_series = metadata_series
+                                    record.series_source = "filename"  # Источник filename (мета подтвердила)
+                                
+                                else:
+                                    # Они не совпадают - используем очищенную версию из filename
+                                    record.proposed_series = clean_candidate
+                                    record.series_source = "filename"
+                            else:
+                                # Нет metadata - используем clean candidate из filename
+                                if self._is_valid_series(series_from_patterns):
+                                    record.proposed_series = series_from_patterns
+                                    record.series_source = "filename"
+                        
                         continue  # Обработка завершена, переходим к следующему файлу
                     
                     # ШАГ 2: Fallback - извлекаем из скобок если паттерны не сработали
@@ -253,32 +298,56 @@ class Pass2SeriesFilename:
             
             # ШАГ 2: Проверить валидность и применить
             if series_candidate:
-                # Проверим валидность
-                if not self._is_valid_series(series_candidate):
+                # СРАЗУ очистим от паразитных символов (томы, названия)
+                clean_candidate = self._clean_series_name(series_candidate)
+                
+                # Проверим валидность (очищенной версии)
+                if not self._is_valid_series(clean_candidate):
                     # Candidate заблочен по BL, но оставляем его для consensus
                     # Используем только metadata если есть
                     if record.metadata_series:
                         series = record.metadata_series.strip()
                         if self._is_valid_series(series):
                             record.proposed_series = series
-                            record.series_source = "metadata"
+                            record.series_source = "metadata"  # Метаданные как основной источник
                 else:
-                    # Candidate валиден, применяем его
+                    # Candidate (очищенный) валиден, применяем его
                     # ШАГ 3: Проверить совпадает ли с metadata
                     if record.metadata_series and record.metadata_series.strip():
                         metadata_series = record.metadata_series.strip()
-                        # Если найденное в файле - это начало metadata, берем metadata целиком (может быть более полной)
-                        if metadata_series.lower().startswith(series_candidate.lower()):
-                            # Предпочитаем metadata версию (более полная)
+                        
+                        # СРАВНИВАЕМ ОЧИЩЕННУЮ версию кандидата с metadata
+                        if clean_candidate.lower() == metadata_series.lower():
+                            # Точное совпадение - используем metadata значение, но source = filename
                             record.proposed_series = metadata_series
-                            record.series_source = "metadata"
+                            record.series_source = "filename"  # Источник - filename (мета только уточнила)
+                        
+                        elif metadata_series.lower().startswith(clean_candidate.lower()):
+                            # Metadata это расширение cleaned_candidate
+                            # "Солдат удачи" в файле, а в metadata "Солдат удачи. Цикл"
+                            record.proposed_series = metadata_series
+                            record.series_source = "filename"  # Источник filename (мета расширила)
+                        
+                        elif clean_candidate.lower().startswith(metadata_series.lower()):
+                            # Clean_candidate это расширение metadata
+                            # Используем metadata как более чистый источник
+                            record.proposed_series = metadata_series
+                            record.series_source = "filename"  # Все равно из filename берем основу
+                        
+                        elif self._matches_with_tolerance(clean_candidate, metadata_series, tolerance=0.80):
+                            # Существенное совпадение с tolerance
+                            # Используем metadata как более надежный источник
+                            record.proposed_series = metadata_series
+                            record.series_source = "filename"  # Источник filename (мета подтвердила)
+                        
                         else:
-                            # Они не совпадают, берем то что нашли в файле
-                            record.proposed_series = series_candidate
+                            # Они не совпадают даже после очистки и tolerance-check
+                            # Используем очищенную версию extracted
+                            record.proposed_series = clean_candidate
                             record.series_source = "filename"
                     else:
-                        # Нет metadata, берем то что нашли в файле
-                        record.proposed_series = series_candidate
+                        # Нет metadata, берем очищенную версию
+                        record.proposed_series = clean_candidate
                         record.series_source = "filename"
             elif record.metadata_series:
                 # FALLBACK: Используем metadata_series если в имени файла не найдено
@@ -286,6 +355,125 @@ class Pass2SeriesFilename:
                 if self._is_valid_series(series):
                     record.proposed_series = series
                     record.series_source = "metadata"
+        
+        # ШАГ ФИНАЛЬНЫЙ: Кросс-файловый анализ - находим общие серии между файлами автора
+        self._apply_cross_file_consensus(records)
+    
+    def _apply_cross_file_consensus(self, records: List[BookRecord]) -> None:
+        """
+        Найти общие последовательности слов в серияхмежду несколькими файлами одного автора.
+        
+        Логика:
+        1. Группируем файлы по автору
+        2. Для каждого автора анализируем все его файлы
+        3. Находим общие последовательности слов в extracted_series_candidate и metadata_series
+        4. Если найдена достаточно очевидная общая серия - применяем её
+        """
+        from collections import Counter
+        
+        # Группируем по автору
+        authors_records = {}
+        for record in records:
+            author = record.proposed_author
+            if not author:
+                continue
+            if author not in authors_records:
+                authors_records[author] = []
+            authors_records[author].append(record)
+        
+        # Для каждого автора анализируем его файлы
+        for author, author_files in authors_records.items():
+            # Пропускаем если у автора только 1 файл
+            if len(author_files) < 2:
+                continue
+            
+            # Собираем все кандидаты серий для этого автора
+            all_candidates = []
+            
+            for record in author_files:
+                extracted = record.extracted_series_candidate
+                metadata = record.metadata_series
+                
+                # Пропускаем если ничего нет
+                if not extracted and not metadata:
+                    continue
+                
+                # Очистим extracted от паразитных символов
+                extracted_clean = self._clean_series_name(extracted) if extracted else ""
+                
+                all_candidates.append({
+                    'record': record,
+                    'extracted': extracted,
+                    'extracted_clean': extracted_clean,
+                    'metadata': metadata
+                })
+            
+            # Если есть хотя бы 2 кандидата - анализируем общее
+            if len(all_candidates) < 2:
+                continue
+            
+            # АНАЛИЗ: Найти общие последовательности слов
+            common_words = self._find_common_series_across_files(all_candidates)
+            
+            if common_words:
+                # Применить найденную общую серию к файлам где её нет
+                for candidate in all_candidates:
+                    record = candidate['record']
+                    
+                    # Если у файла уже есть series - не переписываем
+                    if record.proposed_series:
+                        continue
+                    
+                    # Если найденные слова совпадают с metadata - применяем
+                    if candidate['metadata'] and self._matches_with_tolerance(common_words, candidate['metadata'], tolerance=0.80):
+                        record.proposed_series = candidate['metadata']
+                        record.series_source = "metadata"
+                    # Иначе применяем найденные слова
+                    elif common_words:
+                        record.proposed_series = common_words
+                        record.series_source = "consensus"
+    
+    def _find_common_series_across_files(self, candidates: list) -> str:
+        """
+        Найти общую последовательность слов в series кандидатах для нескольких файлов.
+        Возвращает строку с найденной общей серией, или пустую строку.
+        """
+        from collections import Counter
+        
+        # Собираем все кандидаты (и из extracted, и из metadata)
+        all_series_strings = []
+        
+        for candidate in candidates:
+            if candidate['extracted_clean']:
+                all_series_strings.append(candidate['extracted_clean'])
+            if candidate['metadata']:
+                all_series_strings.append(candidate['metadata'])
+        
+        if not all_series_strings:
+            return ""
+        
+        # Нормализуем для сравнения (нижний регистр, без пунктуации)
+        normalized_strings = []
+        original_to_normalized = {}  # Маппинг нормализованного на оригинальный
+        
+        for s in all_series_strings:
+            norm = re.sub(r'[^\w\s]', '', s).lower().strip()
+            normalized_strings.append(norm)
+            if norm not in original_to_normalized:
+                original_to_normalized[norm] = s
+        
+        # Считаем что встречалось > 1 раза
+        counter = Counter(normalized_strings)
+        most_common = counter.most_common(1)
+        
+        if most_common:
+            norm_series, count = most_common[0]
+            # Если встречалось > 1 раза - это наша серия
+            if count > 1:
+                # Возвращаем оригинальную версию (не нормализованную)
+                return original_to_normalized[norm_series]
+        
+        return ""
     
     def _extract_series_from_filename(self, file_path: str, validate: bool = True) -> str:
         """
@@ -380,12 +568,17 @@ class Pass2SeriesFilename:
         if pattern == "Author - Series (service_words)":
             # "Садов Сергей - Горе победителям (Дилогия)"
             # "Валериев Игорь - 2. Ермак. Поход (Ермак 4-6)"
+            # "Авраменко Александр - Солдат удачи 3. Взор Тьмы (Наследник)"
             # Извлекаем: группу 2 (Series) - части до скобок
             match = re.match(r'^(.+?)\s*-\s*([^()]+?)\s*\(', filename)
             if match:
                 series = match.group(2).strip()
                 # Удаляем префикс книги: "1. ", "2. ", "3. " и т.д.
                 series = re.sub(r'^\s*\d+\s*[.,]\s*', '', series).strip()
+                # Также удаляем том номер и название внутри серии: "Солдат удачи 3. Взор Тьмы" → "Солдат удачи"
+                # Паттерн: слова, потом пробел, потом цифра, потом точка/двоеточие, потом еще слова
+                # Захватываем только до первого "число. название"
+                series = re.sub(r'\s+\d+[\s\.\:].+$', '', series).strip()
                 return series
         
         elif pattern == "Author - Title (Series. service_words)":
@@ -399,10 +592,12 @@ class Pass2SeriesFilename:
         
         elif pattern == "Author - Series.Title":
             # "Авраменко Александр - Солдат удачи 1. Солдат удачи"
-            # Извлекаем часть после " - " и до цифры/точки
-            match = re.match(r'^(.+?)\s*-\s*([^0-9\(\)]+?)[\s\.\d]', filename)
+            # Извлекаем часть после " - " и до нумерованного тома (N.)
+            # Улучшено: теперь захватывает несколько слов перед номером
+            match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d+[\s\.\:]', filename)
             if match:
-                return match.group(2).strip()
+                series = match.group(2).strip()
+                return series
         
         elif pattern == "Author. Series. Title":
             # "Анисимов. Вариант «Бис» 2. Год мертвой змеи"
@@ -543,6 +738,103 @@ class Pass2SeriesFilename:
             pass  # Если парсинг не сработал - это вероятно серия
         
         return True
+    
+    def _clean_series_name(self, text: str) -> str:
+        """
+        Очистить название серии от паразитных символов и информации:
+        - Номера томов: "Солдат удачи 1", "Солдат удачи 2. Название"
+        - Названия книг: "Серия 1. Название книги"
+        - Служебные слова: "Трилогия", "Тетралогия"
+        
+        Примеры:
+            "Солдат удачи 3. Взор Тьмы" → "Солдат удачи"
+            "Вариант «Бис» 1" → "Вариант «Бис»"
+            "Война в Космосе 5" → "Война в Космосе"
+            "Странник (Серия 3)" → "Странник" (скобки обработаны)
+        
+        Args:
+            text: Исходный текст
+        
+        Returns:
+            Очищенное название серии
+        """
+        if not text:
+            return text
+        
+        original = text.strip()
+        
+        # Правило 0: Удалить скобки с информацией в конце
+        # "(к-во, год, описание)" → убрать
+        text = re.sub(r'\s*\([^)]*\)\s*$', '', text).strip()
+        
+        # Правило 1: Удалить всё после "номер. слова" (объективное)
+        # Паттерн: "слова цифра. слова" → берем только "слова"
+        match = re.match(r'^(.+?)\s+\d+[\.\:]\s+.+$', text)
+        if match:
+            text = match.group(1).strip()
+        
+        # Правило 2: Удалить номер тома/выпуска в конце
+        # Паттерны: "Серия 1", "Серия 2", "Серия (том) 3", и т.д.
+        # Удаляем: пробел + одна или две цифры + конец
+        text = re.sub(r'\s+\d{1,2}\s*$', '', text).strip()
+        
+        # Правило 3: Удалить всё после "номер " (менее строгое)
+        # Паттерн: "слова цифра слова" → берем только "слова"
+        match = re.match(r'^(.+?)\s+\d+\s+.+$', text)
+        if match:
+            text = match.group(1).strip()
+        
+        # Правило 4: Удалить служебные слова в скобках
+        # "Серия (Трилогия)" → "Серия"
+        text = re.sub(r'\s*\([^)]+\)\s*$', '', text).strip()
+        
+        # Правило 5: Удалить служебные слова в конце (простые, без скобок)
+        # После серии часто идут: "- Трилогия", "- Цикл", и т.д.
+        for service_word in self.service_words:
+            pattern = r'\s*[\-–—]?\s*' + re.escape(service_word) + r'\s*$'
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+        
+        return text if text else original
+
+    
+    def _matches_with_tolerance(self, text1: str, text2: str, tolerance: float = 0.85) -> bool:
+        """
+        Проверить что два текста совпадают с учетом опечаток, разницы в регистре и пунктуации.
+        
+        Args:
+            text1: Первый текст
+            text2: Второй текст
+            tolerance: Минимальная степень совпадения (0.0-1.0)
+        
+        Returns:
+            True если тексты совпадают с достаточной точностью
+        """
+        # Очистить от пунктуации и привести к нижнему регистру
+        clean1 = re.sub(r'[^\w\s]', '', text1).lower().strip()
+        clean2 = re.sub(r'[^\w\s]', '', text2).lower().strip()
+        
+        if not clean1 or not clean2:
+            return False
+        
+        # Точное совпадение
+        if clean1 == clean2:
+            return True
+        
+        # Проверить что одна строка содержит другую полностью
+        if clean1 in clean2 or clean2 in clean1:
+            return True
+        
+        # Проверить используя Levenshtein distance (приблизительное совпадение)
+        # Если совпадает > tolerance % символов
+        max_len = max(len(clean1), len(clean2))
+        if max_len == 0:
+            return False
+        
+        # Простой подсчет: совпадающие символы / длина более длинной строки
+        matches = sum(1 for a, b in zip(clean1, clean2) if a == b)
+        similarity = matches / max_len
+        
+        return similarity >= tolerance
     
     def _score_pattern_match(self, pattern: str, filename: str, extracted_series: str) -> int:
         """

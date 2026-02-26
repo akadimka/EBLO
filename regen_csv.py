@@ -159,6 +159,10 @@ class RegenCSVService:
             pass6.execute(self.records)
             self.logger.log("[OK] PASS 6: Abbreviations expanded")
             
+            # ===== Clear series for collections/compilations =====
+            self._clear_series_for_compilations()
+            self.logger.log("[OK] Series cleared for compilations")
+            
             # ===== Save CSV =====
             self._save_csv()
             self.logger.log(f"[OK] CSV saved to {self.output_csv}")
@@ -175,6 +179,26 @@ class RegenCSVService:
             import traceback
             traceback.print_exc()
             return False
+    
+    def _clear_series_for_compilations(self) -> None:
+        """Clear series for compilation/collection records.
+        
+        If proposed_author contains 'сборник' (compilation), 
+        proposed_series should be empty.
+        """
+        compilation_keywords = ['сборник', 'compilation', 'сборник', 'антология', 'anthology']
+        
+        for record in self.records:
+            if not record.proposed_author:
+                continue
+            
+            author_lower = record.proposed_author.lower()
+            
+            # Check if author contains compilation keyword
+            if any(kw in author_lower for kw in compilation_keywords):
+                # Clear the series for compilations
+                record.proposed_series = ""
+                record.series_source = ""
     
     def _save_csv(self) -> None:
         """Save records to CSV file."""
