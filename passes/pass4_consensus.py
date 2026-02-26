@@ -96,6 +96,83 @@ class Pass4Consensus:
                     record.proposed_author = consensus_author
                     record.author_source = "consensus"
                     consensus_count += 1
-                    consensus_count += 1
         
         self.logger.log(f"[PASS 4] Applied consensus to {consensus_count} records")
+        
+        # SERIES CONSENSUS: Apply consensus series to files in same folder
+        # IMPORTANT: Only apply to files that have extracted_series_candidate matching
+        # the consensus candidate. This prevents applying unrelated series to files
+        # that only happen to be in the same folder.
+        print("[PASS 4] Applying series consensus...")
+        series_consensus_count = 0
+        
+        for folder, group_records in groups.items():
+            # Count extracted_series_candidate occurrences
+            candidates_count = {}
+            for record in group_records:
+                if record.extracted_series_candidate:
+                    candidate = record.extracted_series_candidate
+                    candidates_count[candidate] = candidates_count.get(candidate, 0) + 1
+            
+            # Only consider candidates that appear 2+ times (true consensus)
+            consensus_candidates = {
+                candidate: count 
+                for candidate, count in candidates_count.items() 
+                if count >= 2
+            }
+            
+            if not consensus_candidates:
+                continue
+            
+            # Apply consensus only to files with matching extracted_series_candidate
+            for record in group_records:
+                # Only apply if:
+                # 1. File has no proposed_series yet (empty)
+                # 2. File has extracted_series_candidate
+                # 3. That candidate appears 2+ times in the group
+                if (not record.proposed_series and 
+                    record.extracted_series_candidate and
+                    record.extracted_series_candidate in consensus_candidates):
+                    
+                    record.proposed_series = record.extracted_series_candidate
+                    record.series_source = "consensus"
+                    series_consensus_count += 1
+        
+        self.logger.log(f"[PASS 4] Applied series consensus to {series_consensus_count} records")
+        
+        # METADATA SERIES CONSENSUS: For depth 2 files (Author/File)
+        # Apply metadata_series consensus to files without proposed_series
+        # This handles files that have metadata_series but it was rejected/empty
+        print("[PASS 4] Applying metadata series consensus...")
+        metadata_series_consensus_count = 0
+        
+        for folder, group_records in groups.items():
+            # Count metadata_series occurrences (only from files with valid proposed_series)
+            metadata_series_count = {}
+            for record in group_records:
+                # Consider medadata_series only if it resulted in proposed_series
+                if record.metadata_series and record.proposed_series == record.metadata_series:
+                    series = record.metadata_series
+                    metadata_series_count[series] = metadata_series_count.get(series, 0) + 1
+            
+            # Only consider series that appear 2+ times
+            consensus_metadata_series = {
+                series: count 
+                for series, count in metadata_series_count.items() 
+                if count >= 2
+            }
+            
+            if not consensus_metadata_series:
+                continue
+            
+            # Apply to files with empty proposed_series if they have empty proposed_series
+            for record in group_records:
+                if (not record.proposed_series and 
+                    record.metadata_series and 
+                    record.metadata_series in consensus_metadata_series):
+                    
+                    record.proposed_series = record.metadata_series
+                    record.series_source = "consensus"
+                    metadata_series_consensus_count += 1
+        
+        self.logger.log(f"[PASS 4] Applied metadata series consensus to {metadata_series_consensus_count} records")

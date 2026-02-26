@@ -68,8 +68,44 @@ class Pass2SeriesFilename:
             file_path_parts = Path(record.file_path).parts
             file_depth = len(file_path_parts)
             
-            # Если файл прямо в папке автора (глубина 2) - используем ТОЛЬКО metadata
+            # Если файл прямо в папке автора (глубина 2) - используем ТОЛЬКО metadata временно
+            # Но извлекаем candidate из filename для consensus в PASS 4
             if file_depth == 2:
+                filename = Path(record.file_path).name
+                name_without_ext = filename.rsplit('.', 1)[0]
+                
+                # Для depth 2 файлов типа "Author. Series/Title/Series NN. Title"
+                # Извлекаемый паттерн: вторая часть после первой точки может быть серией
+                # Примеры:
+                # "Сойер. Неандертальский параллакс (сборник)" -> "Неандертальский параллакс (сборник)"
+                # "Сойер. Неандертальский параллакс 01. Гоминиды" -> "Неандертальский параллакс"
+                # "Сойер. Ката Бинду" -> "Ката Бинду"
+                
+                if '. ' in name_without_ext:
+                    parts = name_without_ext.split('. ')
+                    # parts[0] = Author, rest = title/series parts
+                    remaining = '. '.join(parts[1:])  # "Неандертальский параллакс (сборник)" или "Неандертальский параллакс 01. Гоминиды"
+                    
+                    # Если есть число и точка, это обычно начало номера в серии
+                    # Тогда берём всё до первого номера как имя серии
+                    match_num = re.search(r'^([^0-9]+?)\s*\d+\s*\.', remaining)
+                    if match_num:
+                        # Найдена нумерация: "Неандертальский параллакс 01. Гоминиды" -> "Неандертальский параллакс"
+                        series_candidate = match_num.group(1).strip()
+                    else:
+                        # Нет нумерации, но есть скобки в конце - берём всё до скобок
+                        # "Неандертальский параллакс (сборник)" -> "Неандертальский параллакс"
+                        series_match = re.match(r'^([^\(]+?)\s*\(', remaining)
+                        if series_match:
+                            series_candidate = series_match.group(1).strip()
+                        else:
+                            # Просто заголовок без нумерации и скобок
+                            # Не очень надёжно, поэтому не берём
+                            series_candidate = None
+                    
+                    if series_candidate:
+                        record.extracted_series_candidate = series_candidate
+                
                 if record.metadata_series:
                     series = record.metadata_series.strip()
                     if self._is_valid_series(series):
@@ -79,26 +115,41 @@ class Pass2SeriesFilename:
             
             # Если файл в подпапке (глубина >= 3) - парсим имя файла
             # ШАГ 1: Попытаться извлечь из имени файла
-            series_from_filename = self._extract_series_from_filename(record.file_path)
+            series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
             
-            if series_from_filename:
-                # Найдено в имени файла
-                # ШАГ 2: Проверить совпадает ли с metadata
-                if record.metadata_series and record.metadata_series.strip():
-                    metadata_series = record.metadata_series.strip()
-                    # Если найденное в файле - это начало metadata, берем metadata целиком (может быть более полной)
-                    if metadata_series.lower().startswith(series_from_filename.lower()):
-                        # Предпочитаем metadata версию (более полная)
-                        record.proposed_series = metadata_series
-                        record.series_source = "metadata"
-                    else:
-                        # Они не совпадают, берем то что нашли в файле
-                        record.proposed_series = series_from_filename
-                        record.series_source = "filename"
+            # ВСЕГДА сохранять candidate (даже если он не валиден) для PASS 4 consensus
+            if series_candidate:
+                record.extracted_series_candidate = series_candidate
+            
+            # ШАГ 2: Проверить валидность и применить
+            if series_candidate:
+                # Проверим валидность
+                if not self._is_valid_series(series_candidate):
+                    # Candidate заблочен по BL, но оставляем его для consensus
+                    # Используем только metadata если есть
+                    if record.metadata_series:
+                        series = record.metadata_series.strip()
+                        if self._is_valid_series(series):
+                            record.proposed_series = series
+                            record.series_source = "metadata"
                 else:
-                    # Нет metadata, берем то что нашли в файле
-                    record.proposed_series = series_from_filename
-                    record.series_source = "filename"
+                    # Candidate валиден, применяем его
+                    # ШАГ 3: Проверить совпадает ли с metadata
+                    if record.metadata_series and record.metadata_series.strip():
+                        metadata_series = record.metadata_series.strip()
+                        # Если найденное в файле - это начало metadata, берем metadata целиком (может быть более полной)
+                        if metadata_series.lower().startswith(series_candidate.lower()):
+                            # Предпочитаем metadata версию (более полная)
+                            record.proposed_series = metadata_series
+                            record.series_source = "metadata"
+                        else:
+                            # Они не совпадают, берем то что нашли в файле
+                            record.proposed_series = series_candidate
+                            record.series_source = "filename"
+                    else:
+                        # Нет metadata, берем то что нашли в файле
+                        record.proposed_series = series_candidate
+                        record.series_source = "filename"
             elif record.metadata_series:
                 # FALLBACK: Используем metadata_series если в имени файла не найдено
                 series = record.metadata_series.strip()
@@ -106,7 +157,7 @@ class Pass2SeriesFilename:
                     record.proposed_series = series
                     record.series_source = "metadata"
     
-    def _extract_series_from_filename(self, file_path: str) -> str:
+    def _extract_series_from_filename(self, file_path: str, validate: bool = True) -> str:
         """
         Извлечь серию из имени файла, используя паттерны из конфига.
         
@@ -114,6 +165,10 @@ class Pass2SeriesFilename:
         1. [Серия] - квадратные скобки в начале
         2. Серия (лат. буквы/цифры) - скобки в конце с сервис-словами
         3. Серия. Название - точка как разделитель в начале
+        
+        Args:
+            file_path: Путь к файлу
+            validate: Если True - проверять валидность; если False - возвращать raw candidate
         """
         filename = Path(file_path).name
         name_without_ext = filename.rsplit('.', 1)[0]
@@ -123,7 +178,7 @@ class Pass2SeriesFilename:
         match = re.search(r'^\[([^\[\]]+)\]', name_without_ext)
         if match:
             series = match.group(1).strip()
-            if self._is_valid_series(series):
+            if not validate or self._is_valid_series(series):
                 return series
         
         # Правило 2: Серия в скобках в КОНЦЕ 
@@ -134,14 +189,14 @@ class Pass2SeriesFilename:
             match = re.search(r'\(?([^)]+)\)\s*$', name_without_ext)
             if match:
                 potential_series = match.group(1).strip()
-                if self._is_valid_series(potential_series):
+                if not validate or self._is_valid_series(potential_series):
                     return potential_series
         
         # Правило 3: Серия. Название (точка как разделитель в начале)
         # Из паттернов конфига: "Series. Title" и "Author - Series.Title"
         if '. ' in name_without_ext:
             potential_series = name_without_ext.split('. ')[0].strip()
-            if self._is_valid_series(potential_series):
+            if not validate or self._is_valid_series(potential_series):
                 return potential_series
         
         return ""

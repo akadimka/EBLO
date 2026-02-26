@@ -18,6 +18,7 @@ class BookRecord:
     metadata_series: str        # Original series from FB2 XML (immutable)
     proposed_series: str        # Final series after all PASS
     series_source: str          # Source of series
+    extracted_series_candidate: str = ""  # Series found in filename (even if blocked by BL)
     needs_filename_fallback: bool = False  # True if folder parse found nothing, need filename PASS 2
 
 
