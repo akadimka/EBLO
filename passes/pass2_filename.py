@@ -352,18 +352,26 @@ class Pass2Filename:
                 skipped_count += 1
                 continue
             
-            # CHECK: Is this file in a collection/compilation folder?
-            # If file path contains collection keywords → set author to "Сборник"
+            # CHECK: Is this file in a collection/compilation?
+            # Check entire path to detect both folder-level and filename-level collections
             file_path_lower = record.file_path.lower()
             is_collection = any(kw in file_path_lower for kw in self.collection_keywords)
             
             if is_collection:
+                # Determine source: folder or filename?
+                file_path_parts = Path(record.file_path).parts
+                folder_path = '/'.join(file_path_parts[:-1]).lower()  # All parts except the last
+                filename_lower = file_path_parts[-1].lower() if file_path_parts else ""
+                
+                is_in_folder = any(kw in folder_path for kw in self.collection_keywords)
+                is_in_filename = any(kw in filename_lower for kw in self.collection_keywords)
+                
                 # This is a collection/compilation
                 record.proposed_author = "Сборник"
-                record.author_source = "folder_dataset"  # From folder structure
+                record.author_source = "folder_dataset" if is_in_folder else "filename"
                 record.needs_filename_fallback = False
                 processed_count += 1
-                continue  # Skip filename parsing for collections
+                continue  # Skip regular filename parsing for collections
             
             # Try to extract from filename (NOT full path!)
             # Handle both Windows (\) and Unix (/) path separators
