@@ -982,7 +982,9 @@ class Pass2SeriesFilename:
         # Правило 5: Удалить служебные слова в конце (простые, без скобок)
         # После серии часто идут: "- Трилогия", "- Цикл", и т.д.
         for service_word in self.service_words:
-            pattern = r'\s*[\-–—]?\s*' + re.escape(service_word) + r'\s*$'
+            # ВАЖНО: Используем \b для word boundary чтобы не удалять буквы из конца слова
+            # Пример: НЕ удаляем "т" из "Адъютант" даже если "т" в service_words
+            pattern = r'\s*[\-–—]?\s*\b' + re.escape(service_word) + r'\b\s*$'
             text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
         
         return text if text else original
