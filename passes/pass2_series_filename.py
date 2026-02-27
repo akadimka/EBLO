@@ -655,11 +655,18 @@ class Pass2SeriesFilename:
         # Из паттернов конфига: "Series. Title" и "Author - Series.Title"
         # ВАЖНО: Не захватываем простые слова (обычно фамилии) перед точкой
         # "Белoус. Последний шанс" - "Белоус" это фамилия, не серия!
+        # И не захватываем "Author - Series" паттерны - они обработаны config pattern
+        # "Борисов Олег - Туман 1. Золото" должен дать "Туман", не "Борисов Олег - Туман"
         if '. ' in name_without_ext:
             potential_series = name_without_ext.split('. ')[0].strip()
-            # Проверяем: если это просто одно слово без пробелов и без  специальных символов
+            
+            # Если содержит " - ", это скорее всего "Author - Series" паттерн
+            # Нужно пропустить и дать обработаться config pattern
+            if ' - ' in potential_series:
+                pass  # Skip: let config pattern handle "Author - Series.Title"
+            # Если это просто одно слово без пробелов и без  специальных символов
             # то это скорее всего фамилия автора, а не название серии
-            if ' ' not in potential_series and len(potential_series) < 50:
+            elif ' ' not in potential_series and len(potential_series) < 50:
                 # Single word - likely an author surname, skip it
                 # Series names usually have multiple words или специальные символы
                 pass
