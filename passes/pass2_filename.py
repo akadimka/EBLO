@@ -52,6 +52,7 @@ class Pass2Filename:
         self.logger = logger
         self.work_dir = Path(work_dir) if work_dir else None
         self.service_words = settings.get_service_words() if hasattr(settings, 'get_service_words') else []
+        self.collection_keywords = settings.get_list('collection_keywords') or []  # Load from config
         self.male_names = male_names or set()
         self.female_names = female_names or set()
         self.patterns = self._load_patterns()
@@ -350,6 +351,19 @@ class Pass2Filename:
             if record.author_source == "folder_dataset" and not getattr(record, 'needs_filename_fallback', False):
                 skipped_count += 1
                 continue
+            
+            # CHECK: Is this file in a collection/compilation folder?
+            # If file path contains collection keywords → set author to "Сборник"
+            file_path_lower = record.file_path.lower()
+            is_collection = any(kw in file_path_lower for kw in self.collection_keywords)
+            
+            if is_collection:
+                # This is a collection/compilation
+                record.proposed_author = "Сборник"
+                record.author_source = "folder_dataset"  # From folder structure
+                record.needs_filename_fallback = False
+                processed_count += 1
+                continue  # Skip filename parsing for collections
             
             # Try to extract from filename (NOT full path!)
             # Handle both Windows (\) and Unix (/) path separators
