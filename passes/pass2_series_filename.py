@@ -116,6 +116,16 @@ class Pass2SeriesFilename:
                     if series_from_patterns:
                         record.extracted_series_candidate = series_from_patterns
                         
+                        # ПРОВЕРКА: Не используем фамилию автора как серию
+                        if self._is_author_surname(series_from_patterns, record.proposed_author):
+                            # Это фамилия, не серия - пропускаем и используем только metadata
+                            if record.metadata_series:
+                                series = record.metadata_series.strip()
+                                if self._is_valid_series(series):
+                                    record.proposed_series = series
+                                    record.series_source = "metadata"
+                            continue  # Переходим к следующему файлу
+                        
                         # Применяем очистку и metadata валидирование
                         clean_candidate = self._clean_series_name(series_from_patterns)
                         
@@ -284,11 +294,15 @@ class Pass2SeriesFilename:
                 series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
                 if series_candidate:
                     record.extracted_series_candidate = series_candidate
-                    clean_candidate = self._clean_series_name(series_candidate)
-                    if self._is_valid_series(clean_candidate):
-                        record.proposed_series = clean_candidate
-                        record.series_source = "filename"
-                        continue  # Нашли из filename - не переписываем с metadata
+                    
+                    # ПРОВЕРКА: Не используем фамилию автора как серию
+                    # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
+                    if not self._is_author_surname(series_candidate, record.proposed_author):
+                        clean_candidate = self._clean_series_name(series_candidate)
+                        if self._is_valid_series(clean_candidate):
+                            record.proposed_series = clean_candidate
+                            record.series_source = "filename"
+                            continue  # Нашли из filename - не переписываем с metadata
                 
                 # ШАГ 2: Fallback - для depth 2 файлов типа "Author. Series/Title" (формат с точками)
                 # Извлекаемый паттерн: вторая часть после первой точки может быть серией
@@ -321,6 +335,13 @@ class Pass2SeriesFilename:
                     
                     if series_candidate:
                         record.extracted_series_candidate = series_candidate
+                        
+                        # ПРОВЕРКА: Не используем фамилию автора как серию
+                        # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
+                        if not self._is_author_surname(series_candidate, record.proposed_author):
+                            if self._is_valid_series(series_candidate):
+                                record.proposed_series = series_candidate
+                                record.series_source = "filename"
                 
                 # ШАГ 3: Финальный fallback - используем metadata если есть
                 if record.metadata_series:
@@ -632,9 +653,17 @@ class Pass2SeriesFilename:
         
         # Правило 3: Серия. Название (точка как разделитель в начале)
         # Из паттернов конфига: "Series. Title" и "Author - Series.Title"
+        # ВАЖНО: Не захватываем простые слова (обычно фамилии) перед точкой
+        # "Белoус. Последний шанс" - "Белоус" это фамилия, не серия!
         if '. ' in name_without_ext:
             potential_series = name_without_ext.split('. ')[0].strip()
-            if not validate or self._is_valid_series(potential_series):
+            # Проверяем: если это просто одно слово без пробелов и без  специальных символов
+            # то это скорее всего фамилия автора, а не название серии
+            if ' ' not in potential_series and len(potential_series) < 50:
+                # Single word - likely an author surname, skip it
+                # Series names usually have multiple words или специальные символы
+                pass
+            elif not validate or self._is_valid_series(potential_series):
                 return potential_series
         
         # Правило 4: Author - Series N (без точки после номера)
@@ -934,6 +963,40 @@ class Pass2SeriesFilename:
         similarity = matches / max_len
         
         return similarity >= tolerance
+    
+    def _is_author_surname(self, series_candidate: str, author: str) -> bool:
+        """
+        Проверить что extracted series это не просто фамилия автора.
+        
+        Примеры:
+            ("Белоус", "Белоус Олег") → True (это фамилия)
+            ("Белоус", "Иванов Сергей") → False (не фамилия)
+            ("Солдат удачи", "Авраменко Александр") → False (это серия)
+        
+        Args:
+            series_candidate: Извлеченная серия
+            author: Автор в формате "Фамилия Имя"
+            
+        Returns:
+            True если series - это фамилия автора
+        """
+        if not series_candidate or not author:
+            return False
+        
+        # Парсим автора: обычно "Фамилия Имя"
+        author_parts = author.strip().split()
+        if not author_parts:
+            return False
+        
+        # Первая часть - фамилия
+        author_surname = author_parts[0].lower()
+        series_lower = series_candidate.lower()
+        
+        # Проверяем точное совпадение (нормализованное)
+        series_normalized = re.sub(r'[^\w]', '', series_lower)
+        surname_normalized = re.sub(r'[^\w]', '', author_surname)
+        
+        return series_normalized == surname_normalized
     
     def _score_pattern_match(self, pattern: str, filename: str, extracted_series: str) -> int:
         """
