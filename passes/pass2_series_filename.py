@@ -280,7 +280,17 @@ class Pass2SeriesFilename:
                 filename = Path(record.file_path).name
                 name_without_ext = filename.rsplit('.', 1)[0]
                 
-                # Для depth 2 файлов типа "Author. Series/Title/Series NN. Title"
+                # ШАГ 1: Попробуем извлечь серию используя новые правила
+                series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
+                if series_candidate:
+                    record.extracted_series_candidate = series_candidate
+                    clean_candidate = self._clean_series_name(series_candidate)
+                    if self._is_valid_series(clean_candidate):
+                        record.proposed_series = clean_candidate
+                        record.series_source = "filename"
+                        continue  # Нашли из filename - не переписываем с metadata
+                
+                # ШАГ 2: Fallback - для depth 2 файлов типа "Author. Series/Title" (формат с точками)
                 # Извлекаемый паттерн: вторая часть после первой точки может быть серией
                 # Примеры:
                 # "Сойер. Неандертальский параллакс (сборник)" -> "Неандертальский параллакс (сборник)"
@@ -312,6 +322,7 @@ class Pass2SeriesFilename:
                     if series_candidate:
                         record.extracted_series_candidate = series_candidate
                 
+                # ШАГ 3: Финальный fallback - используем metadata если есть
                 if record.metadata_series:
                     series = record.metadata_series.strip()
                     if self._is_valid_series(series):
@@ -625,6 +636,17 @@ class Pass2SeriesFilename:
             potential_series = name_without_ext.split('. ')[0].strip()
             if not validate or self._is_valid_series(potential_series):
                 return potential_series
+        
+        # Правило 4: Author - Series N (без точки после номера)
+        # "Атаманов Михаил - Задача выжить 1" → "Задача выжить"
+        # Паттерн: Author - Серия N где N это одна или две цифры в конце
+        if ' - ' in name_without_ext:
+            match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d{1,2}\s*$', name_without_ext)
+            if match:
+                potential_series = match.group(2).strip()
+                # Убедимся что это не автор (не похоже на имя)
+                if not validate or self._is_valid_series(potential_series):
+                    return potential_series
         
         return ""
     
