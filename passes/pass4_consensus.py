@@ -176,3 +176,50 @@ class Pass4Consensus:
                     metadata_series_consensus_count += 1
         
         self.logger.log(f"[PASS 4] Applied metadata series consensus to {metadata_series_consensus_count} records")
+        
+        # PROPOSED SERIES CONSENSUS: For files without extracted_series_candidate
+        # Apply proposed_series from other files in same folder when multiple files agree
+        # This handles series folders where some files don't have extractable series names
+        print("[PASS 4] Applying proposed series fallback consensus...")
+        proposed_consensus_count = 0
+        
+        for folder, group_records in groups.items():
+            # Count proposed_series occurrences (only from files with valid proposed_series)
+            proposed_count = {}
+            for record in group_records:
+                if record.proposed_series:
+                    series = record.proposed_series
+                    proposed_count[series] = proposed_count.get(series, 0) + 1
+            
+            # Only consider series that appear 2+ times
+            consensus_proposed_series = {
+                series: count 
+                for series, count in proposed_count.items() 
+                if count >= 2
+            }
+            
+            if not consensus_proposed_series:
+                #print(f"[DEBUG] Folder {folder}: No consensus (proposed_count={proposed_count})")
+                continue
+            
+            #print(f"[DEBUG] Folder {folder}: Found consensus {consensus_proposed_series}")
+            
+            # Apply to files with empty proposed_series if they're in a series folder
+            for record in group_records:
+                # Only apply if:
+                # 1. File has no proposed_series yet (empty)
+                # 2. Not extracted from extracted_series_candidate (would be caught earlier)
+                # 3. A proposed_series appears 2+ times in the group
+                # ВАЖНО: проверяем что extracted_series_candidate is None, не just falsey
+                # Потому что "" (empty string) означает что это одна книга, не серия
+                if (not record.proposed_series and 
+                    record.extracted_series_candidate is None and
+                    len(consensus_proposed_series) == 1):  # Only apply if unanimous consensus
+                    
+                    consensus_series = list(consensus_proposed_series.keys())[0]
+                    record.proposed_series = consensus_series
+                    record.series_source = "consensus"
+                    proposed_consensus_count += 1
+                    #print(f"[DEBUG] Applied consensus to {Path(record.file_path).name}: {consensus_series}")
+        
+        self.logger.log(f"[PASS 4] Applied proposed series consensus to {proposed_consensus_count} records")

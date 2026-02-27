@@ -116,7 +116,18 @@ class Pass2SeriesFilename:
                     if series_from_patterns:
                         record.extracted_series_candidate = series_from_patterns
                         
-                        # ПРОВЕРКА: Не используем фамилию автора как серию
+                        # ПРОВЕРКА 1: Не используем запятую - это признак списка авторов
+                        # "Демидова, Конторович" → это авторы, не серия!
+                        if ',' in series_from_patterns:
+                            # Это список авторов, не серия - пропускаем и используем только metadata
+                            if record.metadata_series:
+                                series = record.metadata_series.strip()
+                                if self._is_valid_series(series):
+                                    record.proposed_series = series
+                                    record.series_source = "metadata"
+                            continue  # Переходим к следующему файлу
+                        
+                        # ПРОВЕРКА 2: Не используем фамилию автора как серию
                         if self._is_author_surname(series_from_patterns, record.proposed_author):
                             # Это фамилия, не серия - пропускаем и используем только metadata
                             if record.metadata_series:
@@ -358,9 +369,14 @@ class Pass2SeriesFilename:
                     if series_candidate:
                         record.extracted_series_candidate = series_candidate
                         
-                        # ПРОВЕРКА: Не используем фамилию автора как серию
+                        # ПРОВЕРКА 1: Не используем запятую - это признак списка авторов
+                        # "Демидова, Конторович" → это авторы, не серия!
+                        if ',' in series_candidate:
+                            # Это список авторов, не серия - не берем
+                            series_candidate = None
+                        # ПРОВЕРКА 2: Не используем фамилию автора как серию
                         # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
-                        if not self._is_author_surname(series_candidate, record.proposed_author):
+                        elif not self._is_author_surname(series_candidate, record.proposed_author):
                             if self._is_valid_series(series_candidate):
                                 record.proposed_series = series_candidate
                                 record.series_source = "filename"
