@@ -149,10 +149,20 @@ class Pass2SeriesFilename:
                                     record.series_source = "filename"  # Источник - filename (мета только уточнила)
                                 
                                 elif metadata_series.lower().startswith(clean_candidate.lower()):
-                                    # Metadata это расширение пользователя
-                                    # "Солдат удачи" в файле, а в metadata "Солдат удачи. Цикл"
-                                    record.proposed_series = metadata_series
-                                    record.series_source = "filename"  # Источник filename (мета расширила)
+                                    # Metadata это расширение clean_candidate
+                                    # "Туман" в файле, а в metadata "Туман (Борисов)" - это диспамбiguация, не расширение
+                                    # "Солдат удачи" в файле, а в metadata "Солдат удачи. Цикл" - это расширение
+                                    
+                                    # Проверяем: если metadata = "clean_candidate (something)" это просто диспамбiguация
+                                    metadata_after_clean = metadata_series[len(clean_candidate):].strip()
+                                    if metadata_after_clean.startswith('(') and metadata_after_clean.endswith(')'):
+                                        # Это просто скобки с диспамбiguацией, используем clean_candidate из filename
+                                        record.proposed_series = clean_candidate
+                                        record.series_source = "filename"
+                                    else:
+                                        # Это реальное расширение (точка, дополнительные слова)
+                                        record.proposed_series = metadata_series
+                                        record.series_source = "filename"  # Источник filename (мета расширила)
                                 
                                 elif clean_candidate.lower().startswith(metadata_series.lower()):
                                     # Clean candidate это расширение metadata
@@ -276,6 +286,18 @@ class Pass2SeriesFilename:
                                     record.proposed_series = series_candidate
                                     record.series_source = "filename"
                     
+                    # ШАГ 1.5: Если скобок нет, попробуем config patterns из filename
+                    # Это поддерживает "Author - Series.Title" формат
+                    if not record.proposed_series:
+                        filename = Path(record.file_path).name
+                        series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
+                        if series_candidate:
+                            record.extracted_series_candidate = series_candidate
+                            clean_candidate = self._clean_series_name(series_candidate)
+                            if self._is_valid_series(clean_candidate):
+                                record.proposed_series = clean_candidate
+                                record.series_source = "filename"
+                    
                     # Если из filename ничего не нашли, но есть metadata - используем её
                     if not record.proposed_series and record.metadata_series:
                         series = record.metadata_series.strip()
@@ -387,9 +409,19 @@ class Pass2SeriesFilename:
                         
                         elif metadata_series.lower().startswith(clean_candidate.lower()):
                             # Metadata это расширение cleaned_candidate
-                            # "Солдат удачи" в файле, а в metadata "Солдат удачи. Цикл"
-                            record.proposed_series = metadata_series
-                            record.series_source = "filename"  # Источник filename (мета расширила)
+                            # "Туман" в файле, а в metadata "Туман (Борисов)" - это НЕ расширение, это диспамбiguация
+                            # "Солдат удачи" в файле, а в metadata "Солдат удачи. Цикл" - это расширение
+                            
+                            # Проверяем: если metadata = "clean_candidate (something)" это просто диспамбiguация
+                            metadata_after_clean = metadata_series[len(clean_candidate):].strip()
+                            if metadata_after_clean.startswith('(') and metadata_after_clean.endswith(')'):
+                                # Это просто скобки с диспамбiguацией, используем clean_candidate
+                                record.proposed_series = clean_candidate
+                                record.series_source = "filename"
+                            else:
+                                # Это реальное расширение (точка, дополнительные слова)
+                                record.proposed_series = metadata_series
+                                record.series_source = "filename"  # Источник filename (мета расширила)
                         
                         elif clean_candidate.lower().startswith(metadata_series.lower()):
                             # Clean_candidate это расширение metadata
@@ -623,8 +655,16 @@ class Pass2SeriesFilename:
         if best_series:
             # Проверка: если best_series - это serve_word, не возвращаем его
             # Serve_words это служебные слова, не названия серий
+            # ВАЖНО: сравниваем целое слово, не префикс!
             best_series_lower = best_series.lower().strip()
-            if any(best_series_lower.startswith(sw.lower()) for sw in self.service_words):
+            is_service_word = False
+            for sw in self.service_words:
+                sw_lower = sw.lower()
+                if best_series_lower == sw_lower or best_series_lower.startswith(sw_lower + ' '):
+                    is_service_word = True
+                    break
+            
+            if is_service_word:
                 # Это serve_word, игнорируем этот результат
                 best_series = None
             else:
@@ -1070,10 +1110,19 @@ class Pass2SeriesFilename:
         # УРОВЕНЬ 4: КРИТИЧНО - если результат сам является служебным словом
         # Это ловушка: паттерн может извлечь "Тетралогия" вместо реальной серии
         # Нужно отдавать предпочтение результатам, которые НЕ serve_words
+        # ВАЖНО: сравниваем целое слово, не префикс!
+        # Пример: "Туман" starts with "т", но "Туман" != "том" или "т."
         extracted_lower = extracted_series.lower().strip()
-        if any(extracted_lower.startswith(sw.lower()) for sw in self.service_words):
-            # БОЛЬШОЙ штраф - это служебное слово, не серия!
-            score = max(0, score - 50)
+        
+        # Проверяем только точное совпадение или начало строки с пробелом после
+        # Это предотвращает ложные срабатывания на "т" для "Туман"
+        for sw in self.service_words:
+            sw_lower = sw.lower()
+            # Только штрафуем если результат = service_word или service_word является отдельным словом
+            if extracted_lower == sw_lower or extracted_lower.startswith(sw_lower + ' '):
+                # БОЛЬШОЙ штраф - это служебное слово, не серия!
+                score = max(0, score - 50)
+                break
         
         # УРОВЕНЬ 5: Штраф за single-word результаты
         # Single-word результаты из сложных паттернов = вероятно Title, не Series
