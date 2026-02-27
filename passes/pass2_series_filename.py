@@ -1,6 +1,25 @@
 """
 PASS 2 для СЕРИЙ: Извлечение серий из имён файлов.
 Аналог pass2_filename.py (для авторов) но специализирован на СЕРИИ.
+
+Обновление: Добавлена УНИФИКАЦИЯ series_source
+================================================================
+Для файлов одного автора с одинаковой серией но разными sources
+(например: File 1-2 с source="metadata", File 3 с source="filename"):
+1. Все такие файлы группируются в _apply_cross_file_consensus()
+2. Source унифицируется с приоритетом: "filename" > "metadata" > "consensus"
+3. Результат: ВСЕ файлы одного автора с одной серией имеют ОДИНАКОВЫЙ source
+
+Пример решения (Бродяга - Аскеров):
+  БЫЛО:
+    File 1: series_source="metadata"
+    File 2: series_source="metadata"  
+    File 3: series_source="filename"
+  
+  СТАЛО:
+    File 1: series_source="filename" ✅
+    File 2: series_source="filename" ✅
+    File 3: series_source="filename" ✅
 """
 
 import re
@@ -148,84 +167,96 @@ class Pass2SeriesFilename:
                         
                         continue  # Обработка завершена, переходим к следующему файлу
                     
-                    # ШАГ 2: Fallback - извлекаем из скобок если паттерны не сработали
+                    # ШАГ 2: Fallback - extractжем из скобок если паттерны не сработали
                     name_without_ext = filename.rsplit('.', 1)[0]
                     
-                    # Ищем скобки - сначала попробуем найти в конце (основной случай)
-                    # "Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия)"
-                    # Но также поддерживаем структуру с информацией после скобок
-                    # "Проект «Оборотень» (Странник. Пенталогия) - 2010"
-                    series_match = re.search(r'\(([^)]+)\)', name_without_ext)
-                    if series_match:
-                        content_in_brackets = series_match.group(1).strip()
-                        
-                        # Если в скобках есть слово в конце (типов/дилогия/коллекция)
-                        # "Сборник" и подобное - нужно пропустить
-                        content_lower = content_in_brackets.lower()
-                        skip_keywords = ['сборник', 'сборник', 'авторский', 'собрание', 'антология']
-                        if any(kw in content_lower for kw in skip_keywords):
-                            # Это сборник, не серия - пропускаем
-                            pass
-                        else:
-                            # Извлекаем series из скобок
-                            # "Солдат удачи. Тетралогия" → "Солдат удачи"
-                            # "Странник. Пенталогия" → "Странник"
-                            # "Страна Арманьяк 1-3" → "Страна Арманьяк"
-                            # "Романы + из цикла «Отрок»" → "Отрок"
-                            # "Отрок 2. Сотник 1-3" → "Отрок"
+                    # ПРИ ОРИТЕТ: сначала пытаемся извлечь серию перед скобками
+                    # "Бродяга (СИ)" → пытаемся извлечь "Бродяга"
+                    # "Бродяга 2. Звёздные закоулки (СИ)" → пытаемся извлечь "Бродяга"
+                    name_before_brackets = re.sub(r'\s*\([^)]*\)\s*$', '', name_without_ext).strip()
+                    
+                    # Пытаемся применить паттерны к имени ДО скобок
+                    # (это может помочь extract "Бродяга" из "Аскеров - Бродяга (СИ)")
+                    series_from_before = self._extract_series_from_filename(name_before_brackets, validate=False)
+                    if series_from_before:
+                        record.extracted_series_candidate = series_from_before
+                        series_candidate = series_from_before
+                    else:
+                        # Ищем скобки - сначала попробуем найти в конце (основной случай)
+                        # "Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия)"
+                        # Но также поддерживаем структуру с информацией после скобок
+                        # "Проект «Оборотень» (Странник. Пенталогия) - 2010"
+                        series_match = re.search(r'\(([^)]+)\)', name_without_ext)
+                        if series_match:
+                            content_in_brackets = series_match.group(1).strip()
                             
-                            series_candidate = content_in_brackets.strip()
-                            
-                            # Сначала проверяем паттерн "из цикла" или "из серии"
-                            # "Романы + из цикла «Отрок»" → "Отрок"
-                            # "Романы из цикла «Ведьма с Летающей ведьмы»" → "Ведьма с Летающей ведьмы"
-                            cycle_match = re.search(r'из\s+(?:цикла|серии)\s+(.+)', content_in_brackets, re.IGNORECASE)
-                            if cycle_match:
-                                series_candidate = cycle_match.group(1).strip()
-                                # Удаляем внешние кавычки в зависимости от структуры
-                                # "«Отрок»" → "Отрок" (1 « и 1 »)
-                                # "«Ведьма с «Летающей ведьмы»»" → "Ведьма с «Летающей ведьмы»" (2 « и 2 »)  
-                                # "«Ведьма с «Летающей ведьмы»" → "Ведьма с «Летающей ведьмы»" (2 « и 1 », первая « это внешняя)
-                                open_count = series_candidate.count('«')
-                                close_count = series_candidate.count('»')
+                            # Если в скобках есть слово в конце (типов/дилогия/коллекция)
+                            # "Сборник" и подобное - нужно пропустить
+                            content_lower = content_in_brackets.lower()
+                            skip_keywords = ['сборник', 'сборник', 'авторский', 'собрание', 'антология']
+                            if any(kw in content_lower for kw in skip_keywords):
+                                # Это сборник, не серия - пропускаем
+                                pass
+                            else:
+                                # Извлекаем series из скобок
+                                # "Солдат удачи. Тетралогия" → "Солдат удачи"
+                                # "Странник. Пенталогия" → "Странник"
+                                # "Страна Арманьяк 1-3" → "Страна Арманьяк"
+                                # "Романы + из цикла «Отрок»" → "Отрок"
+                                # "Отрок 2. Сотник 1-3" → "Отрок"
                                 
-                                # Если количество кавычек совпадает - удаляем первую и последнюю как парн
-                                if (open_count > 0 and open_count == close_count and 
-                                    series_candidate.startswith('«') and series_candidate.endswith('»')):
-                                    series_candidate = series_candidate[1:-1]
-                                # Если открывающих больше чем закрывающих, но первый символ - открывающая
-                                # это значит первая « это внешняя, остальные внутренние
-                                elif open_count > close_count and series_candidate.startswith('«'):
-                                    series_candidate = series_candidate[1:]
+                                series_candidate = content_in_brackets.strip()
+                                
+                                # Сначала проверяем паттерн "из цикла" или "из серии"
+                                # "Романы + из цикла «Отрок»" → "Отрок"
+                                # "Романы из цикла «Ведьма с Летающей ведьмы»" → "Ведьма с Летающей ведьмы"
+                                cycle_match = re.search(r'из\s+(?:цикла|серии)\s+(.+)', content_in_brackets, re.IGNORECASE)
+                                if cycle_match:
+                                    series_candidate = cycle_match.group(1).strip()
+                                    # Удаляем внешние кавычки в зависимости от структуры
+                                    # "«Отрок»" → "Отрок" (1 « и 1 »)
+                                    # "«Ведьма с «Летающей ведьмы»»" → "Ведьма с «Летающей ведьмы»" (2 « и 2 »)  
+                                    # "«Ведьма с «Летающей ведьмы»" → "Ведьма с «Летающей ведьмы»" (2 « и 1 », первая « это внешняя)
+                                    open_count = series_candidate.count('«')
+                                    close_count = series_candidate.count('»')
                                     
-                                series_candidate = series_candidate.strip()
-                            # Иначе пытаемся извлечь по точке - но ТОЛЬКО если после точки идет служебное слово
-                            # "Солдат удачи. Тетралогия" → "Солдат удачи"
-                            # "Отрок 2. Сотник 1-3" → сохраняем как есть (это иерархия серий)
-                            elif '. ' in content_in_brackets:
-                                parts = content_in_brackets.split('. ')
-                                after_dot = parts[1].lower() if len(parts) > 1 else ''
-                                # Проверяем, является ли часть после точки служебным словом
-                                is_service_word_after_dot = any(
-                                    after_dot.startswith(sw.lower()) 
-                                    for sw in ['том', 'дилогия', 'трилогия', 'тетралогия', 'пенталогия', 'роман-эпопея']
-                                )
-                                if is_service_word_after_dot:
-                                    # Это служебное слово - берем только первую часть
-                                    series_candidate = parts[0].strip()
-                                # иначе оставляем всю строку (иерархия: "Отрок 2. Сотник")
-                            
-                            # Удаляем номер тома в начале: "Отрок 2." или "2. "
-                            # Паттерн: "Серия NN." или "Серия NN " в начале
-                            series_candidate = re.sub(r'^\s*\d+\s*[.,]?\s*', '', series_candidate).strip()
-                            
-                            # Удаляем числовые суффиксы (номера томов в конце)
-                            # Паттерны: "1-3", "1-6", "01, 02", "№1" и т.д.
-                            # ВАЖНО: не удаляем точки, т.к. они разделяют серии ("Отрок 2. Сотник 1-3" → "Отрок 2. Сотник")
-                            series_candidate = re.sub(r'\s*[\d\-,•]+\s*$', '', series_candidate).strip()
-                            # Удаляем оставшиеся служебные слова в конце (т, т., том и т.д.)
-                            for service_word in self.service_words:
-                                pattern = r'\s*' + re.escape(service_word.lower()) + r'\s*$'
+                                    # Если количество кавычек совпадает - удаляем первую и последнюю как парн
+                                    if (open_count > 0 and open_count == close_count and 
+                                        series_candidate.startswith('«') and series_candidate.endswith('»')):
+                                        series_candidate = series_candidate[1:-1]
+                                    # Если открывающих больше чем закрывающих, но первый символ - открывающая
+                                    # это значит первая « это внешняя, остальные внутренние
+                                    elif open_count > close_count and series_candidate.startswith('«'):
+                                        series_candidate = series_candidate[1:]
+                                        
+                                    series_candidate = series_candidate.strip()
+                                # Иначе пытаемся извлечь по точке - но ТОЛЬКО если после точки идет служебное слово
+                                # "Солдат удачи. Тетралогия" → "Солдат удачи"
+                                # "Отрок 2. Сотник 1-3" → сохраняем как есть (это иерархия серий)
+                                elif '. ' in content_in_brackets:
+                                    parts = content_in_brackets.split('. ')
+                                    after_dot = parts[1].lower() if len(parts) > 1 else ''
+                                    # Проверяем, является ли часть после точки служебным словом
+                                    is_service_word_after_dot = any(
+                                        after_dot.startswith(sw.lower()) 
+                                        for sw in ['том', 'дилогия', 'трилогия', 'тетралогия', 'пенталогия', 'роман-эпопея']
+                                    )
+                                    if is_service_word_after_dot:
+                                        # Это служебное слово - берем только первую часть
+                                        series_candidate = parts[0].strip()
+                                    # иначе оставляем всю строку (иерархия: "Отрок 2. Сотник")
+                                
+                                # Удаляем номер тома в начале: "Отрок 2." или "2. "
+                                # Паттерн: "Серия NN." или "Серия NN " в начале
+                                series_candidate = re.sub(r'^\s*\d+\s*[.,]?\s*', '', series_candidate).strip()
+                                
+                                # Удаляем числовые суффиксы (номера томов в конце)
+                                # Паттерны: "1-3", "1-6", "01, 02", "№1" и т.д.
+                                # ВАЖНО: не удаляем точки, т.к. они разделяют серии ("Отрок 2. Сотник 1-3" → "Отрок 2. Сотник")
+                                series_candidate = re.sub(r'\s*[\d\-,•]+\s*$', '', series_candidate).strip()
+                                # Удаляем оставшиеся служебные слова в конце (т, т., том и т.д.)
+                                for service_word in self.service_words:
+                                    pattern = r'\s*' + re.escape(service_word.lower()) + r'\s*$'
                                 series_candidate = re.sub(pattern, '', series_candidate, flags=re.IGNORECASE).strip()
                             
                             if series_candidate:
@@ -368,6 +399,8 @@ class Pass2SeriesFilename:
         2. Для каждого автора анализируем все его файлы
         3. Находим общие последовательности слов в extracted_series_candidate и metadata_series
         4. Если найдена достаточно очевидная общая серия - применяем её
+        5. УНИФИКАЦИЯ: Если несколько файлов одного автора имеют одинаковую серию 
+           но с разными series_source - установим для всех одинаковый источник (filename приоритетнее)
         """
         from collections import Counter
         
@@ -432,6 +465,50 @@ class Pass2SeriesFilename:
                     elif common_words:
                         record.proposed_series = common_words
                         record.series_source = "consensus"
+            
+            # ШАГ УНИФИКАЦИИ: Если несколько файлов имеют одинаковую series - унифицировать series_source
+            # Группируем файлы по series
+            series_groups = {}
+            for record in author_files:
+                if not record.proposed_series:
+                    continue
+                
+                # Нормализуем серию для группировки (нижний регистр, без пунктуации)
+                series_normalized = re.sub(r'[^\w\s]', '', record.proposed_series).lower().strip()
+                
+                if series_normalized not in series_groups:
+                    series_groups[series_normalized] = {
+                        'records': [],
+                        'sources': [],
+                        'original_series': record.proposed_series
+                    }
+                
+                series_groups[series_normalized]['records'].append(record)
+                if record.series_source:
+                    series_groups[series_normalized]['sources'].append(record.series_source)
+            
+            # Для каждой группы серий - если есть конфликт source, унифицируем
+            for normalized_series, group_info in series_groups.items():
+                if len(group_info['records']) < 2:
+                    continue
+                
+                # Проверяем если есть конфликт источников
+                unique_sources = set(group_info['sources'])
+                if len(unique_sources) > 1:
+                    # Есть конфликт! Унифицируем
+                    # ПРИОРИТЕТ: "filename" > "metadata" > "consensus"
+                    if "filename" in unique_sources:
+                        best_source = "filename"
+                    elif "metadata" in unique_sources:
+                        best_source = "metadata"
+                    else:
+                        best_source = "consensus"
+                    
+                    # Установим best_source для всех файлов этой серии
+                    for record in group_info['records']:
+                        if record.series_source in unique_sources:
+                            # Если он имел другой source - обновляем
+                            record.series_source = best_source
     
     def _find_common_series_across_files(self, candidates: list) -> str:
         """
