@@ -467,8 +467,118 @@ class Pass2SeriesFilename:
                     record.proposed_series = series
                     record.series_source = "metadata"
         
+        # ШАГ ФИНАЛЬНЫЙ-1: Consensus для файлов в series folder на основе common name patterns
+        self._apply_series_folder_pattern_consensus(records)
+        
         # ШАГ ФИНАЛЬНЫЙ: Кросс-файловый анализ - находим общие серии между файлами автора
         self._apply_cross_file_consensus(records)
+    
+    def _apply_series_folder_pattern_consensus(self, records: List[BookRecord]) -> None:
+        """
+        Для файлов в series folder: найти common name patterns и применить consensus.
+        
+        Логика:
+        1. Ищем файлы в папках типа "Серия - ..." (series collection folders)
+        2. Для каждого автора в folder анализируем filename patterns
+        3. Ищем файлы с common "Author. FirstWord" структурой
+        4. Если есть файлы с extracted_series, и файл без series имеет совпадающий FirstWord,
+           применяем series из других файлов как consensus
+        
+        Примеры:
+        - File 1: "Жеребьёв. Негоциант 2. Марланский Квест" → extracted = "Негоциант"
+        - File 2: "Жеребьёв. Негоциант" → extracted = empty, FirstWord = "Негоциант"
+          → Применяем "Негоциант" к File 2 как consensus
+        - File 3: "Жеребьёв. Ретранслятор" → extracted = empty, FirstWord = "Ретранслятор"
+          → Не совпадает с другими, остается пусто
+        """
+        from collections import defaultdict
+        
+        # Группируем файлы по папке (series folder) и автору
+        folder_author_files = defaultdict(lambda: defaultdict(list))
+        
+        for record in records:
+            file_path_parts = Path(record.file_path).parts
+            
+            # Проверяем является ли это series folder структурой
+            if len(file_path_parts) >= 2:
+                parent_folder = file_path_parts[0]
+                
+                # Проверяем что это series folder
+                is_series_folder = (
+                    parent_folder.startswith('Серия') or
+                    'Серия' in parent_folder
+                )
+                
+                if is_series_folder and record.proposed_author:
+                    # Это файл в series folder - сохраняем в группировку
+                    folder_author_files[parent_folder][record.proposed_author].append(record)
+        
+        # Для каждой папки и автора анализируем файлы
+        for folder, authors_dict in folder_author_files.items():
+            for author, author_files in authors_dict.items():
+                if len(author_files) < 2:
+                    continue  # Нужно минимум 2 файла для поиска consensus
+                
+                # Анализируем структуру имен файлов
+                # Ищем файлы с 2-part "Author. Name" структурой
+                file_patterns = {}  # { first_word_after_author: [records] }
+                
+                for record in author_files:
+                    filename = Path(record.file_path).name
+                    name_without_ext = filename.rsplit('.', 1)[0]
+                    
+                    # Проверяем 2-part структуру "Author. Name"
+                    if '. ' in name_without_ext:
+                        parts = name_without_ext.split('. ', 1)  # Split на первую точку
+                        if len(parts) == 2:
+                            first_part = parts[0].strip()
+                            second_part = parts[1].strip()
+                            
+                            # Проверяем что первая часть это single word (likely author surname)
+                            if ' ' not in first_part:
+                                # Извлекаем первое слово из второй части
+                                first_word = second_part.split()[0] if second_part else ""
+                                
+                                if first_word:
+                                    # Нормализуем для сравнения
+                                    first_word_norm = first_word.lower()
+                                    
+                                    if first_word_norm not in file_patterns:
+                                        file_patterns[first_word_norm] = {
+                                            'first_word': first_word,
+                                            'records': []
+                                        }
+                                    
+                                    file_patterns[first_word_norm]['records'].append(record)
+                
+                # Для каждой группы файлов с одинаковым first_word прим ем consensus
+                for first_word_norm, pattern_info in file_patterns.items():
+                    if len(pattern_info['records']) < 2:
+                        continue  # Нужно минимум 2 файла с одинаковым first_word
+                    
+                    # Ищем extracted_series в файлах с этим first_word
+                    series_candidates = set()
+                    
+                    for rec in pattern_info['records']:
+                        if rec.proposed_series:
+                            # Уже има series - добавляем как candidate
+                            series_candidates.add(rec.proposed_series)
+                        elif rec.extracted_series_candidate:
+                            # Был extracted candidate
+                            clean = self._clean_series_name(rec.extracted_series_candidate)
+                            if clean:
+                                series_candidates.add(clean)
+                    
+                    # Если нашли series candidates, применяем к файлам без series
+                    if series_candidates:
+                        # Берем наибольший common prefix или просто первый candidate
+                        best_candidate = list(series_candidates)[0]
+                        
+                        for rec in pattern_info['records']:
+                            if not rec.proposed_series:
+                                # Файл без series - применяем consensus
+                                rec.proposed_series = best_candidate
+                                rec.series_source = "consensus"
     
     def _apply_cross_file_consensus(self, records: List[BookRecord]) -> None:
         """
@@ -796,7 +906,11 @@ class Pass2SeriesFilename:
             parts = filename.split('. ')
             if len(parts) >= 3:
                 # parts[1] должна быть Series
-                return parts[1].strip()
+                series = parts[1].strip()
+                # Удаляем trailing число (том/выпуск) из серии
+                # "Негоциант 2" -> "Негоциант"
+                series = re.sub(r'\s+\d+\s*$', '', series).strip()
+                return series
         
         elif pattern == "Author, Author - Title (Series. service_words)":
             # "Земляной Андрей, Орлов Борис - Академик (Странник 4-5)"
