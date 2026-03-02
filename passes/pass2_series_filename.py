@@ -953,7 +953,10 @@ class Pass2SeriesFilename:
             # "Игнатов Михаил - Путь 10. Защитник. Второй пояс (СИ)"
             # Извлекаем Series между " - " и номером
             # Паттерн: Author - Series Number. Title
-            match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d+\.\s+', filename)
+            # ВАЖНО: Требуем пробелы ДО дефиса чтобы не совпасть с дефисом в серии
+            # "Сердитый, Бирюков. Человек-саламандра 1" не должен совпасть
+            # (здесь дефис без пробела перед ним)
+            match = re.match(r'^(.+?)\s+-\s+(.+?)\s+\d+\.\s+', filename)
             if match:
                 series = match.group(2).strip()
                 return series
