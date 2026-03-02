@@ -204,6 +204,10 @@
     {
       "pattern": "Author - Title (Series service_words)",
       "example": "Валериев Игорь - 2. Ермак. Поход (Ермак 4-6).fb2"
+    },
+    {
+      "pattern": "Author - Series service_words. Title",
+      "example": "Игнатов Михаил - Путь 10. Защитник. Второй пояс (СИ).fb2"
     }
   ],
   "author_name_patterns": [

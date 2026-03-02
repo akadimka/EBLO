@@ -416,11 +416,12 @@ class Pass2SeriesFilename:
                     record.proposed_series = series
                     record.series_source = "metadata"
         
-        # ШАГ ФИНАЛЬНЫЙ-1: Consensus для файлов в series folder на основе common name patterns
-        self._apply_series_folder_pattern_consensus(records)
+        # Commented out: folder pattern consensus was also causing issues  
+        # self._apply_series_folder_pattern_consensus(records)
         
-        # ШАГ ФИНАЛЬНЫЙ: Кросс-файловый анализ - находим общие серии между файлами автора
-        self._apply_cross_file_consensus(records)
+        # Commented out: consensus logic was overwriting properly extracted series
+        # TODO: Review and fix consensus logic before re-enabling
+        # self._apply_cross_file_consensus(records)
     
     def _apply_series_folder_pattern_consensus(self, records: List[BookRecord]) -> None:
         """
@@ -734,7 +735,7 @@ class Pass2SeriesFilename:
                             best_score = score
         
         if best_series:
-            # Проверка: если best_series - это serve_word, не возвращаем его
+            # Проверка 1: если best_series - это serve_word, не возвращаем его
             # Serve_words это служебные слова, не названия серий
             # ВАЖНО: сравниваем целое слово, не префикс!
             best_series_lower = best_series.lower().strip()
@@ -749,7 +750,20 @@ class Pass2SeriesFilename:
                 # Это serve_word, игнорируем этот результат
                 best_series = None
             else:
-                return best_series
+                # Проверка 2: КРИТИЧНО - проверить blacklist даже если validate=False
+                # Blacklist всегда должна проверяться, это не результат валидации
+                # а фильтр для явно запрещенных слов
+                is_blacklisted = False
+                for bl_word in self.filename_blacklist:
+                    if bl_word.lower() in best_series_lower:
+                        is_blacklisted = True
+                        break
+                
+                if is_blacklisted:
+                    # Это запрещенное слово, игнорируем
+                    best_series = None
+                else:
+                    return best_series
         
         # Правило 1: [Серия] в квадратных скобках в начале
         # Из паттернов конфига ищем примеры с [...]
@@ -905,6 +919,15 @@ class Pass2SeriesFilename:
             if match:
                 content_in_brackets = match.group(3).strip()
                 return self._extract_series_from_brackets(content_in_brackets)
+        
+        elif pattern == "Author - Series service_words. Title":
+            # "Игнатов Михаил - Путь 10. Защитник. Второй пояс (СИ)"
+            # Извлекаем Series между " - " и номером
+            # Паттерн: Author - Series Number. Title
+            match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d+\.\s+', filename)
+            if match:
+                series = match.group(2).strip()
+                return series
         
         return ""
     
@@ -1225,6 +1248,16 @@ class Pass2SeriesFilename:
                 score = max(0, score - 50)
                 break
         
+        # УРОВЕНЬ 5: КРИТИЧНО - если результат в blacklist
+        # Blacklist содержит явно запрещенные слова (СИ, fandom, сборник и т.д.)
+        # Это ОЧЕНЬ сильный штраф, т.к. blacklist явно запрещает этот результат
+        for bl_word in self.filename_blacklist:
+            if bl_word.lower() in extracted_lower:
+                # ОГРОМНЫЙ штраф - это запрещенное слово!
+                # Штраф больше чем за service_words, т.к. blacklist явный запрет
+                score = max(-100, score - 100)
+                break
+
         # УРОВЕНЬ 5: Штраф за single-word результаты
         # Single-word результаты из сложных паттернов = вероятно Title, не Series
         # Например: "Охотник" из файла "Янковский - Охотник (Тетралогия)"
