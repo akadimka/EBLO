@@ -209,6 +209,13 @@
       "pattern": "Author - Series service_words. Title",
       "example": "Игнатов Михаил - Путь 10. Защитник. Второй пояс (СИ).fb2"
     }
+    
+  ],
+  "series_patterns_in_metadata": [
+    {
+      "pattern": "Series. Title",
+      "example": "Рукопись Памяти-3. Забытое грядущее.fb2"
+    }
   ],
   "author_name_patterns": [
     {

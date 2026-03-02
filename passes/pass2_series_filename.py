@@ -60,6 +60,7 @@ class Pass2SeriesFilename:
         
         # Получить паттерны из конфига
         self.file_patterns = self.settings.get_list('author_series_patterns_in_files') or []
+        self.metadata_patterns = self.settings.get_list('series_patterns_in_metadata') or []
     
     def execute(self, records: List[BookRecord]) -> None:
         """
@@ -260,7 +261,7 @@ class Pass2SeriesFilename:
                     
                     # Если из filename ничего не нашли, но есть metadata - используем её
                     if not record.proposed_series and record.metadata_series:
-                        series = record.metadata_series.strip()
+                        series = self._extract_series_from_metadata(record.metadata_series.strip())
                         if self._is_valid_series(series):
                             record.proposed_series = series
                             record.series_source = "metadata"
@@ -332,7 +333,7 @@ class Pass2SeriesFilename:
                 
                 # ШАГ 3: Финальный fallback - используем metadata если есть
                 if record.metadata_series:
-                    series = record.metadata_series.strip()
+                    series = self._extract_series_from_metadata(record.metadata_series.strip())
                     if self._is_valid_series(series):
                         record.proposed_series = series
                         record.series_source = "metadata"
@@ -364,9 +365,9 @@ class Pass2SeriesFilename:
                     # Candidate (очищенный) валиден, применяем его
                     # ШАГ 3: Проверить совпадает ли с metadata
                     if record.metadata_series and record.metadata_series.strip():
-                        metadata_series = record.metadata_series.strip()
+                        metadata_series = self._extract_series_from_metadata(record.metadata_series.strip())
                         
-                        # СРАВНИВАЕМ ОЧИЩЕННУЮ версию кандидата с metadata
+                        # СРАВНИВАЕМ ОЧИЩЕННУЮ версию кандидата с очищенной metadata
                         if clean_candidate.lower() == metadata_series.lower():
                             # Точное совпадение - используем metadata значение, но source = filename
                             record.proposed_series = metadata_series
@@ -1035,6 +1036,38 @@ class Pass2SeriesFilename:
             pass  # Если парсинг не сработал - это вероятно серия
         
         return True
+    
+    def _extract_series_from_metadata(self, metadata_series: str) -> str:
+        """
+        Применить паттерны из series_patterns_in_metadata для очистки metadata серии.
+        
+        Паттерн "Series. Title" означает: извлечь всё перед первой точкой.
+        Пример: "Рукопись Памяти-3. Забытое грядущее" → "Рукопись Памяти-3"
+        
+        Args:
+            metadata_series:值ание серии из метаданных
+        
+        Returns:
+            Очищенное название серии
+        """
+        if not metadata_series or not self.metadata_patterns:
+            return metadata_series
+        
+        text = metadata_series.strip()
+        
+        # Применяем каждый паттерн
+        for pattern_obj in self.metadata_patterns:
+            pattern = pattern_obj.get('pattern', '')
+            
+            if pattern == "Series. Title":
+                # "Серия. Название" → "Серия"
+                # Извлекаем всё перед первой точкой + пробелом
+                if '. ' in text:
+                    series = text.split('. ')[0].strip()
+                    if series:
+                        return series
+        
+        return text
     
     def _clean_series_name(self, text: str) -> str:
         """
