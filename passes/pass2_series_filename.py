@@ -137,23 +137,14 @@ class Pass2SeriesFilename:
                                     record.series_source = "metadata"
                             continue  # Переходим к следующему файлу
                         
-                        # Применяем очистку и metadata валидирование
+                        # Применяем очистку
                         clean_candidate = self._clean_series_name(series_from_patterns)
                         
-                        # Проверим валидность очищенной версии
-                        if not self._is_valid_series(clean_candidate):
-                            # Candidate заблочен - используем metadata если есть
-                            if record.metadata_series:
-                                series = record.metadata_series.strip()
-                                if self._is_valid_series(series):
-                                    record.proposed_series = series
-                                    record.series_source = "metadata"  # Метаданные как основной источник
-                        else:
-                                # Clean candidate валиден - метаданные служат только для подтверждения
-                                # ВСЕГДА используем значение из filename (clean_candidate)
-                                # Метаданные только проверяют совместимость
-                                record.proposed_series = clean_candidate
-                                record.series_source = "filename"
+                        # ВСЕГДА используем clean candidate из filename как proposed_series
+                        # Это наиболее надёжный источник информации о серии
+                        # Валидизация может быть слишком строгой
+                        record.proposed_series = clean_candidate
+                        record.series_source = "filename"
                         continue  # Обработка завершена, переходим к следующему файлу
                     
                     # ШАГ 2: Fallback - extractжем из скобок если паттерны не сработали
@@ -605,6 +596,12 @@ class Pass2SeriesFilename:
                     if record.proposed_series:
                         continue
                     
+                    # ВАЖНО: Не применяем consensus если файл имеет extracted_series_candidate
+                    # даже если proposed_series пусто (может быть мы не прошли валидацию)
+                    # Consensus применяется ТОЛЬКО к файлам у которых НЕЧЕГО не извлечено
+                    if candidate['extracted']:
+                        continue
+                    
                     # Если найденные слова совпадают с metadata - применяем
                     if candidate['metadata'] and self._matches_with_tolerance(common_words, candidate['metadata'], tolerance=0.80):
                         record.proposed_series = candidate['metadata']
@@ -807,6 +804,20 @@ class Pass2SeriesFilename:
                 # Убедимся что это не автор (не похоже на имя)
                 if not validate or self._is_valid_series(potential_series):
                     return potential_series
+        
+        # Правило 5: Author - Title. Subtitle (fallback для файлов без номея)
+        # "Земляной Андрей - Отморозки. Другим путем" → "Отморозки"
+        # Попытаемся извлечь часть после " - " и до первой точки как Title (которая может быть Series)
+        if ' - ' in name_without_ext and '. ' in name_without_ext:
+            match = re.match(r'^(.+?)\s*-\s*([^.]+)\.\s+(.+)$', name_without_ext)
+            if match:
+                title_before_dot = match.group(2).strip()
+                # Это Title (потенциальная Series) если он:
+                # 1. Имеет несколько слов ИЛИ 
+                # 2. Это нечто более подходящее серии чем фамилия  
+                if len(title_before_dot.split()) > 1 or (title_before_dot and len(title_before_dot) > 3):
+                    if not validate or self._is_valid_series(title_before_dot):
+                        return title_before_dot
         
         return ""
     
