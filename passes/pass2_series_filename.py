@@ -716,6 +716,12 @@ class Pass2SeriesFilename:
         filename = Path(file_path).name
         name_without_ext = filename.rsplit('.', 1)[0]
         
+        # ВАЖНО: Удалить метатеги из конца filename ПЕРЕД парсингом
+        # "(СИ)" - Самиздат/Интернет
+        # "(ЛП)" - Лицензионное произведение
+        # Эти метатеги не должны влиять на извлечение series
+        name_for_parsing = re.sub(r'\s*\([СЛ]И\)\s*$', '', name_without_ext).strip()
+        
         # ШАГ 0: Найти ЛУЧШИЙ паттерн на основе оценки соответствия
         best_series = None
         best_score = -1
@@ -723,11 +729,11 @@ class Pass2SeriesFilename:
         if self.file_patterns:
             for pattern_obj in self.file_patterns:
                 pattern_str = pattern_obj.get('pattern', '')
-                series_candidate = self._apply_config_pattern(pattern_str, name_without_ext)
+                series_candidate = self._apply_config_pattern(pattern_str, name_for_parsing)
                 
                 if series_candidate:
                     # Оценить соответствие паттерна структуре файла
-                    score = self._score_pattern_match(pattern_str, name_without_ext, series_candidate)
+                    score = self._score_pattern_match(pattern_str, name_for_parsing, series_candidate)
                     
                     # Если это лучший результат - запомнить
                     if score > best_score:
@@ -768,7 +774,7 @@ class Pass2SeriesFilename:
         
         # Правило 1: [Серия] в квадратных скобках в начале
         # Из паттернов конфига ищем примеры с [...]
-        match = re.search(r'^\[([^\[\]]+)\]', name_without_ext)
+        match = re.search(r'^\[([^\[\]]+)\]', name_for_parsing)
         if match:
             series = match.group(1).strip()
             if not validate or self._is_valid_series(series):
@@ -777,9 +783,9 @@ class Pass2SeriesFilename:
         # Правило 2: Серия в скобках в КОНЦЕ 
         # Из паттернов конфига: "Author - Title (Series. service_words)"
         # Ищем скобку в конце, может быть с сервис-словами перед ней
-        if '(' in name_without_ext and ')' in name_without_ext:
+        if '(' in name_for_parsing and ')' in name_for_parsing:
             # Ищем закрытую скобку в конце, которой предшествует открытая скобка
-            match = re.search(r'\(([^)]+)\)\s*$', name_without_ext)
+            match = re.search(r'\(([^)]+)\)\s*$', name_for_parsing)
             if match:
                 content_in_brackets = match.group(1).strip()
                 # Используем логику из _extract_series_from_brackets для cleanup
@@ -793,8 +799,8 @@ class Pass2SeriesFilename:
         # "Белoус. Последний шанс" - "Белоус" это фамилия, не серия!
         # И не захватываем "Author - Series" паттерны - они обработаны config pattern
         # "Борисов Олег - Туман 1. Золото" должен дать "Туман", не "Борисов Олег - Туман"
-        if '. ' in name_without_ext:
-            potential_series = name_without_ext.split('. ')[0].strip()
+        if '. ' in name_for_parsing:
+            potential_series = name_for_parsing.split('. ')[0].strip()
             
             # Если содержит " - ", это скорее всего "Author - Series" паттерн
             # Нужно пропустить и дать обработаться config pattern
@@ -812,9 +818,9 @@ class Pass2SeriesFilename:
         # Правило 3B: Author. Series N (без второго элемента после точки)
         # "Курилкин. Охотник 1" → "Охотник"
         # Структура: OneWord. MultipleWords N где N это одна или две цифры
-        if '. ' in name_without_ext and ' ' not in name_without_ext.split('. ')[0]:
+        if '. ' in name_for_parsing and ' ' not in name_for_parsing.split('. ')[0]:
             # Первая часть это одно слово (вероятно Author)
-            parts = name_without_ext.split('. ', 1)
+            parts = name_for_parsing.split('. ', 1)
             if len(parts) == 2:
                 second_part = parts[1].strip()
                 # Проверяем, содержит ли вторая часть номер в конце
@@ -828,8 +834,8 @@ class Pass2SeriesFilename:
         # Правило 4: Author - Series N (без точки после номера)
         # "Атаманов Михаил - Задача выжить 1" → "Задача выжить"
         # Паттерн: Author - Серия N где N это одна или две цифры в конце
-        if ' - ' in name_without_ext:
-            match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d{1,2}\s*$', name_without_ext)
+        if ' - ' in name_for_parsing:
+            match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d{1,2}\s*$', name_for_parsing)
             if match:
                 potential_series = match.group(2).strip()
                 # Убедимся что это не автор (не похоже на имя)
