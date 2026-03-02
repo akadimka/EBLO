@@ -809,6 +809,22 @@ class Pass2SeriesFilename:
             elif not validate or self._is_valid_series(potential_series):
                 return potential_series
         
+        # Правило 3B: Author. Series N (без второго элемента после точки)
+        # "Курилкин. Охотник 1" → "Охотник"
+        # Структура: OneWord. MultipleWords N где N это одна или две цифры
+        if '. ' in name_without_ext and ' ' not in name_without_ext.split('. ')[0]:
+            # Первая часть это одно слово (вероятно Author)
+            parts = name_without_ext.split('. ', 1)
+            if len(parts) == 2:
+                second_part = parts[1].strip()
+                # Проверяем, содержит ли вторая часть номер в конце
+                # "Охотник 1" → True, "Охотник" → False (но это обработано другими рулами)
+                series_match = re.match(r'^(.+?)\s+\d+\s*$', second_part)
+                if series_match:
+                    potential_series = series_match.group(1).strip()
+                    if not validate or self._is_valid_series(potential_series):
+                        return potential_series
+        
         # Правило 4: Author - Series N (без точки после номера)
         # "Атаманов Михаил - Задача выжить 1" → "Задача выжить"
         # Паттерн: Author - Серия N где N это одна или две цифры в конце
@@ -827,13 +843,19 @@ class Pass2SeriesFilename:
             match = re.match(r'^(.+?)\s*-\s*([^.]+)\.\s+(.+)$', name_without_ext)
             if match:
                 title_before_dot = match.group(2).strip()
+                if "охотник" in name_without_ext.lower():
+                    print(f"  [Rule 5 match] title_before_dot='{title_before_dot}'")
                 # Это Title (потенциальная Series) если он:
                 # 1. Имеет несколько слов ИЛИ 
                 # 2. Это нечто более подходящее серии чем фамилия  
                 if len(title_before_dot.split()) > 1 or (title_before_dot and len(title_before_dot) > 3):
                     if not validate or self._is_valid_series(title_before_dot):
+                        if "охотник" in name_without_ext.lower():
+                            print(f"  [RETURNING from Rule 5] '{title_before_dot}'")
                         return title_before_dot
         
+        if "охотник" in name_without_ext.lower():
+            print(f"  [NO MATCH - returning empty]")
         return ""
     
     def _apply_config_pattern(self, pattern: str, filename: str) -> str:

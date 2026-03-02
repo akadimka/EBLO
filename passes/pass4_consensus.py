@@ -37,6 +37,38 @@ class Pass4Consensus:
             self.settings = None
         self.normalizer = AuthorNormalizer(self.settings)
     
+    def _normalize_series_for_consensus(self, series_candidate: str) -> str:
+        """
+        Normalize series candidate for consensus comparison.
+        Removes volume numbers so "Охотник 1" and "Охотник 2" match as same series.
+        
+        Args:
+            series_candidate: Raw series candidate string
+        
+        Returns:
+            Normalized series name
+        """
+        if not series_candidate:
+            return ""
+        
+        import re
+        
+        text = series_candidate.strip()
+        
+        # Remove " N" or " N. " patterns (space + digits)
+        # "Охотник 1" → "Охотник"
+        # "Охотник 2. Something" → "Охотник"  
+        text = re.sub(r'\s+\d+[\s\.\:].*$', '', text).strip()
+        
+        # Remove trailing digits after space
+        # "Охотник 1" → "Охотник"
+        text = re.sub(r'\s+\d+\s*$', '', text).strip()
+        
+        # Remove trailing digits after hyphen (but keep the base, e.g. "Фэндом-3" → "Фэндом")
+        text = re.sub(r'[-–—]\d+\s*$', '', text).strip()
+        
+        return text if text else series_candidate
+    
     def execute(self, records: List) -> None:
         """Execute PASS 4: Apply consensus author.
         
@@ -107,12 +139,13 @@ class Pass4Consensus:
         series_consensus_count = 0
         
         for folder, group_records in groups.items():
-            # Count extracted_series_candidate occurrences
+            # Count extracted_series_candidate occurrences (with normalization)
             candidates_count = {}
             for record in group_records:
                 if record.extracted_series_candidate:
-                    candidate = record.extracted_series_candidate
-                    candidates_count[candidate] = candidates_count.get(candidate, 0) + 1
+                    # Normalize candidate for consensus (remove volume numbers)
+                    normalized = self._normalize_series_for_consensus(record.extracted_series_candidate)
+                    candidates_count[normalized] = candidates_count.get(normalized, 0) + 1
             
             # Only consider candidates that appear 2+ times (true consensus)
             consensus_candidates = {
@@ -129,14 +162,18 @@ class Pass4Consensus:
                 # Only apply if:
                 # 1. File has no proposed_series yet (empty)
                 # 2. File has extracted_series_candidate
-                # 3. That candidate appears 2+ times in the group
+                # 3. That candidate (normalized) appears 2+ times in the group
                 if (not record.proposed_series and 
-                    record.extracted_series_candidate and
-                    record.extracted_series_candidate in consensus_candidates):
+                    record.extracted_series_candidate):
                     
-                    record.proposed_series = record.extracted_series_candidate
-                    record.series_source = "consensus"
-                    series_consensus_count += 1
+                    # Normalize the candidate for matching
+                    normalized = self._normalize_series_for_consensus(record.extracted_series_candidate)
+                    
+                    if normalized in consensus_candidates:
+                        # Use normalized version as the consensus series
+                        record.proposed_series = normalized
+                        record.series_source = "consensus"
+                        series_consensus_count += 1
         
         self.logger.log(f"[PASS 4] Applied series consensus to {series_consensus_count} records")
         
