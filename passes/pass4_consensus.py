@@ -135,47 +135,89 @@ class Pass4Consensus:
         # IMPORTANT: Only apply to files that have extracted_series_candidate matching
         # the consensus candidate. This prevents applying unrelated series to files
         # that only happen to be in the same folder.
-        print("[PASS 4] Applying series consensus...")
+        # GROUP BY AUTHOR for consensus calculation
+        # Build author groups: author → [records]
+        author_groups = {}
+        for record in records:
+            author = record.proposed_author or "[unknown]"
+            if author not in author_groups:
+                author_groups[author] = []
+            author_groups[author].append(record)
+        
+        # AUTHOR-BASED SERIES CONSENSUS: Match files by sequence in filename
+        # For each author group, find files with same series_base that have proposed_series
+        # and apply to files without series_candidate
         series_consensus_count = 0
         
-        for folder, group_records in groups.items():
-            # Count extracted_series_candidate occurrences (with normalization)
-            candidates_count = {}
-            for record in group_records:
+        for author, author_records in author_groups.items():
+            # Build map: series_base → [records with proposed_series from extracted_series_candidate]
+            series_base_map = {}
+            
+            for record in author_records:
                 if record.extracted_series_candidate:
-                    # Normalize candidate for consensus (remove volume numbers)
+                    # Extract series_base from proposed_series (remove volume numbers)
                     normalized = self._normalize_series_for_consensus(record.extracted_series_candidate)
-                    candidates_count[normalized] = candidates_count.get(normalized, 0) + 1
+                    if normalized not in series_base_map:
+                        series_base_map[normalized] = []
+                    series_base_map[normalized].append(record)
             
-            # Only consider candidates that appear 2+ times (true consensus)
-            consensus_candidates = {
-                candidate: count 
-                for candidate, count in candidates_count.items() 
-                if count >= 2
-            }
-            
-            if not consensus_candidates:
-                continue
-            
-            # Apply consensus only to files with matching extracted_series_candidate
-            for record in group_records:
-                # Only apply if:
-                # 1. File has no proposed_series yet (empty)
-                # 2. File has extracted_series_candidate
-                # 3. That candidate (normalized) appears 2+ times in the group
-                if (not record.proposed_series and 
-                    record.extracted_series_candidate):
+            # For each series_base, check if we have files without series_candidate
+            # that match the series_base in their filename
+            for series_base, source_records in series_base_map.items():
+                # For each record without extracted_series_candidate
+                for target_record in author_records:
+                    if target_record.proposed_series:
+                        # Already has series, skip
+                        continue
                     
-                    # Normalize the candidate for matching
-                    normalized = self._normalize_series_for_consensus(record.extracted_series_candidate)
+                    if target_record.extracted_series_candidate:
+                        # Already has extracted_series_candidate, would be caught earlier
+                        continue
                     
-                    if normalized in consensus_candidates:
-                        # Use normalized version as the consensus series
-                        record.proposed_series = normalized
-                        record.series_source = "consensus"
-                        series_consensus_count += 1
+                    # Check if target filename contains the same series_base as source
+                    # Extract filename and check if it contains series_base
+                    filename = Path(target_record.file_path).stem
+                    
+                    # Simple heuristic: series_base appears in the filename
+                    # and it's likely the same series (case-insensitive, normalize spaces)
+                    # Format: "Author - SeriesBase" or "Author - SeriesBase N" or "SeriesBase N"
+                    series_base_normalized = series_base.lower().strip()
+                    filename_normalized = filename.lower()
+                    
+                    # Check if filename contains series_base in the expected position
+                    # Must be after author name (after " - ") or at start
+                    if series_base_normalized in filename_normalized:
+                        # Verify it's at the right position: after author name or at position
+                        # where series should be
+                        dash_pos = filename_normalized.find(" - ")
+                        base_pos = filename_normalized.find(series_base_normalized)
+                        
+                        if dash_pos >= 0:
+                            # After "Author - " pattern
+                            if base_pos > dash_pos:
+                                # Apply consensus
+                                target_record.proposed_series = series_base
+                                target_record.series_source = "author-consensus"
+                                
+                                # Check for metadata confirmation
+                                if (target_record.metadata_series and 
+                                    self._normalize_series_for_consensus(target_record.metadata_series) == series_base):
+                                    target_record.series_source = "author-consensus (metadata-confirmed)"
+                                
+                                series_consensus_count += 1
+                        elif base_pos == 0:
+                            # Series at start of filename (no author prefix expected)
+                            target_record.proposed_series = series_base
+                            target_record.series_source = "author-consensus"
+                            
+                            # Check for metadata confirmation
+                            if (target_record.metadata_series and 
+                                self._normalize_series_for_consensus(target_record.metadata_series) == series_base):
+                                target_record.series_source = "author-consensus (metadata-confirmed)"
+                            
+                            series_consensus_count += 1
         
-        self.logger.log(f"[PASS 4] Applied series consensus to {series_consensus_count} records")
+        self.logger.log(f"[PASS 4] Applied author-based series consensus to {series_consensus_count} records")
         
         # METADATA SERIES CONSENSUS: For depth 2 files (Author/File)
         # Apply metadata_series consensus to files without proposed_series
