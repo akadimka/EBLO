@@ -149,53 +149,11 @@ class Pass2SeriesFilename:
                                     record.proposed_series = series
                                     record.series_source = "metadata"  # Метаданные как основной источник
                         else:
-                            # Clean candidate валиден - сравниваем с metadata
-                            if record.metadata_series and record.metadata_series.strip():
-                                metadata_series = record.metadata_series.strip()
-                                
-                                # СРАВНИВАЕМ ОЧИЩЕННУЮ версию кандидата с metadata
-                                if clean_candidate.lower() == metadata_series.lower():
-                                    # Точное совпадение - используем metadata значение, но source = filename
-                                    record.proposed_series = metadata_series
-                                    record.series_source = "filename"  # Источник - filename (мета только уточнила)
-                                
-                                elif metadata_series.lower().startswith(clean_candidate.lower()):
-                                    # Metadata это расширение clean_candidate
-                                    # "Туман" в файле, а в metadata "Туман (Борисов)" - это диспамбiguация, не расширение
-                                    # "Солдат удачи" в файле, а в metadata "Солдат удачи. Цикл" - это расширение
-                                    
-                                    # Проверяем: если metadata = "clean_candidate (something)" это просто диспамбiguация
-                                    metadata_after_clean = metadata_series[len(clean_candidate):].strip()
-                                    if metadata_after_clean.startswith('(') and metadata_after_clean.endswith(')'):
-                                        # Это просто скобки с диспамбiguацией, используем clean_candidate из filename
-                                        record.proposed_series = clean_candidate
-                                        record.series_source = "filename"
-                                    else:
-                                        # Это реальное расширение (точка, дополнительные слова)
-                                        record.proposed_series = metadata_series
-                                        record.series_source = "filename"  # Источник filename (мета расширила)
-                                
-                                elif clean_candidate.lower().startswith(metadata_series.lower()):
-                                    # Clean candidate это расширение metadata
-                                    # Используем metadata как более чистый источник
-                                    record.proposed_series = metadata_series
-                                    record.series_source = "filename"  # Все равно из filename берем основу
-                                
-                                elif self._matches_with_tolerance(clean_candidate, metadata_series, tolerance=0.80):
-                                    # Существенное совпадение с tolerance
-                                    record.proposed_series = metadata_series
-                                    record.series_source = "filename"  # Источник filename (мета подтвердила)
-                                
-                                else:
-                                    # Они не совпадают - используем очищенную версию из filename
-                                    record.proposed_series = clean_candidate
-                                    record.series_source = "filename"
-                            else:
-                                # Нет metadata - используем clean candidate из filename
-                                if self._is_valid_series(series_from_patterns):
-                                    record.proposed_series = series_from_patterns
-                                    record.series_source = "filename"
-                        
+                                # Clean candidate валиден - метаданные служат только для подтверждения
+                                # ВСЕГДА используем значение из filename (clean_candidate)
+                                # Метаданные только проверяют совместимость
+                                record.proposed_series = clean_candidate
+                                record.series_source = "filename"
                         continue  # Обработка завершена, переходим к следующему файлу
                     
                     # ШАГ 2: Fallback - extractжем из скобок если паттерны не сработали
