@@ -201,8 +201,9 @@ class Pass4Consensus:
             for series_base, source_records in series_base_map.items():
                 # For each record without extracted_series_candidate
                 for target_record in author_records:
-                    if target_record.proposed_series:
-                        # Already has series, skip
+                    if target_record.proposed_series and target_record.series_source != "metadata":
+                        # Already has series from filename or other source, skip
+                        # But try consensus if it's only from metadata
                         continue
                     
                     if target_record.extracted_series_candidate:
@@ -319,10 +320,7 @@ class Pass4Consensus:
             }
             
             if not consensus_proposed_series:
-                #print(f"[DEBUG] Folder {folder}: No consensus (proposed_count={proposed_count})")
                 continue
-            
-            #print(f"[DEBUG] Folder {folder}: Found consensus {consensus_proposed_series}")
             
             # Apply to files with empty proposed_series if they're in a series folder
             for record in group_records:
@@ -340,6 +338,5 @@ class Pass4Consensus:
                     record.proposed_series = consensus_series
                     record.series_source = "consensus"
                     proposed_consensus_count += 1
-                    #print(f"[DEBUG] Applied consensus to {Path(record.file_path).name}: {consensus_series}")
         
         self.logger.log(f"[PASS 4] Applied proposed series consensus to {proposed_consensus_count} records")
