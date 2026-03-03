@@ -742,14 +742,15 @@ class Pass2SeriesFilename:
                             best_score = score
         
         if best_series:
-            # Проверка 1: если best_series - это serve_word, не возвращаем его
-            # Serve_words это служебные слова, не названия серий
-            # ВАЖНО: сравниваем целое слово, не префикс!
+            # Проверка 1: если best_series - это ТОЧНО serve_word (не начинается с него), не возвращаем его
+            # Serve_words это служебные слова, но они не должны отбрасывать серии как "Цикл Скорпиона"
+            # ВАЖНО: Только отбрасываем если это ТОЧНО service_word целиком, без остального текста!
             best_series_lower = best_series.lower().strip()
             is_service_word = False
             for sw in self.service_words:
                 sw_lower = sw.lower()
-                if best_series_lower == sw_lower or best_series_lower.startswith(sw_lower + ' '):
+                # Только если это ТОЧНО равно service_word, никакие префиксы
+                if best_series_lower == sw_lower:
                     is_service_word = True
                     break
             
