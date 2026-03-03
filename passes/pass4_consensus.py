@@ -80,6 +80,41 @@ class Pass4Consensus:
         """
         print("[PASS 4] Applying consensus...")
         
+        # METADATA AUTHOR CONFIRMATION: If proposed_author and metadata_authors have same surname
+        # but different first names, prefer the metadata version
+        # This handles cases where filename has partial name (e.g. "Мельник") that gets
+        # normalized to wrong variant in Pass3, but metadata has correct full name
+        for record in records:
+            if record.proposed_author and record.metadata_authors:
+                proposed = record.proposed_author.strip()
+                proposed_parts = proposed.split()
+                
+                # Get surname from proposed (last word in "Surname FirstName" format)
+                if proposed_parts:
+                    proposed_surname = proposed_parts[0].lower()  # First part in "Surname FirstName"
+                    proposed_firstname = ' '.join(proposed_parts[1:]).lower() if len(proposed_parts) > 1 else ""
+                    
+                    meta_authors = [a.strip() for a in record.metadata_authors.split(';')]
+                    
+                    # Try to find matching author in metadata (same surname, different first name)
+                    for meta_author in meta_authors:
+                        meta_parts = meta_author.split()
+                        if meta_parts:
+                            # Metadata is in "FirstName LastName" format
+                            meta_surname = meta_parts[-1].lower()  # Last part
+                            meta_firstname = ' '.join(meta_parts[:-1]).lower() if len(meta_parts) > 1 else ""
+                            
+                            if (meta_surname == proposed_surname and 
+                                meta_firstname and proposed_firstname and
+                                meta_firstname != proposed_firstname):
+                                # Same surname, different first name
+                                # Use metadata version: normalize "FirstName LastName" to "LastName FirstName"
+                                last_name = meta_parts[-1]
+                                first_names = ' '.join(meta_parts[:-1])
+                                corrected = f"{last_name} {first_names}".strip()
+                                record.proposed_author = corrected
+                                break
+        
         # Group by folder
         groups: Dict[Path, List] = {}
         for record in records:
