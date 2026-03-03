@@ -180,37 +180,43 @@ class Pass4Consensus:
                     
                     # Simple heuristic: series_base appears in the filename
                     # and it's likely the same series (case-insensitive, normalize spaces)
-                    # Format: "Author - SeriesBase" or "Author - SeriesBase N" or "SeriesBase N"
+                    # Format: "Author - SeriesBase" or "Author - SeriesBase N" or "SeriesBase N" or "Author. Series"
                     series_base_normalized = series_base.lower().strip()
                     filename_normalized = filename.lower()
                     
                     # Check if filename contains series_base in the expected position
-                    # Must be after author name (after " - ") or at start
+                    # Must be after author name (after " - " or after ". ") or at start
                     if series_base_normalized in filename_normalized:
                         # Verify it's at the right position: after author name or at position
                         # where series should be
                         dash_pos = filename_normalized.find(" - ")
+                        dot_pos = filename_normalized.find(". ")
                         base_pos = filename_normalized.find(series_base_normalized)
                         
-                        if dash_pos >= 0:
-                            # After "Author - " pattern
-                            if base_pos > dash_pos:
-                                # Apply consensus
-                                target_record.proposed_series = series_base
-                                target_record.series_source = "author-consensus"
-                                
-                                # Check for metadata confirmation
-                                if (target_record.metadata_series and 
-                                    self._normalize_series_for_consensus(target_record.metadata_series) == series_base):
-                                    target_record.series_source = "author-consensus (metadata-confirmed)"
-                                
-                                series_consensus_count += 1
+                        # Three patterns: "Author - Series", "Author. Series", or "Series ..." at start
+                        applies = False
+                        
+                        if dash_pos >= 0 and base_pos > dash_pos:
+                            # "Author - Series" pattern
+                            applies = True
+                        elif dot_pos >= 0 and base_pos > dot_pos:
+                            # "Author. Series" pattern
+                            applies = True
                         elif base_pos == 0:
-                            # Series at start of filename (no author prefix expected)
+                            # Series at start of filename
+                            applies = True
+                        
+                        if applies:
+                            # Apply consensus
                             target_record.proposed_series = series_base
                             target_record.series_source = "author-consensus"
                             
                             # Check for metadata confirmation
+                            if (target_record.metadata_series and 
+                                self._normalize_series_for_consensus(target_record.metadata_series) == series_base):
+                                target_record.series_source = "author-consensus (metadata-confirmed)"
+                            
+                            series_consensus_count += 1
                             if (target_record.metadata_series and 
                                 self._normalize_series_for_consensus(target_record.metadata_series) == series_base):
                                 target_record.series_source = "author-consensus (metadata-confirmed)"
