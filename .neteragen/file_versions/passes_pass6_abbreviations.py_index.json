@@ -1,0 +1,33 @@
+{
+  "file_name": "passes/pass6_abbreviations.py",
+  "revisions": [
+    {
+      "revision_id": "ae96cf91-fb99-48da-af2b-2730256a5261",
+      "metadata": {
+        "timestamp": "2026-03-03T17:19:33.211906",
+        "type": "cache_version",
+        "source": "ToolTextFileEdit",
+        "size": 8305,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": ""
+      },
+      "saved_at": "2026-03-03T17:19:33.212923"
+    },
+    {
+      "revision_id": "86cf1024-85c1-4736-bcf5-647165aafe05",
+      "metadata": {
+        "timestamp": "2026-03-03T17:19:33.207945",
+        "type": "cache_version",
+        "source": "ToolTextFileEdit",
+        "size": 8351,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": null
+      },
+      "saved_at": "2026-03-03T17:19:33.210348"
+    }
+  ]
+}

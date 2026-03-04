@@ -742,15 +742,14 @@ class Pass2SeriesFilename:
                             best_score = score
         
         if best_series:
-            # Проверка 1: если best_series - это ТОЧНО serve_word (не начинается с него), не возвращаем его
-            # Serve_words это служебные слова, но они не должны отбрасывать серии как "Цикл Скорпиона"
-            # ВАЖНО: Только отбрасываем если это ТОЧНО service_word целиком, без остального текста!
+            # Проверка 1: если best_series - это serve_word, не возвращаем его
+            # Serve_words это служебные слова, не названия серий
+            # ВАЖНО: сравниваем целое слово, не префикс!
             best_series_lower = best_series.lower().strip()
             is_service_word = False
             for sw in self.service_words:
                 sw_lower = sw.lower()
-                # Только если это ТОЧНО равно service_word, никакие префиксы
-                if best_series_lower == sw_lower:
+                if best_series_lower == sw_lower or best_series_lower.startswith(sw_lower + ' '):
                     is_service_word = True
                     break
             
@@ -1135,11 +1134,7 @@ class Pass2SeriesFilename:
         if match:
             text = match.group(1).strip()
         
-        # Правило 2: Удалить диапазоны томов (1-3, 4-6, 7-10 и т.д.)
-        # "Оружейники 1-3" → "Оружейники"
-        text = re.sub(r'\s+\d+(?:\-\d+)+\s*$', '', text).strip()
-        
-        # Правило 2b: Удалить номер тома/выпуска в конце
+        # Правило 2: Удалить номер тома/выпуска в конце
         # Паттерны: "Серия 1", "Серия 2", "Серия (том) 3", и т.д.
         # Удаляем: пробел + одна или две цифры + конец
         text = re.sub(r'\s+\d{1,2}\s*$', '', text).strip()

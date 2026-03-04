@@ -1,0 +1,33 @@
+{
+  "file_name": "config.json",
+  "revisions": [
+    {
+      "revision_id": "3ae21cee-92f2-498a-836c-1d917c8de0ac",
+      "metadata": {
+        "timestamp": "2026-03-04T10:52:31.588343",
+        "type": "cache_version",
+        "source": "external_edit",
+        "size": 10980,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": "External edit"
+      },
+      "saved_at": "2026-03-04T10:52:31.593842"
+    },
+    {
+      "revision_id": "4b66a35b-e889-47df-ba55-5a9801e23da8",
+      "metadata": {
+        "timestamp": "2026-03-03T17:36:37.655793",
+        "type": "cache_version",
+        "source": "initial_from_disk",
+        "size": 10967,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": null
+      },
+      "saved_at": "2026-03-03T17:36:37.658503"
+    }
+  ]
+}

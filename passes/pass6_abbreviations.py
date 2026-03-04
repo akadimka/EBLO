@@ -192,7 +192,5 @@ class Pass6Abbreviations:
                             authors_map[key] = []
                         authors_map[key].append(normalized)
                         seen.add(normalized)
-
-                        seen.add(normalized)
         
         return authors_map

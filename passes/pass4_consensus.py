@@ -80,6 +80,20 @@ class Pass4Consensus:
         """
         print("[PASS 4] Applying consensus...")
         
+        # SPECIAL HANDLING: If metadata contains specific series values, they take absolute priority
+        # These values override all other extraction methods
+        special_series_values = [
+            "Шерлок Холмс. Свободные продолжения"
+        ]
+        
+        for record in records:
+            if record.metadata_series:
+                metadata_series = record.metadata_series.strip()
+                if metadata_series in special_series_values:
+                    # This metadata value has absolute priority
+                    record.proposed_series = metadata_series
+                    record.series_source = "metadata"
+        
         # METADATA AUTHOR CONFIRMATION: If proposed_author and metadata_authors have same surname
         # but different first names, prefer the metadata version
         # This handles cases where filename has partial name (e.g. "Мельник") that gets
@@ -248,11 +262,6 @@ class Pass4Consensus:
                             target_record.series_source = "author-consensus"
                             
                             # Check for metadata confirmation
-                            if (target_record.metadata_series and 
-                                self._normalize_series_for_consensus(target_record.metadata_series) == series_base):
-                                target_record.series_source = "author-consensus (metadata-confirmed)"
-                            
-                            series_consensus_count += 1
                             if (target_record.metadata_series and 
                                 self._normalize_series_for_consensus(target_record.metadata_series) == series_base):
                                 target_record.series_source = "author-consensus (metadata-confirmed)"
