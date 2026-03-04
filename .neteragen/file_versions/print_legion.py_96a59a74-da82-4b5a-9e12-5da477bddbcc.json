@@ -1,0 +1,16 @@
+{
+  "file_name": "print_legion.py",
+  "revision_id": "96a59a74-da82-4b5a-9e12-5da477bddbcc",
+  "metadata": {
+    "timestamp": "2026-03-04T13:39:03.730820",
+    "type": "cache_version",
+    "source": "ToolTextFileEdit",
+    "size": 496,
+    "is_reverted": false,
+    "git_branch_name": "master",
+    "agent_name": "Cody",
+    "description": ""
+  },
+  "content": "#!/usr/bin/env python3\nimport csv, sys\n\ncsv_path = r'C:\\Temp\\fb2parser\\regen.csv'\n\nprint(\"=== CSV rows with 'егион' ===\")\nwith open(csv_path, encoding='utf-8') as f:\n    reader = csv.reader(f)\n    header = next(reader)\n    print(','.join(header))\n    for row in reader:\n        if any('егион' in cell for cell in row):\n            print(','.join(row))\n\nprint()\nprint(\"=== PASS 2 DEBUG from regen log (if logger writes to file) ===\")\n# Also run regen and capture only DEBUG lines for Legion files\n",
+  "saved_at": "2026-03-04T13:39:03.730820"
+}

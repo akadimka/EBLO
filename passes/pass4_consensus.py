@@ -98,9 +98,15 @@ class Pass4Consensus:
         # but different first names, prefer the metadata version
         # This handles cases where filename has partial name (e.g. "Мельник") that gets
         # normalized to wrong variant in Pass3, but metadata has correct full name
+        # CRITICAL: Only apply to SINGLE-author proposed_author, not multi-author!
         for record in records:
             if record.proposed_author and record.metadata_authors:
                 proposed = record.proposed_author.strip()
+                
+                # SKIP if multi-author (contains comma) - don't modify group authors
+                if ', ' in proposed or '; ' in proposed:
+                    continue
+                
                 proposed_parts = proposed.split()
                 
                 # Get surname from proposed (last word in "Surname FirstName" format)
@@ -179,6 +185,9 @@ class Pass4Consensus:
                     consensus_count += 1
         
         self.logger.log(f"[PASS 4] Applied consensus to {consensus_count} records")
+        for record in records:
+            if 'егион' in record.file_path:
+                print(f"[PASS 4 DEBUG LEGION] '{Path(record.file_path).name}': proposed_author='{record.proposed_author}'")
         
         # SERIES CONSENSUS: Apply consensus series to files in same folder
         # IMPORTANT: Only apply to files that have extracted_series_candidate matching

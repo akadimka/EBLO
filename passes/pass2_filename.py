@@ -172,6 +172,57 @@ class Pass2Filename:
                     if part_lower not in self.author_cache:
                         self.author_cache[part_lower] = author
     
+    def prebuild_author_cache(self, records: List) -> None:
+        """Pre-scan all FB2 files to build author cache BEFORE main processing.
+
+        This ensures that even if a file has bad/missing metadata, its authors
+        can be resolved from sibling files in the same folder that DO have good metadata.
+
+        Strategy: for each record, read FB2 metadata and cache all author names
+        (full name, surname, each word) so they're available during execute().
+
+        Args:
+            records: List of BookRecord objects
+        """
+        if not self.work_dir:
+            return
+
+        print("[PASS 2] Pre-building author cache from FB2 metadata...")
+        cached_count = 0
+
+        for record in records:
+            fb2_path = self.work_dir / record.file_path
+            if not fb2_path.exists():
+                continue
+
+            try:
+                extractor = FB2AuthorExtractor()
+                fb2_authors_str = extractor._extract_all_authors_from_metadata(fb2_path)
+
+                if not fb2_authors_str:
+                    continue
+
+                fb2_authors = [a.strip() for a in fb2_authors_str.split(';') if a.strip()]
+
+                for author in fb2_authors:
+                    if not author:
+                        continue
+                    author_lower = author.lower().strip()
+                    # Cache full name
+                    self.author_cache[author_lower] = author
+                    # Cache each word (surname, firstname) separately
+                    for part in author.split():
+                        if len(part) > 2:
+                            part_lower = part.lower()
+                            if part_lower not in self.author_cache:
+                                self.author_cache[part_lower] = author
+                    cached_count += 1
+
+            except Exception:
+                pass
+
+        print(f"[PASS 2] Pre-cache built: {len(self.author_cache)} entries from {cached_count} authors")
+
     def _validate_and_expand_author(self, extracted_author: str, fb2_path: Optional[Path]) -> str:
         """Validate and potentially expand author name using FB2 metadata and cache.
         
@@ -368,9 +419,22 @@ class Pass2Filename:
         skipped_count = 0
         
         for i, record in enumerate(records):
-            # Skip files with folder_dataset source ONLY if fallback is NOT needed
-            # needs_filename_fallback = True means folder parse found NOTHING, try filename anyway
-            if record.author_source == "folder_dataset" and not getattr(record, 'needs_filename_fallback', False):
+            # Skip files with folder_dataset source ONLY if:
+            # 1. NOT a fallback situation (folder extraction found something valid)
+            # 2. AND filename doesn'tcontain multi-author pattern (comma in non-extension parts)
+            
+            is_multiauthor_pattern = False
+            filename_for_check = record.file_path.replace('\\', '/').split('/')[-1]  # basename only
+            if '. ' in filename_for_check:
+                before_extension = filename_for_check.rsplit('.', 1)[0]  # remove .fb2
+                # Check if there's a comma indicating multi-author pattern
+                if ', ' in before_extension:
+                    is_multiauthor_pattern = True
+            
+            # Skip if folder_dataset source AND not a fallback AND single-author filename
+            if (record.author_source == "folder_dataset" and 
+                not getattr(record, 'needs_filename_fallback', False) and
+                not is_multiauthor_pattern):
                 skipped_count += 1
                 continue
             
@@ -616,8 +680,12 @@ class Pass2Filename:
                 best_pattern_specificity = specificity
         
         # Extract author based on best matching pattern
+        if 'егион' in filename:
+            print(f"[PASS 2 DEBUG LEGION] file='{filename}' best_pattern='{best_pattern}' score={best_score:.2f}")
         if best_pattern and best_score > 0.3:  # Minimum threshold
             author = self._extract_by_pattern(filename, best_pattern, struct)
+            if 'егион' in filename:
+                print(f"[PASS 2 DEBUG LEGION] extracted='{author}'")
             
             # Handle comma-separated authors (co-authorship)
             if author and ', ' in author:
@@ -626,9 +694,13 @@ class Pass2Filename:
                 
                 for single_author in authors:
                     # VALIDATE each author independently
-                    if single_author and self._looks_like_author_name(single_author) and validate_author_name(single_author):
+                    looks_like = self._looks_like_author_name(single_author)
+                    is_valid = validate_author_name(single_author) if single_author else False
+                    print(f"[PASS 2 DEBUG] co-author '{single_author}': looks_like={looks_like}, valid={is_valid}, cache_hit={single_author.lower().strip() in self.author_cache}")
+                    if single_author and looks_like and is_valid:
                         # Validate and expand using FB2 metadata if available
                         expanded = self._validate_and_expand_author(single_author, fb2_path)
+                        print(f"[PASS 2 DEBUG] co-author '{single_author}' expanded to '{expanded}'")
                         validated_authors.append(expanded)
                     elif single_author:
                         # Keep as-is if validation fails (some edge cases)

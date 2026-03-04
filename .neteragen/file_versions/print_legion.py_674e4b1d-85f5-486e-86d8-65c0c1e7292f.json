@@ -1,0 +1,16 @@
+{
+  "file_name": "print_legion.py",
+  "revision_id": "674e4b1d-85f5-486e-86d8-65c0c1e7292f",
+  "metadata": {
+    "timestamp": "2026-03-04T13:39:30.389521",
+    "type": "cache_version",
+    "source": "ToolTextFileEdit",
+    "size": 466,
+    "is_reverted": false,
+    "git_branch_name": "master",
+    "agent_name": "Cody",
+    "description": ""
+  },
+  "content": "#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\nimport csv\n\ncsv_path = r'C:\\Temp\\fb2parser\\regen.csv'\nout_path = 'legion_rows.txt'\n\nwith open(csv_path, encoding='utf-8') as f, open(out_path, 'w', encoding='utf-8') as out:\n    reader = csv.reader(f)\n    header = next(reader)\n    out.write('|'.join(header) + '\\n')\n    for row in reader:\n        if any('егион' in cell for cell in row):\n            out.write('|'.join(row) + '\\n')\n\nprint(\"Done, written to\", out_path)\n",
+  "saved_at": "2026-03-04T13:39:30.389521"
+}

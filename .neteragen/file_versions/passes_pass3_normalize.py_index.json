@@ -1,0 +1,33 @@
+{
+  "file_name": "passes/pass3_normalize.py",
+  "revisions": [
+    {
+      "revision_id": "8cbc1d6e-dc02-4c76-88de-429496bab617",
+      "metadata": {
+        "timestamp": "2026-03-04T13:43:09.275890",
+        "type": "cache_version",
+        "source": "ToolTextFileEdit",
+        "size": 9375,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": ""
+      },
+      "saved_at": "2026-03-04T13:43:09.278910"
+    },
+    {
+      "revision_id": "6e2d4479-9c4f-49e8-983d-b49e59d3e7e7",
+      "metadata": {
+        "timestamp": "2026-03-04T13:43:09.255253",
+        "type": "cache_version",
+        "source": "ToolTextFileEdit",
+        "size": 9205,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": null
+      },
+      "saved_at": "2026-03-04T13:43:09.268135"
+    }
+  ]
+}

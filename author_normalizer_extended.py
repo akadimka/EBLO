@@ -67,6 +67,26 @@ class AuthorNormalizer:
         config_path = self.settings._config_path if hasattr(self.settings, '_config_path') else 'config.json'
         AuthorName.set_config_path(config_path)
     
+    def _apply_to_each_author(self, author: str, fn, separator: str = ', ') -> str:
+        """Применить fn к каждому автору в строке с несколькими авторами.
+        
+        Если author содержит separator — сплитует, применяет fn к каждому, джойнит обратно.
+        Иначе применяет fn напрямую.
+        
+        Args:
+            author: Строка с одним или несколькими авторами
+            fn: Функция (single_author: str) -> str
+            separator: Разделитель авторов (по умолчанию ', ')
+            
+        Returns:
+            Обработанная строка
+        """
+        if separator in author:
+            return separator.join(
+                fn(a.strip()) for a in author.split(separator) if a.strip()
+            )
+        return fn(author)
+
     def normalize_format(self, author: str, metadata_authors: str = "") -> str:
         """Нормализовать формат автора.
         
@@ -201,35 +221,15 @@ class AuthorNormalizer:
             return author
         
         conversions = self.settings.get_author_surname_conversions()
-        
-        # Проверить есть ли несколько авторов разделённых запятой
-        if ', ' in author:
-            authors = author.split(', ')
-            converted_authors = []
-            
-            for single_author in authors:
-                single_author = single_author.strip()
-                result = single_author
-                
-                # Пробуем каждую замену
-                for pattern, replacement in conversions.items():
-                    if pattern in result:
-                        result = result.replace(pattern, replacement)
-                
-                converted_authors.append(result)
-            
-            # Объединить через запятую
-            return ', '.join(converted_authors)
-        
-        # Одиночный автор
-        result = author
-        
-        # Пробуем каждую замену
-        for pattern, replacement in conversions.items():
-            if pattern in result:
-                result = result.replace(pattern, replacement)
-        
-        return result
+
+        def _convert_single(single: str) -> str:
+            result = single
+            for pattern, replacement in conversions.items():
+                if pattern in result:
+                    result = result.replace(pattern, replacement)
+            return result
+
+        return self._apply_to_each_author(author, _convert_single)
     
     def expand_abbreviation(self, author: str, authors_map: Dict[str, List[str]]) -> str:
         """Раскрыть аббревиатуру в имени автора.
@@ -248,22 +248,11 @@ class AuthorNormalizer:
         """
         if not author or "." not in author:
             return author
-        
-        # Проверить есть ли несколько авторов разделённых запятой
-        if ', ' in author:
-            authors = author.split(', ')
-            expanded_authors = []
-            
-            for single_author in authors:
-                single_author = single_author.strip()
-                expanded = self._expand_single_abbreviation(single_author, authors_map)
-                expanded_authors.append(expanded)
-            
-            # Объединить через запятую
-            return ', '.join(expanded_authors)
-        
-        # Одиночный автор
-        return self._expand_single_abbreviation(author, authors_map)
+
+        return self._apply_to_each_author(
+            author,
+            lambda a: self._expand_single_abbreviation(a, authors_map)
+        )
     
     def _expand_single_abbreviation(self, author: str, authors_map: Dict[str, List[str]]) -> str:
         """Раскрыть аббревиатуру в одном имени автора.

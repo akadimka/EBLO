@@ -179,5 +179,8 @@ class Pass3Normalize:
             if normalized and normalized != record.proposed_author:
                 record.proposed_author = normalized
                 normalized_count += 1
+            
+            if 'егион' in record.file_path:
+                print(f"[PASS 3 DEBUG LEGION] '{record.file_path}': proposed_author='{record.proposed_author}'")
         
         self.logger.log(f"[PASS 3] Normalized {normalized_count} author names")

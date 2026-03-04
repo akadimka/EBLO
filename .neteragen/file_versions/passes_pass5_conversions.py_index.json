@@ -1,0 +1,33 @@
+{
+  "file_name": "passes/pass5_conversions.py",
+  "revisions": [
+    {
+      "revision_id": "f06270c4-9f21-481b-b88f-6c26b942a730",
+      "metadata": {
+        "timestamp": "2026-03-04T13:44:17.482658",
+        "type": "cache_version",
+        "source": "ToolTextFileEdit",
+        "size": 2654,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": ""
+      },
+      "saved_at": "2026-03-04T13:44:17.506154"
+    },
+    {
+      "revision_id": "da1866f0-ba74-4db4-8f52-e76d0d2edafb",
+      "metadata": {
+        "timestamp": "2026-03-04T13:44:17.472832",
+        "type": "cache_version",
+        "source": "ToolTextFileEdit",
+        "size": 2447,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": null
+      },
+      "saved_at": "2026-03-04T13:44:17.479020"
+    }
+  ]
+}
