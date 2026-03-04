@@ -313,6 +313,28 @@ class Pass2Filename:
         
         return True
     
+    def _count_authors(self, authors_str: str) -> int:
+        """Count number of authors in metadata authors string.
+        
+        Authors are separated by "; " (fb2 metadata) or ", " (filename/metadata)
+        
+        Args:
+            authors_str: String with authors (e.g. "Author 1; Author 2; Author 3")
+            
+        Returns:
+            Number of authors found
+        """
+        if not authors_str or authors_str == "[unknown]":
+            return 0
+        
+        # Count authors separated by "; " or ", "
+        if "; " in authors_str:
+            return len([a for a in authors_str.split("; ") if a.strip()])
+        elif ", " in authors_str:
+            return len([a for a in authors_str.split(", ") if a.strip()])
+        else:
+            return 1 if authors_str.strip() else 0
+    
     def execute(self, records: List) -> None:
         """Execute PASS 2: Extract authors from filenames.
         
@@ -352,26 +374,26 @@ class Pass2Filename:
                 skipped_count += 1
                 continue
             
-            # CHECK: Is this file in a collection/compilation?
-            # Check entire path to detect both folder-level and filename-level collections
-            file_path_lower = record.file_path.lower()
-            is_collection = any(kw in file_path_lower for kw in self.collection_keywords)
+            # CHECK: Is this file a collection/anthology?
+            # NEW LOGIC (Feb 20, 2026):
+            # - NEVER determine collection based on folder name
+            # - Only check if FILENAME contains collection keywords
+            # - Require 3+ authors in metadata to assign "Сборник"
             
-            if is_collection:
-                # Determine source: folder or filename?
-                file_path_parts = Path(record.file_path).parts
-                folder_path = '/'.join(file_path_parts[:-1]).lower()  # All parts except the last
-                filename_lower = file_path_parts[-1].lower() if file_path_parts else ""
+            filename_only = Path(record.file_path).name.lower()  # Only filename, not full path
+            has_collection_keyword = any(kw.lower() in filename_only for kw in self.collection_keywords)
+            
+            if has_collection_keyword:
+                # Keyword found in filename - check author count
+                author_count = self._count_authors(record.metadata_authors)
                 
-                is_in_folder = any(kw in folder_path for kw in self.collection_keywords)
-                is_in_filename = any(kw in filename_lower for kw in self.collection_keywords)
-                
-                # This is a collection/compilation
-                record.proposed_author = "Сборник"
-                record.author_source = "folder_dataset" if is_in_folder else "filename"
-                record.needs_filename_fallback = False
-                processed_count += 1
-                continue  # Skip regular filename parsing for collections
+                if author_count >= 3:
+                    # This is a true collection/anthology
+                    record.proposed_author = "Сборник"
+                    record.author_source = "collection"
+                    record.needs_filename_fallback = False
+                    processed_count += 1
+                    continue  # Skip regular filename parsing for collections
             
             # Try to extract from filename (NOT full path!)
             # Handle both Windows (\) and Unix (/) path separators
