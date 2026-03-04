@@ -575,7 +575,7 @@ class Pass2Filename:
         
         1. Analyze filename structure
         2. Score all patterns from config
-        3. Pick best matching pattern
+        3. Pick best matching pattern (with tie-breaker for specificity)
         4. Extract author based on that pattern
         5. VALIDATE that extracted name is a real author name
         6. Optionally expand/validate using FB2 metadata
@@ -596,14 +596,24 @@ class Pass2Filename:
         # Score all patterns
         best_pattern = None
         best_score = 0.0
+        best_pattern_specificity = 0  # Tie-breaker: more specific patterns win
         
         for pattern_obj in self.patterns:
             pattern = pattern_obj.get('pattern', '')
             score = score_pattern_match(struct, pattern, self.service_words)
             
-            if score > best_score:
+            # Calculate specificity as a tie-breaker
+            # More components = more specific pattern
+            # E.g., "Author, Author. Title (Series)" is more specific than "Author. Title"
+            specificity = pattern.count(',') * 10 + pattern.count('(') * 5 + pattern.count('.') * 2
+            
+            # Update best if:
+            # 1. Score is higher, OR
+            # 2. Score is same but pattern is more specific (tie-breaker)
+            if score > best_score or (score == best_score and specificity > best_pattern_specificity):
                 best_score = score
                 best_pattern = pattern
+                best_pattern_specificity = specificity
         
         # Extract author based on best matching pattern
         if best_pattern and best_score > 0.3:  # Minimum threshold
