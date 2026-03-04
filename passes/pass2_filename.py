@@ -680,12 +680,8 @@ class Pass2Filename:
                 best_pattern_specificity = specificity
         
         # Extract author based on best matching pattern
-        if 'егион' in filename:
-            print(f"[PASS 2 DEBUG LEGION] file='{filename}' best_pattern='{best_pattern}' score={best_score:.2f}")
         if best_pattern and best_score > 0.3:  # Minimum threshold
             author = self._extract_by_pattern(filename, best_pattern, struct)
-            if 'егион' in filename:
-                print(f"[PASS 2 DEBUG LEGION] extracted='{author}'")
             
             # Handle comma-separated authors (co-authorship)
             if author and ', ' in author:
@@ -696,11 +692,9 @@ class Pass2Filename:
                     # VALIDATE each author independently
                     looks_like = self._looks_like_author_name(single_author)
                     is_valid = validate_author_name(single_author) if single_author else False
-                    print(f"[PASS 2 DEBUG] co-author '{single_author}': looks_like={looks_like}, valid={is_valid}, cache_hit={single_author.lower().strip() in self.author_cache}")
                     if single_author and looks_like and is_valid:
                         # Validate and expand using FB2 metadata if available
                         expanded = self._validate_and_expand_author(single_author, fb2_path)
-                        print(f"[PASS 2 DEBUG] co-author '{single_author}' expanded to '{expanded}'")
                         validated_authors.append(expanded)
                     elif single_author:
                         # Keep as-is if validation fails (some edge cases)

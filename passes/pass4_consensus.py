@@ -185,9 +185,6 @@ class Pass4Consensus:
                     consensus_count += 1
         
         self.logger.log(f"[PASS 4] Applied consensus to {consensus_count} records")
-        for record in records:
-            if 'егион' in record.file_path:
-                print(f"[PASS 4 DEBUG LEGION] '{Path(record.file_path).name}': proposed_author='{record.proposed_author}'")
         
         # SERIES CONSENSUS: Apply consensus series to files in same folder
         # IMPORTANT: Only apply to files that have extracted_series_candidate matching

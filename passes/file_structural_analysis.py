@@ -196,53 +196,90 @@ def score_pattern_match(struct: Dict, pattern: str, service_words: List[str] = N
     if service_words is None:
         service_words = []
     
-    service_words_lower = [w.lower() for w in service_words]
     pattern_lower = pattern.lower()
-    original_lower = struct['original'].lower()
-    
+
+    # ── HARD DISQUALIFIERS ──────────────────────────────────────────────────
+    # If the pattern REQUIRES a structural element that the filename LACKS,
+    # this pattern cannot possibly match → return 0.0 immediately.
+
+    # Pattern requires ' - ' (dash separator) but filename has none
+    if ' - ' in pattern and not struct['has_dash']:
+        return 0.0
+
+    # Pattern requires ',' (co-author comma) but filename has none
+    if ',' in pattern and not struct['has_comma']:
+        return 0.0
+
+    # Pattern requires parentheses '(' but filename has none
+    if '(' in pattern and struct['paren_count'] == 0:
+        return 0.0
+
+    # Pattern requires '(author)' bracket but filename has no brackets at all
+    if '(author)' in pattern_lower and struct['bracket_positioning'] not in ['start', 'end', 'middle', 'wrap']:
+        return 0.0
+
+    # ── POSITIVE SCORING ────────────────────────────────────────────────────
+    # Award points for each structural element the pattern correctly accounts for.
+    # Also award points when pattern correctly predicts ABSENCE of an element.
+
     score = 0.0
     max_score = 0.0
-    
-    # Check pattern components
-    patterns_to_check = {
-        '(author)': struct['bracket_positioning'] in ['end', 'wrap', 'middle'],
-        'author -': struct['has_dash'],
-        'author.': struct['paren_count'] == 0 and '.' in struct['original'],
-        'author, author': struct['has_comma'],
-        'title (': struct['bracket_positioning'] in ['end', 'middle'],
-        '- (author)': struct['has_dash'] and struct['bracket_positioning'] in ['end', 'middle'],
-    }
-    
-    # Score based on pattern match
-    if '(author)' in pattern_lower:
-        max_score += 1.0
-        if struct['bracket_positioning'] in ['start', 'end', 'middle']:
-            score += 1.0
-    
+
+    # Dash
+    max_score += 1.0
     if ' - ' in pattern:
-        max_score += 1.0
         if struct['has_dash']:
             score += 1.0
-    
-    if pattern_lower.count('.') > 0 and '(series)' not in pattern_lower:
-        max_score += 1.0
-        if '.' in struct['original']:
+    else:
+        # Pattern has no dash — reward if filename also has no dash
+        if not struct['has_dash']:
             score += 1.0
-    
+        # else: filename has dash but pattern ignores it → no reward (soft penalty)
+
+    # Comma (co-authors)
+    max_score += 1.0
     if ',' in pattern:
-        max_score += 1.0
         if struct['has_comma']:
             score += 1.0
-    
-    # Default: if we have segments, it matches the pattern
+    else:
+        # Pattern has no comma — reward if filename also has no comma
+        if not struct['has_comma']:
+            score += 1.0
+        # else: filename has comma but pattern ignores it → no reward (soft penalty)
+
+    # Parentheses
+    max_score += 1.0
+    if '(' in pattern:
+        if struct['paren_count'] > 0:
+            score += 1.0
+    else:
+        # Pattern has no parens — reward if filename also has no parens
+        if struct['paren_count'] == 0:
+            score += 1.0
+        # else: filename has parens but pattern ignores them → no reward
+
+    # Dot separator (outside parens)
+    has_dot_outside_parens = ('.' in struct['original'].split('(')[0]
+                              if '(' in struct['original']
+                              else '.' in struct['original'])
+    pattern_has_dot = '.' in pattern_lower.replace('(series)', '').replace('(author)', '')
+    max_score += 1.0
+    if pattern_has_dot:
+        if has_dot_outside_parens:
+            score += 1.0
+    else:
+        if not has_dot_outside_parens:
+            score += 1.0
+
+    # Base: filename has at least one segment (always true for non-empty filenames)
     if struct['segments']:
         max_score += 1.0
         score += 1.0
-    
+
     # Normalize score
     if max_score == 0:
         return 0.0
-    
+
     return min(1.0, score / max_score)
 
 

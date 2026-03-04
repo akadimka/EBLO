@@ -80,9 +80,6 @@ class Pass6Abbreviations:
                 expanded_count += 1
         
         self.logger.log(f"[PASS 6] Expanded {expanded_count} author names")
-        for record in records:
-            if 'егион' in record.file_path:
-                print(f"[PASS 6 DEBUG LEGION] '{record.file_path.split(chr(92))[-1]}': proposed_author='{record.proposed_author}'")
     
     def _expand_author(self, author: str, authors_map: Dict[str, List[str]]) -> str:
         """Expand a single author name using authors_map.

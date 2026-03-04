@@ -61,6 +61,10 @@ class Pass2SeriesFilename:
         # Получить паттерны из конфига
         self.file_patterns = self.settings.get_list('author_series_patterns_in_files') or []
         self.metadata_patterns = self.settings.get_list('series_patterns_in_metadata') or []
+        
+        # Флаг: последний вызов _extract_series_from_brackets вернул иерархическую серию
+        # (MainSeries N из "MainSeries N. SubSeries M-K") — не убирать trailing number
+        self._last_was_hierarchical = False
     
     def execute(self, records: List[BookRecord]) -> None:
         """
@@ -138,8 +142,8 @@ class Pass2SeriesFilename:
                                     record.series_source = "metadata"
                             continue  # Переходим к следующему файлу
                         
-                        # Применяем очистку
-                        clean_candidate = self._clean_series_name(series_from_patterns)
+                        # Применяем очистку (сохраняем trailing number если иерархическая серия)
+                        clean_candidate = self._clean_series_name(series_from_patterns, keep_trailing_number=self._last_was_hierarchical)
                         
                         # ВСЕГДА используем clean candidate из filename как proposed_series
                         # Это наиболее надёжный источник информации о серии
@@ -254,7 +258,7 @@ class Pass2SeriesFilename:
                         series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
                         if series_candidate:
                             record.extracted_series_candidate = series_candidate
-                            clean_candidate = self._clean_series_name(series_candidate)
+                            clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
                             if self._is_valid_series(clean_candidate):
                                 record.proposed_series = clean_candidate
                                 record.series_source = "filename"
@@ -281,7 +285,7 @@ class Pass2SeriesFilename:
                     # ПРОВЕРКА: Не используем фамилию автора как серию
                     # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
                     if not self._is_author_surname(series_candidate, record.proposed_author):
-                        clean_candidate = self._clean_series_name(series_candidate)
+                        clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
                         if self._is_valid_series(clean_candidate):
                             record.proposed_series = clean_candidate
                             record.series_source = "filename"
@@ -350,7 +354,7 @@ class Pass2SeriesFilename:
             # ШАГ 2: Проверить валидность и применить
             if series_candidate:
                 # СРАЗУ очистим от паразитных символов (томы, названия)
-                clean_candidate = self._clean_series_name(series_candidate)
+                clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
                 
                 # Проверим валидность (очищенной версии)
                 if not self._is_valid_series(clean_candidate):
@@ -892,6 +896,15 @@ class Pass2SeriesFilename:
                 # Паттерн: слова, потом пробел, потом цифра, потом точка/двоеточие, потом еще слова
                 # Захватываем только до первого "число. название"
                 series = re.sub(r'\s+\d+[\s\.\:].+$', '', series).strip()
+                # Если результат содержит '. ' — берём только часть до точки (это Series, остальное Title)
+                # "Войд. Захваченный дом" → "Войд"
+                # "Ермак. Поход" → "Ермак"
+                # НО: если часть до точки — одно слово, это может быть просто Series без номера
+                if '. ' in series:
+                    before_dot = series.split('. ')[0].strip()
+                    # Одно слово — вероятно это и есть серия (Войд, Ермак и т.д.)
+                    # Несколько слов — тоже может быть серия ("Солдат удачи")
+                    series = before_dot
                 return series
         
         elif pattern == "Author - Title (Series. service_words)":
@@ -915,6 +928,13 @@ class Pass2SeriesFilename:
         elif pattern == "Author. Series. Title":
             # "Анисимов. Вариант «Бис» 2. Год мертвой змеи"
             # Формат: Author. Series. Title
+            # ВАЖНО: Не применяем если в filename есть скобки - это дело pattern "Author. Title (Series)"
+            # "Кумин. Битва за звёзды (Исход. Тетралогия)" не должен обрабатываться так!
+            # Наличие скобок означает что реюлярная серия в скобках, а не "Author. Series. Title"
+            if '(' in filename:
+                # Есть скобки - скорее всего "Author. Title (Series)" паттерн, пропускаем
+                return ""
+            
             parts = filename.split('. ')
             if len(parts) >= 3:
                 # parts[1] должна быть Series
@@ -977,6 +997,9 @@ class Pass2SeriesFilename:
         Returns:
             Извлеченное имя серии
         """
+        # Сбрасываем флаг иерархической серии
+        self._last_was_hierarchical = False
+        
         # Сначала попробуем паттерн "из цикла" или "из серии"
         # "Романы из цикла «Отрок»" → "Отрок"
         cycle_match = re.search(r'из\s+(?:цикла|серии)\s+(.+)', content, re.IGNORECASE)
@@ -997,16 +1020,44 @@ class Pass2SeriesFilename:
         # Если есть точка - берем до неё (это Series. service_words)
         if '. ' in content:
             parts = content.split('. ')
-            after_dot = parts[1].lower() if len(parts) > 1 else ''
+            after_dot = parts[1].strip() if len(parts) > 1 else ''
+            after_dot_lower = after_dot.lower()
             
-            # Проверка служебных слов
+            # Проверка служебных слов + blacklist + collection_keywords
+            # "Мир Алекса Королёва. Сборник" → after_dot="сборник" → берём "Мир Алекса Королёва"
+            blacklist_words = [w.lower() for w in self.filename_blacklist]
+            collection_words = [w.lower() for w in self.collection_keywords]
+            service_check_words = ['том', 'дилогия', 'трилогия', 'тетралогия', 'пенталогия', 'роман-эпопея']
+            all_check_words = service_check_words + blacklist_words + collection_words
             is_service_word = any(
-                after_dot.startswith(sw.lower()) 
-                for sw in ['том', 'дилогия', 'трилогия', 'тетралогия', 'пенталогия', 'роман-эпопея']
+                after_dot_lower.startswith(sw.lower()) 
+                for sw in all_check_words
             )
             
             if is_service_word:
                 return parts[0].strip()
+            
+            # ИЕРАРХИЧЕСКАЯ СЕРИЯ: "Отрок 2. Сотник 1-3"
+            # Признаки: parts[0] = "Слова Число", parts[1] = "Слова Число/Диапазон"
+            # → это главная серия + подсерия → возвращаем parts[0] КАК ЕСТЬ (с номером тома!)
+            # Отличие от обычного случая: after_dot начинается с заглавной буквы (имя подсерии)
+            # и содержит число или диапазон
+            part0 = parts[0].strip()
+            # parts[0] заканчивается числом: "Отрок 2", "Серия 5"
+            part0_has_trailing_num = bool(re.search(r'\s+\d+\s*$', part0))
+            # parts[1] начинается с заглавной буквы и содержит число: "Сотник 1-3", "Книга 2"
+            after_dot_is_subseries = (
+                after_dot and
+                after_dot[0].isupper() and
+                bool(re.search(r'\d', after_dot))
+            )
+            
+            if part0_has_trailing_num and after_dot_is_subseries:
+                # Иерархическая серия: возвращаем главную серию С номером тома
+                # "Отрок 2. Сотник 1-3" → "Отрок 2"
+                # Устанавливаем флаг чтобы _clean_series_name не убирала trailing number
+                self._last_was_hierarchical = True
+                return part0
         
         # Если есть числовой диапазон (1-3, 4-6), берем до него
         series_candidate = re.sub(r'\s*[\d\-]+\s*$', '', content).strip()
@@ -1100,7 +1151,7 @@ class Pass2SeriesFilename:
         
         return text
     
-    def _clean_series_name(self, text: str) -> str:
+    def _clean_series_name(self, text: str, keep_trailing_number: bool = False) -> str:
         """
         Очистить название серии от паразитных символов и информации:
         - Номера томов: "Солдат удачи 1", "Солдат удачи 2. Название"
@@ -1134,16 +1185,17 @@ class Pass2SeriesFilename:
         if match:
             text = match.group(1).strip()
         
-        # Правило 2: Удалить номер тома/выпуска в конце
-        # Паттерны: "Серия 1", "Серия 2", "Серия (том) 3", и т.д.
-        # Удаляем: пробел + одна или две цифры + конец
-        text = re.sub(r'\s+\d{1,2}\s*$', '', text).strip()
-        
-        # Правило 3: Удалить всё после "номер " (менее строгое)
-        # Паттерн: "слова цифра слова" → берем только "слова"
-        match = re.match(r'^(.+?)\s+\d+\s+.+$', text)
-        if match:
-            text = match.group(1).strip()
+        if not keep_trailing_number:
+            # Правило 2: Удалить номер тома/выпуска в конце
+            # Паттерны: "Серия 1", "Серия 2", "Серия (том) 3", и т.д.
+            # Удаляем: пробел + одна или две цифры + конец
+            text = re.sub(r'\s+\d{1,2}\s*$', '', text).strip()
+            
+            # Правило 3: Удалить всё после "номер " (менее строгое)
+            # Паттерн: "слова цифра слова" → берем только "слова"
+            match = re.match(r'^(.+?)\s+\d+\s+.+$', text)
+            if match:
+                text = match.group(1).strip()
         
         # Правило 4: Удалить служебные слова в скобках
         # "Серия (Трилогия)" → "Серия"
@@ -1199,6 +1251,28 @@ class Pass2SeriesFilename:
         
         return similarity >= tolerance
     
+    def _is_hierarchical_series(self, text: str) -> bool:
+        """
+        Проверить является ли текст иерархической серией вида "MainSeries N" 
+        где N — номер тома в главной серии (не просто trailing number для удаления).
+        
+        Признак: текст заканчивается числом, и это число — часть имени серии,
+        потому что оригинальный контент скобок был "MainSeries N. SubSeries M-K".
+        
+        Используется чтобы не убирать trailing number в _clean_series_name.
+        
+        Примеры:
+            "Отрок 2" → True (было "Отрок 2. Сотник 1-3")
+            "Солдат удачи 3" → False (обычный номер тома)
+        
+        Простая эвристика: если текст = "Слова Число" и число <= 20 — 
+        мы не можем точно знать без контекста. Поэтому этот метод
+        должен вызываться только когда контекст известен.
+        """
+        # Этот метод — заглушка, реальная логика в _extract_series_from_brackets
+        # который возвращает результат с флагом через специальный маркер
+        return bool(re.match(r'^.+\s+\d+$', text.strip()))
+
     def _is_author_surname(self, series_candidate: str, author: str) -> bool:
         """
         Проверить что extracted series это не просто фамилия автора.
@@ -1253,77 +1327,87 @@ class Pass2SeriesFilename:
         """
         if not extracted_series:
             return -1
-        
-        score = 0
-        
-        # УРОВЕНЬ 1: Специфичность паттерна (более специфичные = более надежные)
-        # Паттерны со скобками и serve_words очень специфичные
-        if 'service_words' in pattern:
-            score += 20  # Наивысший приоритет - это точный паттерн
-        
-        # Паттерны со скобками хорошие
-        if '(' in pattern and ')' in pattern:
-            score += 10
-        
-        # Паттерны с тире
-        if ' - ' in pattern:
-            score += 5
-        
-        # Паттерны с точкой
-        if '. ' in pattern:
-            score += 3
-        
-        # УРОВЕНЬ 2: Совпадение структуры файла с паттерном структурой
-        # Если в файле есть то же что в паттерне - это хороший знак
-        if ' - ' in pattern and ' - ' in filename:
-            score += 8
-        
-        if '(' in pattern and '(' in filename and ')' in filename:
-            score += 8
-        
-        if '. ' in pattern and '. ' in filename:
-            score += 4
-        
-        # УРОВЕНЬ 3: Качество результата
-        word_count = len(extracted_series.split())
-        if word_count > 1:
-            score += word_count * 2  # Мультисловные результаты ценятся выше
-        elif word_count == 0:
-            score -= 30  # Пустой результат = плохо
-        
-        # Штраф за слишком короткие результаты из многомерных паттернов
-        if word_count == 1 and ' - ' in pattern and ' - ' in filename and len(filename) > 30:
-            score -= 3  # Вероятно мы неправильно разпарсили
-        
-        # УРОВЕНЬ 4: КРИТИЧНО - если результат сам является служебным словом
-        # Это ловушка: паттерн может извлечь "Тетралогия" вместо реальной серии
-        # Нужно отдавать предпочтение результатам, которые НЕ serve_words
-        # ВАЖНО: сравниваем целое слово, не префикс!
-        # Пример: "Туман" starts with "т", но "Туман" != "том" или "т."
-        extracted_lower = extracted_series.lower().strip()
-        
-        # Проверяем только точное совпадение или начало строки с пробелом после
-        # Это предотвращает ложные срабатывания на "т" для "Туман"
-        for sw in self.service_words:
-            sw_lower = sw.lower()
-            # Только штрафуем если результат = service_word или service_word является отдельным словом
-            if extracted_lower == sw_lower or extracted_lower.startswith(sw_lower + ' '):
-                # БОЛЬШОЙ штраф - это служебное слово, не серия!
-                score = max(0, score - 50)
-                break
-        
-        # УРОВЕНЬ 5: КРИТИЧНО - если результат в blacklist
-        # Blacklist содержит явно запрещенные слова (СИ, fandom, сборник и т.д.)
-        # Это ОЧЕНЬ сильный штраф, т.к. blacklist явно запрещает этот результат
-        for bl_word in self.filename_blacklist:
-            if bl_word.lower() in extracted_lower:
-                # ОГРОМНЫЙ штраф - это запрещенное слово!
-                # Штраф больше чем за service_words, т.к. blacklist явный запрет
-                score = max(-100, score - 100)
-                break
 
-        # УРОВЕНЬ 5: Штраф за single-word результаты
-        # Single-word результаты из сложных паттернов = вероятно Title, не Series
-        # Например: "Охотник" из файла "Янковский - Охотник (Тетралогия)"
-        
-        return max(0, score)  # Минимум 0
+        # ── HARD DISQUALIFIERS ──────────────────────────────────────────────────
+        # Если паттерн требует структурный элемент, которого нет в имени файла,
+        # этот паттерн не может подойти → сразу возвращаем -1.
+
+        # Паттерн требует ' - ' (разделитель-тире), но в имени файла его нет
+        if ' - ' in pattern and ' - ' not in filename:
+            return -1
+
+        # Паттерн требует запятую (соавторы), но в имени файла её нет
+        if ',' in pattern and ',' not in filename:
+            return -1
+
+        # Паттерн требует скобки '(', но в имени файла их нет
+        if '(' in pattern and '(' not in filename:
+            return -1
+
+        # ── POSITIVE SCORING ────────────────────────────────────────────────────
+        # Начисляем очки за каждый структурный элемент, который паттерн
+        # правильно предсказывает. Также начисляем очки, когда паттерн
+        # правильно предсказывает ОТСУТСТВИЕ элемента (двунаправленное).
+
+        score = 0
+        max_score = 0
+
+        # Тире ' - '
+        max_score += 3
+        if ' - ' in pattern:
+            if ' - ' in filename:
+                score += 3
+        else:
+            # Паттерн без тире — награждаем, если и в файле нет тире
+            if ' - ' not in filename:
+                score += 3
+
+        # Запятая (соавторы)
+        max_score += 2
+        if ',' in pattern:
+            if ',' in filename:
+                score += 2
+        else:
+            if ',' not in filename:
+                score += 2
+
+        # Скобки '('
+        max_score += 2
+        if '(' in pattern:
+            if '(' in filename:
+                score += 2
+        else:
+            if '(' not in filename:
+                score += 2
+
+        # service_words в паттерне
+        max_score += 1
+        if 'service_words' in pattern:
+            score += 1
+
+        # Бонус: серия извлечена из скобок — более надёжный источник
+        # Паттерны "(Series. service_words)" и "(Series service_words)" надёжнее чем "Author - Series (...)"
+        # потому что в скобках явно указана серия, а не Title
+        max_score += 3
+        bracket_series_patterns = [
+            "Author - Title (Series. service_words)",
+            "Author - Title (Series service_words)",
+            "Author. Title (Series. service_words)",
+            "Author, Author - Title (Series. service_words)",
+            "Author, Author. Title (Series)",
+        ]
+        if pattern in bracket_series_patterns:
+            score += 3
+
+        # Длина извлечённой серии: больше слов = надёжнее
+        word_count = len(extracted_series.split())
+        max_score += 6
+        if word_count >= 2:
+            score += min(6, word_count * 2)
+        elif word_count == 0:
+            return -1
+
+        if max_score == 0:
+            return 0
+
+        return max(0, score)

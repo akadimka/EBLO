@@ -66,6 +66,3 @@ class Pass5Conversions:
                 conversions_count += 1
         
         self.logger.log(f"[PASS 5] Applied conversions to {conversions_count} records")
-        for record in records:
-            if 'егион' in record.file_path:
-                print(f"[PASS 5 DEBUG LEGION] '{record.file_path.split(chr(92))[-1]}': proposed_author='{record.proposed_author}'")
