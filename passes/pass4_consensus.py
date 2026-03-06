@@ -80,6 +80,57 @@ class Pass4Consensus:
         """
         print("[PASS 4] Applying consensus...")
         
+        # CLEANUP: Remove false "series" that are actually just titles/subtitles
+        # These are single-appearance series with no numbering/service words markers
+        # Example: "Осень 93-го" or "Баржа Т-36" (no other files in author's catalog with these series)
+        print("[PASS 4] Cleaning up false series (single-file titles)...")
+        false_series_count = 0
+        
+        # Build series frequency map by author
+        import re
+        author_series_count = {}
+        for record in records:
+            if record.proposed_series:
+                author = record.proposed_author or "[unknown]"
+                series = record.proposed_series
+                
+                key = (author, series)
+                if key not in author_series_count:
+                    author_series_count[key] = []
+                author_series_count[key].append(record)
+        
+        # Service words that indicate THIS IS a series (not just a title)
+        # If series contains these, it's likely genuine
+        service_markers = {
+            'том', 'volume', 'vol', 'т.', 'v.',  # Volume/tome markers
+            'часть', 'part', 'п.', 'pt.',  # Part markers
+            'выпуск', 'issue', 'вып.',  # Issue markers
+            'книга', 'book', 'кн.',  # Book markers
+            'сборник', 'collection',  # Collection
+            'трилогия', 'trilogy', 'дилогия', 'duology', 'тетралогия', 'tetralogy',  # Series count
+        }
+        
+        # Check each (author, series) pair
+        for (author, series), records_with_series in author_series_count.items():
+            # If this series appears only ONCE (not a real series)
+            if len(records_with_series) == 1:
+                record = records_with_series[0]
+                
+                # Check if series contains service markers that indicate it's a real series
+                series_lower = series.lower()
+                has_service_marker = any(marker in series_lower for marker in service_markers)
+                
+                # If NO service markers AND from filename source
+                # This is likely a title/subtitle, not a series
+                # (Single files tend to have made-up "series" from titles)
+                if not has_service_marker and record.series_source == "filename":
+                    # Clear it
+                    record.proposed_series = ""
+                    record.series_source = ""
+                    false_series_count += 1
+        
+        self.logger.log(f"[PASS 4] Removed {false_series_count} false series (single-file titles)")
+        
         # SPECIAL HANDLING: If metadata contains specific series values, they take absolute priority
         # These values override all other extraction methods
         special_series_values = [

@@ -1,0 +1,16 @@
+{
+  "file_name": ".temp/analyze_regen.py",
+  "revision_id": "e914c42d-0597-4afb-9dad-7fb3c6244e7e",
+  "metadata": {
+    "timestamp": "2026-03-06T14:20:12.955975",
+    "type": "cache_version",
+    "source": "ToolTextFileEdit",
+    "size": 1856,
+    "is_reverted": false,
+    "git_branch_name": "master",
+    "agent_name": "Cody",
+    "description": ""
+  },
+  "content": "import csv\nimport re\nimport os\nimport sys\n\n# Force UTF-8 output\nsys.stdout.reconfigure(encoding='utf-8')\n\nwith open('regen.csv', newline='', encoding='utf-8-sig') as f:\n    reader = csv.DictReader(f)\n    rows = list(reader)\n\nprint(f\"Total rows: {len(rows)}\")\nprint()\n\nissues = []\n\nfor i, row in enumerate(rows, 1):\n    fp = row.get('file_path', '')\n    proposed = row.get('proposed_series', '')\n    meta = row.get('metadata_series', '')\n    src = row.get('series_source', '')\n    \n    if not proposed:\n        continue\n    \n    fname = os.path.basename(fp)\n    fname_noext = fname.rsplit('.', 1)[0] if '.' in fname else fname\n    \n    # Extract bracket content\n    bracket_match = re.search(r'\\(([^)]+)\\)(?:\\s*\\([^)]+\\))?$', fname_noext)\n    bracket_content = bracket_match.group(1) if bracket_match else ''\n    \n    proposed_in_file = proposed.lower() in fp.lower()\n    meta_clean = meta.strip()\n    \n    # Flag trailing number in proposed_series (e.g. \"Юрант 2\" - wrong)\n    trailing_num = re.search(r'\\s+\\d+$', proposed)\n    \n    flag = None\n    \n    if trailing_num:\n        flag = f\"TRAILING_NUM: proposed='{proposed}'\"\n    \n    elif not proposed_in_file:\n        flag = f\"NOT_IN_FILENAME: proposed='{proposed}'\"\n    \n    elif meta_clean and meta_clean.lower() != proposed.lower():\n        meta_base = re.sub(r'\\s*\\([^)]+\\)\\s*$', '', meta_clean).strip()\n        if meta_base.lower() != proposed.lower():\n            if not proposed.lower() in meta_clean.lower() and not meta_clean.lower() in proposed.lower():\n                flag = f\"META_MISMATCH: proposed='{proposed}' vs meta='{meta_clean}'\"\n    \n    if flag:\n        issues.append((i, fp, flag, src))\n\nprint(f\"=== SUSPICIOUS ROWS ({len(issues)}) ===\")\nfor row_num, fp, flag, src in issues:\n    print(f\"\\nROW {row_num}: {os.path.basename(fp)}\")\n    print(f\"  {flag}\")\n    print(f\"  source={src}\")\n",
+  "saved_at": "2026-03-06T14:20:12.955975"
+}
