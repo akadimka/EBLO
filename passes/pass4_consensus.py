@@ -355,3 +355,57 @@ class Pass4Consensus:
                     proposed_consensus_count += 1
         
         self.logger.log(f"[PASS 4] Applied proposed series consensus to {proposed_consensus_count} records")
+        
+        # HIERARCHICAL SERIES UNIFICATION
+        # For files of the same author with hierarchical series variants (e.g., "Серия" and "Серия. Подсерия"),
+        # unify all to the shortest/base version if it appears most frequently
+        # Example: "Старплекс" vs "Старплекс. Конец эры" → all use "Старплекс"
+        print("[PASS 4] Applying hierarchical series unification...")
+        hierarchical_unification_count = 0
+        
+        # Group by author
+        author_groups = {}
+        for record in records:
+            author = record.proposed_author or "[unknown]"
+            if author not in author_groups:
+                author_groups[author] = []
+            author_groups[author].append(record)
+        
+        for author, author_records in author_groups.items():
+            # Group by base series (part before first ". ")
+            base_series_groups = {}
+            
+            for record in author_records:
+                if record.proposed_series:
+                    # Extract base series (part before ". " if hierarchical)
+                    series = record.proposed_series
+                    if '. ' in series:
+                        base = series.split('. ')[0]
+                    else:
+                        base = series
+                    
+                    if base not in base_series_groups:
+                        base_series_groups[base] = []
+                    base_series_groups[base].append((record, series))
+            
+            # For each base series with multiple variants
+            for base, records_with_series in base_series_groups.items():
+                series_variants = {}
+                for record, series in records_with_series:
+                    if series not in series_variants:
+                        series_variants[series] = []
+                    series_variants[series].append(record)
+                
+                # If this base has multiple variants (e.g., "Старплекс" and "Старплекс. Конец эры")
+                if len(series_variants) > 1:
+                    # Choose the shortest variant as the canonical one
+                    canonical_series = min(series_variants.keys(), key=len)
+                    
+                    # Unify all variants to the canonical
+                    for variant_series, variant_records in series_variants.items():
+                        if variant_series != canonical_series:
+                            for record in variant_records:
+                                record.proposed_series = canonical_series
+                                hierarchical_unification_count += 1
+        
+        self.logger.log(f"[PASS 4] Unified {hierarchical_unification_count} hierarchical series variants")
