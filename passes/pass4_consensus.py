@@ -94,46 +94,22 @@ class Pass4Consensus:
                     record.proposed_series = metadata_series
                     record.series_source = "metadata"
         
-        # METADATA AUTHOR CONFIRMATION: If proposed_author and metadata_authors have same surname
-        # but different first names, prefer the metadata version
-        # This handles cases where filename has partial name (e.g. "Мельник") that gets
-        # normalized to wrong variant in Pass3, but metadata has correct full name
-        # CRITICAL: Only apply to SINGLE-author proposed_author, not multi-author!
-        for record in records:
-            if record.proposed_author and record.metadata_authors:
-                proposed = record.proposed_author.strip()
-                
-                # SKIP if multi-author (contains comma) - don't modify group authors
-                if ', ' in proposed or '; ' in proposed:
-                    continue
-                
-                proposed_parts = proposed.split()
-                
-                # Get surname from proposed (last word in "Surname FirstName" format)
-                if proposed_parts:
-                    proposed_surname = proposed_parts[0].lower()  # First part in "Surname FirstName"
-                    proposed_firstname = ' '.join(proposed_parts[1:]).lower() if len(proposed_parts) > 1 else ""
-                    
-                    meta_authors = [a.strip() for a in record.metadata_authors.split(';')]
-                    
-                    # Try to find matching author in metadata (same surname, different first name)
-                    for meta_author in meta_authors:
-                        meta_parts = meta_author.split()
-                        if meta_parts:
-                            # Metadata is in "FirstName LastName" format
-                            meta_surname = meta_parts[-1].lower()  # Last part
-                            meta_firstname = ' '.join(meta_parts[:-1]).lower() if len(meta_parts) > 1 else ""
-                            
-                            if (meta_surname == proposed_surname and 
-                                meta_firstname and proposed_firstname and
-                                meta_firstname != proposed_firstname):
-                                # Same surname, different first name
-                                # Use metadata version: normalize "FirstName LastName" to "LastName FirstName"
-                                last_name = meta_parts[-1]
-                                first_names = ' '.join(meta_parts[:-1])
-                                corrected = f"{last_name} {first_names}".strip()
-                                record.proposed_author = corrected
-                                break
+        # ⚠️ REMOVED: METADATA AUTHOR CONFIRMATION logic
+        # This logic was attempting to "improve" authors by cross-checking with metadata,
+        # but this is fundamentally wrong:
+        # 
+        # 1. folder_dataset source is AUTHORITATIVE (user explicitly created folder hierarchy)
+        #    → MUST NOT be modified or questioned
+        # 
+        # 2. Cross-checking with metadata is:
+        #    - Resource-intensive (requires parsing every FB2 file)
+        #    - Ineffective (metadata may be worse quality than folder_dataset)
+        #    - Logically incorrect (damages confidence in folder-based extraction)
+        # 
+        # 3. Correct strategy:
+        #    - folder_dataset → Final and should never be changed
+        #    - filename → Can check metadata only if extraction is incomplete
+        #    - metadata → Sufficient on its own, no need to cross-check
         
         # Group by folder
         groups: Dict[Path, List] = {}
