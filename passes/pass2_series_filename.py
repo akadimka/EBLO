@@ -127,7 +127,8 @@ class Pass2SeriesFilename:
                             # Это список авторов, не серия - пропускаем и используем только metadata
                             if record.metadata_series:
                                 series = record.metadata_series.strip()
-                                if self._is_valid_series(series):
+                                extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                                if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                                     record.proposed_series = series
                                     record.series_source = "metadata"
                             continue  # Переходим к следующему файлу
@@ -137,7 +138,8 @@ class Pass2SeriesFilename:
                             # Это фамилия, не серия - пропускаем и используем только metadata
                             if record.metadata_series:
                                 series = record.metadata_series.strip()
-                                if self._is_valid_series(series):
+                                extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                                if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                                     record.proposed_series = series
                                     record.series_source = "metadata"
                             continue  # Переходим к следующему файлу
@@ -261,7 +263,10 @@ class Pass2SeriesFilename:
                             if series_candidate:
                                 record.extracted_series_candidate = series_candidate
                                 # Для файлов в series коллекции - используем extracted candidate как proposed series
-                                if self._is_valid_series(series_candidate):
+                                # Передаём контекст автора при валидации чтобы не отвергать series
+                                # если она выглядит как имя человека
+                                extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                                if self._is_valid_series(series_candidate, extracted_author=extracted_author_for_validation):
                                     record.proposed_series = series_candidate
                                     record.series_source = "filename"
                     
@@ -273,14 +278,16 @@ class Pass2SeriesFilename:
                         if series_candidate:
                             record.extracted_series_candidate = series_candidate
                             clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
-                            if self._is_valid_series(clean_candidate):
+                            extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                            if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
                                 record.proposed_series = clean_candidate
                                 record.series_source = "filename"
                     
                     # Если из filename ничего не нашли, но есть metadata - используем её
                     if not record.proposed_series and record.metadata_series:
                         series = self._extract_series_from_metadata(record.metadata_series.strip())
-                        if self._is_valid_series(series):
+                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                        if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                             record.proposed_series = series
                             record.series_source = "metadata"
                     continue
@@ -300,7 +307,8 @@ class Pass2SeriesFilename:
                     # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
                     if not self._is_author_surname(series_candidate, record.proposed_author):
                         clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
-                        if self._is_valid_series(clean_candidate):
+                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                        if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
                             record.proposed_series = clean_candidate
                             record.series_source = "filename"
                             continue  # Нашли из filename - не переписываем с metadata
@@ -345,14 +353,16 @@ class Pass2SeriesFilename:
                         # ПРОВЕРКА 2: Не используем фамилию автора как серию
                         # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
                         elif not self._is_author_surname(series_candidate, record.proposed_author):
-                            if self._is_valid_series(series_candidate):
+                            extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                            if self._is_valid_series(series_candidate, extracted_author=extracted_author_for_validation):
                                 record.proposed_series = series_candidate
                                 record.series_source = "filename"
                 
                 # ШАГ 3: Финальный fallback - используем metadata если есть
                 if record.metadata_series:
                     series = self._extract_series_from_metadata(record.metadata_series.strip())
-                    if self._is_valid_series(series):
+                    extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                    if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                         record.proposed_series = series
                         record.series_source = "metadata"
                 continue
@@ -376,7 +386,8 @@ class Pass2SeriesFilename:
                     # Используем только metadata если есть
                     if record.metadata_series:
                         series = record.metadata_series.strip()
-                        if self._is_valid_series(series):
+                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                        if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                             record.proposed_series = series
                             record.series_source = "metadata"  # Метаданные как основной источник
                 else:
