@@ -127,7 +127,8 @@ class Pass2SeriesFilename:
                             # Это список авторов, не серия - пропускаем и используем только metadata
                             if record.metadata_series:
                                 series = record.metadata_series.strip()
-                                if self._is_valid_series(series):
+                                extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                                if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                                     record.proposed_series = series
                                     record.series_source = "metadata"
                             continue  # Переходим к следующему файлу
@@ -137,7 +138,8 @@ class Pass2SeriesFilename:
                             # Это фамилия, не серия - пропускаем и используем только metadata
                             if record.metadata_series:
                                 series = record.metadata_series.strip()
-                                if self._is_valid_series(series):
+                                extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                                if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                                     record.proposed_series = series
                                     record.series_source = "metadata"
                             continue  # Переходим к следующему файлу
@@ -145,9 +147,23 @@ class Pass2SeriesFilename:
                         # Применяем очистку (сохраняем trailing number если иерархическая серия)
                         clean_candidate = self._clean_series_name(series_from_patterns, keep_trailing_number=self._last_was_hierarchical)
                         
+                        # ПРОВЕРКА 3: Валидизируем clean_candidate
+                        # Передаём информацию об извлечённом авторе чтобы не отвергать series
+                        # если она выглядит как фамилия (но это другое слово чем автор)
+                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                        if not self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
+                            # Series не прошёл валидацию - используем metadata fallback
+                            if record.metadata_series:
+                                series = record.metadata_series.strip()
+                                clean_series = self._clean_series_name(series)
+                                if self._is_valid_series(clean_series, extracted_author=extracted_author_for_validation):
+                                    record.proposed_series = clean_series
+                                    record.series_source = "metadata"
+                            continue  # Переходим к следующему файлу
+                        
                         # ВСЕГДА используем clean candidate из filename как proposed_series
                         # Это наиболее надёжный источник информации о серии
-                        # Валидизация может быть слишком строгой
+                        # Валидизация только фильтрует очевидно неправильные значения
                         record.proposed_series = clean_candidate
                         record.series_source = "filename"
                         continue  # Обработка завершена, переходим к следующему файлу
@@ -247,7 +263,10 @@ class Pass2SeriesFilename:
                             if series_candidate:
                                 record.extracted_series_candidate = series_candidate
                                 # Для файлов в series коллекции - используем extracted candidate как proposed series
-                                if self._is_valid_series(series_candidate):
+                                # Передаём контекст автора при валидации чтобы не отвергать series
+                                # если она выглядит как имя человека
+                                extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                                if self._is_valid_series(series_candidate, extracted_author=extracted_author_for_validation):
                                     record.proposed_series = series_candidate
                                     record.series_source = "filename"
                     
@@ -259,14 +278,16 @@ class Pass2SeriesFilename:
                         if series_candidate:
                             record.extracted_series_candidate = series_candidate
                             clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
-                            if self._is_valid_series(clean_candidate):
+                            extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                            if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
                                 record.proposed_series = clean_candidate
                                 record.series_source = "filename"
                     
                     # Если из filename ничего не нашли, но есть metadata - используем её
                     if not record.proposed_series and record.metadata_series:
                         series = self._extract_series_from_metadata(record.metadata_series.strip())
-                        if self._is_valid_series(series):
+                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                        if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                             record.proposed_series = series
                             record.series_source = "metadata"
                     continue
@@ -286,7 +307,8 @@ class Pass2SeriesFilename:
                     # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
                     if not self._is_author_surname(series_candidate, record.proposed_author):
                         clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
-                        if self._is_valid_series(clean_candidate):
+                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                        if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
                             record.proposed_series = clean_candidate
                             record.series_source = "filename"
                             continue  # Нашли из filename - не переписываем с metadata
@@ -331,14 +353,16 @@ class Pass2SeriesFilename:
                         # ПРОВЕРКА 2: Не используем фамилию автора как серию
                         # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
                         elif not self._is_author_surname(series_candidate, record.proposed_author):
-                            if self._is_valid_series(series_candidate):
+                            extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                            if self._is_valid_series(series_candidate, extracted_author=extracted_author_for_validation):
                                 record.proposed_series = series_candidate
                                 record.series_source = "filename"
                 
                 # ШАГ 3: Финальный fallback - используем metadata если есть
                 if record.metadata_series:
                     series = self._extract_series_from_metadata(record.metadata_series.strip())
-                    if self._is_valid_series(series):
+                    extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                    if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                         record.proposed_series = series
                         record.series_source = "metadata"
                 continue
@@ -362,7 +386,8 @@ class Pass2SeriesFilename:
                     # Используем только metadata если есть
                     if record.metadata_series:
                         series = record.metadata_series.strip()
-                        if self._is_valid_series(series):
+                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
+                        if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
                             record.proposed_series = series
                             record.series_source = "metadata"  # Метаданные как основной источник
                 else:
@@ -741,7 +766,10 @@ class Pass2SeriesFilename:
                     
                     # Если это лучший результат - запомнить
                     if score > best_score:
-                        if not validate or self._is_valid_series(series_candidate):
+                        # Валидируем series но пропускаем check на автора
+                        # (потому что здесь нет контекста об авторе из record)
+                        # True validation с контекстом произойдёт позже
+                        if not validate or self._is_valid_series(series_candidate, skip_author_check=True):
                             best_series = series_candidate
                             best_score = score
         
@@ -1064,14 +1092,21 @@ class Pass2SeriesFilename:
         
         return series_candidate if series_candidate else ""
     
-    def _is_valid_series(self, text: str) -> bool:
+    def _is_valid_series(self, text: str, extracted_author: str = None, skip_author_check: bool = False) -> bool:
         """
         Проверить что text выглядит как название серии, не как другое.
         Проверяет против:
         - filename_blacklist (список запрещенных слов)
         - collection_keywords (сборники, антологии)
         - service_words (том, книга, выпуск)
-        - AuthorName (не похоже на имя автора)
+        - AuthorName (не похоже на имя автора) - ЗА ИСКЛЮЧЕНИЕМ случаев когда это иное слово
+        
+        Args:
+            text: Проверяемый текст (название серии)
+            extracted_author: Опционально, извлечённый из файла автор. Если passed, не отвергаем
+                            series если она не совпадает с author (важно для паттернов "Author - Series")
+            skip_author_check: Если True - пропускаем проверку на похожесть на автора (используется при
+                            предварительной валидации без контекста об авторе)
         """
         if not text or len(text) < 2:
             return False
@@ -1079,11 +1114,21 @@ class Pass2SeriesFilename:
         text_lower = text.lower()
         
         # ПРОВЕРКА 1: filename_blacklist - запрещенные слова
+        # ВАЖНО: проверяем целые слова, не substring!
+        # "СИ" в blacklist относится к метатегам "(СИ)" в конце, а не к "Сид"
         for bl_word in self.filename_blacklist:
-            if bl_word.lower() in text_lower:
+            bl_word_lower = bl_word.lower()
+            # Проверяем как целое слово, отделённое границами
+            # Паттерны: "СИ" или "СИ)" или "(СИ)" или в начале/конце
+            import re
+            # Match bl_word as a whole word or at word boundary
+            pattern = r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$)'
+            if re.search(pattern, text_lower):
                 return False
         
         # ПРОВЕРКА 2: Исключить очевидные сборники/антологии
+        # Эти фразы обычно многословные (сборник, антология, коллекция)
+        # поэтому substring check более безопасен
         for keyword in self.collection_keywords:
             if keyword.lower() in text_lower:
                 return False
@@ -1110,12 +1155,42 @@ class Pass2SeriesFilename:
                         return False
         
         # ПРОВЕРКА 4: Убедиться что это НЕ похоже на автора!
-        try:
-            author = AuthorName(text, [])
-            if author.is_valid_author():
-                return False  # Это похоже на автора, отвергаем как серию
-        except Exception:
-            pass  # Если парсинг не сработал - это вероятно серия
+        # Если skip_author_check=True - пропускаем эту проверку
+        # (используется при предварительной валидации без контекста об авторе)
+        if not skip_author_check:
+            # КРИТИЧНО: если extracted_author передан, мы уже знаем что это не автор
+            # Например в паттерне "Author - Series" мы извлекли series из second part
+            # и у нас есть информация об авторе - нет смысла отвергать series
+            # только потому что она выглядит как фамилия (может быть совпадение)
+            try:
+                author = AuthorName(text)
+                if author.is_valid:
+                    # Это похоже на валийного автора... но есть ли контекст?
+                    if extracted_author:
+                        # У нас есть информация об извлечённом авторе
+                        # Пропускаем проверку на автора если text отличается от автора
+                        # "Охотник" != "Янковский Дмитрий" → это не автор, это серия
+                        try:
+                            extracted_author_obj = AuthorName(extracted_author)
+                            extracted_author_normalized = extracted_author_obj.normalized or extracted_author_obj.raw_name
+                            
+                            # Нормализуем text как если бы это был автор
+                            text_as_author_obj = AuthorName(text)
+                            text_as_author_normalized = text_as_author_obj.normalized or text_as_author_obj.raw_name
+                            
+                            # Если normalized версии совпадают - это один и тот же автор
+                            if extracted_author_normalized != text_as_author_normalized:
+                                # Это РАЗНЫЕ авторы/имена → text это серия, не автор
+                                return True
+                        except Exception:
+                            # Если нормализация не сработала - пытаемся простое сравнение
+                            if extracted_author.lower() != text.lower():
+                                return True
+                    
+                    # Если контекста нет или совпадает - отвергаем как автора
+                    return False
+            except Exception:
+                pass  # Если парсинг не сработал - это вероятно серия
         
         return True
     
@@ -1388,6 +1463,10 @@ class Pass2SeriesFilename:
         # Бонус: серия извлечена из скобок — более надёжный источник
         # Паттерны "(Series. service_words)" и "(Series service_words)" надёжнее чем "Author - Series (...)"
         # потому что в скобках явно указана серия, а не Title
+        # ВАЖНО: не даём бонус если extracted_series это service_word!
+        # Service words (Тетралогия, Дилогия, Трилогия) — это не названия серий,
+        # это описания количества книг. Если извлекли service_word из скобок —
+        # это не означает что скобки содержали название серии.
         max_score += 3
         bracket_series_patterns = [
             "Author - Title (Series. service_words)",
@@ -1397,7 +1476,18 @@ class Pass2SeriesFilename:
             "Author, Author. Title (Series)",
         ]
         if pattern in bracket_series_patterns:
-            score += 3
+            # Проверяем что extracted_series это не service_word перед начислением бонуса
+            extracted_series_lower = extracted_series.lower().strip()
+            is_service_word = False
+            for sw in self.service_words:
+                sw_lower = sw.lower()
+                if extracted_series_lower == sw_lower or extracted_series_lower.startswith(sw_lower + ' '):
+                    is_service_word = True
+                    break
+            
+            # Только даём бонус если это НЕ service_word
+            if not is_service_word:
+                score += 3
 
         # Длина извлечённой серии: больше слов = надёжнее
         word_count = len(extracted_series.split())

@@ -1,8 +1,127 @@
-# Архитектура системы регенерации CSV (Версия 2.5)
+# Архитектура системы регенерации CSV (Версия 2.6)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
 **📋 Полная история изменений и исправлений:** см. [CHANGELOG.md](CHANGELOG.md)
+
+**🆕 Март 6, 2026 - ИСПРАВЛЕНИЕ КРИТИЧЕСКИХ ОШИБОК В СИСТЕМЕ ИЗВЛЕЧЕНИЯ СЕРИЙ**
+
+#### 1️⃣ Исправление приоритета паттернов (Pattern Scoring Fix)
+- **Проблема:** Паттерны извлекающие служебные слова ("Тетралогия", "Дилогия") имели более высокий score чем паттерны извлекающие реальные названия серий
+  - Файл: `"Янковский Дмитрий - Охотник (Тетралогия).fb2"`
+  - Ожидается: `proposed_series="Охотник"` (реальное имя серии)
+  - Было: `proposed_series=""` (fallback к metadata "Правила подводной охоты")
+  
+- **Корневая причина:** Функция `_score_pattern_match()` давала бонус +3 за "скобки серии" для всех паттернов типа `"Author - Title (Series. service_words)"`, даже если они извлекали служебное слово
+  
+- **Решение:** Модифицирована логика бонуса в `_score_pattern_match()`:
+  ```python
+  # Бонус +3 только если extracted_series НЕ является serve_word
+  if pattern in bracket_series_patterns:
+      # Проверяем что extracted_series это не service_word
+      is_service_word = any(
+          extracted_series_lower == sw.lower() 
+          for sw in self.service_words
+      )
+      if not is_service_word:
+          score += 3  # Только если это реальное имя серии
+  ```
+  
+- **Результат:** Паттерн #10 "Author - Series (service_words)" теперь получает лучший score и выбирается вместо паттернов #11-14
+- **Реализация:** [passes/pass2_series_filename.py](passes/pass2_series_filename.py) линия 1437-1448
+
+#### 2️⃣ Исправление валидации с учётом контекста автора (Validation Context Fix)
+- **Проблема:** Валидация отвергала серии которые выглядели как фамилии, даже если это были другие слова
+  - Файл: `"Филимонов Олег - Злой среди чужих (Сид 1. ...)"`
+  - Проблема: `AuthorName("Сид").is_valid` → `True` (плутал за фамилию)
+  - Было: `proposed_series=""` (валидация отвергла "Сид" как потенциальную фамилию)
+  
+- **Решение:** Улучшена функция `_is_valid_series()` с поддержкой контекста автора:
+  ```python
+  def _is_valid_series(self, text, extracted_author=None, skip_author_check=False):
+      # Если extracted_author передан и отличается от text (после нормализации)
+      # → text это не автор, а серия!
+      if extracted_author:
+          extracted_author_normalized = AuthorName(extracted_author).normalized
+          text_normalized = AuthorName(text).normalized
+          if extracted_author_normalized != text_normalized:
+              return True  # Разные люди → text это серия
+  ```
+  
+- **Результат:** "Сид" принимается как валидная серия когда автор "Филимонов Олег"
+- **Реализация:** [passes/pass2_series_filename.py](passes/pass2_series_filename.py) линия 1067-1180
+
+#### 3️⃣ Исправление false-positive в проверке blacklist (Blacklist Word Boundary Fix)
+- **Проблема:** Blacklist проверка использовала substring matching, что давала false-positive
+  - `filename_blacklist` содержит: `"СИ"` (метатег самиздата)
+  - Файл: `"Филимонов Олег - Злой среди чужих (Сид 1. ...)"`
+  - Ошибка: Проверка находила `"СИ"` в `"Сид 1"` и отвергала всю серию!
+  
+- **Решение:** Изменена проверка на word boundary с использованием regex:
+  ```python
+  # Вместо: if bl_word.lower() in text_lower:
+  # Теперь:
+  pattern = r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$)'
+  if re.search(pattern, text_lower):
+      return False  # Отвергнуть только если целое слово
+  ```
+  
+- **Результат:** "Сид" теперь не блокируется blacklist словом "СИ"
+- **Реализация:** [passes/pass2_series_filename.py](passes/pass2_series_filename.py) линия 1105-1116
+
+**🆕 Март 6, 2026 (Третья волна) - ИСПРАВЛЕНИЕ: Context-aware validation для серий**
+
+#### 5️⃣ Context-Aware Series Validation (Pass2 Series Filename)
+- **Проблема:** Серии которые выглядят как имена人  отвергались валидацией
+  - Файл: `"Роберт Дж. Сойер\Сойер. Неандертальский параллакс 01. Гоминиды.fb2"`
+  - Проблема: `proposed_series` была пуста вместо **"Неандертальский параллакс"**
+  - Причина: Словосочетание "Неандертальский параллакс" выглядит как имя → валидация отвергала
+  - Логика: `AuthorName('Неандертальский параллакс').is_valid = True` = похоже на фамилию
+  
+- **Корневая причина:** Валидация не получала контекст какой автор был уже определён
+  - Когда предложенный автор "Сойер Роберт" ≠ "Неандертальский параллакс" → это другой объект!
+  - Но валидация не знала об авторе и только видела "Коротко Имя" структуру
+  
+- **Решение:** Передано `extracted_author` во все вызовы `_is_valid_series()` для валидации metadata/fallback
+  ```python
+  # БЫЛО (неправильно):
+  if self._is_valid_series(series):  # Без контекста - может быть названо как имя
+  
+  # СТАЛО (правильно):
+  extracted_author = record.proposed_author if record.proposed_author else None
+  if self._is_valid_series(series, extracted_author=extracted_author):  # С контекстом!
+  ```
+  
+- **Результат:** "Неандертальский параллакс" теперь принимается как валидная серия когда автор "Сойер Роберт"
+- **Реализация:** [passes/pass2_series_filename.py](passes/pass2_series_filename.py) обновлены все вызовы валидации с контекстом автора
+
+**🆕 Март 6, 2026 (Вторая волна) - ИСПРАВЛЕНИЕ: Удаление конфликтующей metadata проверки в Pass4**
+
+#### 4️⃣ Удаление METADATA AUTHOR CONFIRMATION Logic (Pass4 Optimization)
+- **Проблема:** Pass4 содержал логику "METADATA AUTHOR CONFIRMATION" которая пыталась "улучшить" авторов через cross-check с metadata
+  - Файл: `"Волков Тим\Земля живых.fb2"`
+  - Проблема: proposed_author был **"Волков Вадим"** вместо правильного **"Волков Тим"**
+  - Причина: Логика нашла в metadata "Вадима Волкова" вместо "Тима Волкова" и заменила!
+  
+- **Корневая причина:** Фундаментально неправильный подход в Pass4:
+  - `author_source="folder_dataset"` означает авторитетный источник (user-created folder hierarchy)
+  - Попытка улучшить через metadata разрушает уверенность в folder-based extraction
+  - Это затратно по ресурсам (требует парсинга всех FB2 файлов)
+  - И малоэффективно (metadata часто худшего качества, чем папки)
+  
+- **Решение:** Удалена вся "METADATA AUTHOR CONFIRMATION" логика:
+  ```python
+  # БЫЛО (неправильно):
+  # Если в metadata найден автор с совпадающей фамилией → заменить!
+  
+  # СТАЛО (правильно):
+  # folder_dataset → ОКОНЧАТЕЛЬНЫЙ источник, никогда не менять
+  # filename → может проверить с metadata если extraction неполная
+  # metadata → достаточен сам по себе, не нужна перепроверка
+  ```
+  
+- **Результат:** Файл "Земля живых" теперь правильно сохраняет `proposed_author="Волков Тим"`
+- **Реализация:** [passes/pass4_consensus.py](passes/pass4_consensus.py) удалена неправильная логика (строки ~104-144 в старой версии)
 
 **🆕 Март 2, 2026 - ИСПРАВЛЕНИЕ: Штраф за blacklist в выборе паттернов**
 - ✅ **Новый паттерн:** `"Author - Series service_words. Title"` для файлов типа `"Игнатов Михаил - Путь 10. Защитник. Второй пояс (СИ).fb2"`
