@@ -1,8 +1,51 @@
-# Архитектура системы регенерации CSV (Версия 2.6)
+# Архитектура системы регенерации CSV (Версия 2.7)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
 **📋 Полная история изменений и исправлений:** см. [CHANGELOG.md](CHANGELOG.md)
+
+**🆕 Март 6, 2026 (Четвёртая волна) - ИСПРАВЛЕНИЕ: Preserve metadata-confirmed series during cleanup**
+
+#### 6️⃣ False Series Cleanup Metadata Check (Pass4 Consensus)
+- **Проблема:** False series cleanup логика удаляла серии которые были подтверждены в FB2 metadata
+  - Файл: `"Волков Тим\Пленники Зоны. Кровь цвета хаки.fb2"`
+  - В FB2 XML: `<sequence name="Пленники Зоны" number="4"/>`
+  - Pass2 извлекает: `proposed_series="Пленники Зоны"` (из filename "Author. Series. Title")
+  - Pass4 cleanup удаляет: `proposed_series=""` ← ОШИБКА!
+  - Причина: Серия встречается один раз И не имеет service маркеров ("том", "выпуск" и т.д.)
+  
+- **Корневая причина:** Cleanup проверял ТРИ условия:
+  1. ✅ Нет service маркеров в имени серии
+  2. ✅ Серия встречается только один раз (в одном файле)
+  3. ✅ Источник извлечения = "filename"
+  
+  НО, cleanup **не проверял** нахождение серии в metadata! Это был критический упуск.
+  
+- **Решение:** Добавлена проверка `is_confirmed_in_metadata` ПЕРЕД удалением:
+  ```python
+  # Проверяем: экстрагирована ли та же серия из metadata?
+  is_confirmed_in_metadata = (
+      record.metadata_series and 
+      record.metadata_series.strip().lower() == series.lower()
+  )
+  
+  # Удаляем ТОЛЬКО если нет confirmации в metadata
+  if not has_service_marker and record.series_source == "filename" and not is_confirmed_in_metadata:
+      record.proposed_series = ""
+      record.series_source = ""
+  ```
+  
+  **Логика:** Если FB2 файл явно содержит `<sequence name="Пленники Зоны">` — это РЕАЛЬНАЯ СЕРИЯ, даже без service маркеров!
+  
+- **Результат:** "Пленники Зоны" теперь сохраняется в CSV:
+  ```
+  metadata_series: Пленники Зоны
+  proposed_series: Пленники Зоны  ← БЫЛО ПУСТО, теперь исправлено!
+  series_source: filename
+  ```
+  
+- **Реализация:** [passes/pass4_consensus.py](passes/pass4_consensus.py) линия 123-132
+- **Коммит:** `4f48df0` - Fix: Preserve series values confirmed in FB2 metadata during false-series cleanup
 
 **🆕 Март 6, 2026 - ИСПРАВЛЕНИЕ КРИТИЧЕСКИХ ОШИБОК В СИСТЕМЕ ИЗВЛЕЧЕНИЯ СЕРИЙ**
 
