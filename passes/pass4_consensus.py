@@ -120,10 +120,18 @@ class Pass4Consensus:
                 series_lower = series.lower()
                 has_service_marker = any(marker in series_lower for marker in service_markers)
                 
-                # If NO service markers AND from filename source
+                # FIX: Check if series is confirmed in metadata BEFORE removing it
+                # Even if it's a single-file series from filename, if metadata confirms it,
+                # we should keep it
+                is_confirmed_in_metadata = (
+                    record.metadata_series and 
+                    record.metadata_series.strip().lower() == series.lower()
+                )
+                
+                # If NO service markers AND from filename source AND NOT confirmed in metadata
                 # This is likely a title/subtitle, not a series
                 # (Single files tend to have made-up "series" from titles)
-                if not has_service_marker and record.series_source == "filename":
+                if not has_service_marker and record.series_source == "filename" and not is_confirmed_in_metadata:
                     # Clear it
                     record.proposed_series = ""
                     record.series_source = ""
