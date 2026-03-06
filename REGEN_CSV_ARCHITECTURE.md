@@ -1,8 +1,73 @@
-# Архитектура системы регенерации CSV (Версия 2.5)
+# Архитектура системы регенерации CSV (Версия 2.6)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
 **📋 Полная история изменений и исправлений:** см. [CHANGELOG.md](CHANGELOG.md)
+
+**🆕 Март 6, 2026 - ИСПРАВЛЕНИЕ КРИТИЧЕСКИХ ОШИБОК В СИСТЕМЕ ИЗВЛЕЧЕНИЯ СЕРИЙ**
+
+#### 1️⃣ Исправление приоритета паттернов (Pattern Scoring Fix)
+- **Проблема:** Паттерны извлекающие служебные слова ("Тетралогия", "Дилогия") имели более высокий score чем паттерны извлекающие реальные названия серий
+  - Файл: `"Янковский Дмитрий - Охотник (Тетралогия).fb2"`
+  - Ожидается: `proposed_series="Охотник"` (реальное имя серии)
+  - Было: `proposed_series=""` (fallback к metadata "Правила подводной охоты")
+  
+- **Корневая причина:** Функция `_score_pattern_match()` давала бонус +3 за "скобки серии" для всех паттернов типа `"Author - Title (Series. service_words)"`, даже если они извлекали служебное слово
+  
+- **Решение:** Модифицирована логика бонуса в `_score_pattern_match()`:
+  ```python
+  # Бонус +3 только если extracted_series НЕ является serve_word
+  if pattern in bracket_series_patterns:
+      # Проверяем что extracted_series это не service_word
+      is_service_word = any(
+          extracted_series_lower == sw.lower() 
+          for sw in self.service_words
+      )
+      if not is_service_word:
+          score += 3  # Только если это реальное имя серии
+  ```
+  
+- **Результат:** Паттерн #10 "Author - Series (service_words)" теперь получает лучший score и выбирается вместо паттернов #11-14
+- **Реализация:** [passes/pass2_series_filename.py](passes/pass2_series_filename.py) линия 1437-1448
+
+#### 2️⃣ Исправление валидации с учётом контекста автора (Validation Context Fix)
+- **Проблема:** Валидация отвергала серии которые выглядели как фамилии, даже если это были другие слова
+  - Файл: `"Филимонов Олег - Злой среди чужих (Сид 1. ...)"`
+  - Проблема: `AuthorName("Сид").is_valid` → `True` (плутал за фамилию)
+  - Было: `proposed_series=""` (валидация отвергла "Сид" как потенциальную фамилию)
+  
+- **Решение:** Улучшена функция `_is_valid_series()` с поддержкой контекста автора:
+  ```python
+  def _is_valid_series(self, text, extracted_author=None, skip_author_check=False):
+      # Если extracted_author передан и отличается от text (после нормализации)
+      # → text это не автор, а серия!
+      if extracted_author:
+          extracted_author_normalized = AuthorName(extracted_author).normalized
+          text_normalized = AuthorName(text).normalized
+          if extracted_author_normalized != text_normalized:
+              return True  # Разные люди → text это серия
+  ```
+  
+- **Результат:** "Сид" принимается как валидная серия когда автор "Филимонов Олег"
+- **Реализация:** [passes/pass2_series_filename.py](passes/pass2_series_filename.py) линия 1067-1180
+
+#### 3️⃣ Исправление false-positive в проверке blacklist (Blacklist Word Boundary Fix)
+- **Проблема:** Blacklist проверка использовала substring matching, что давала false-positive
+  - `filename_blacklist` содержит: `"СИ"` (метатег самиздата)
+  - Файл: `"Филимонов Олег - Злой среди чужих (Сид 1. ...)"`
+  - Ошибка: Проверка находила `"СИ"` в `"Сид 1"` и отвергала всю серию!
+  
+- **Решение:** Изменена проверка на word boundary с использованием regex:
+  ```python
+  # Вместо: if bl_word.lower() in text_lower:
+  # Теперь:
+  pattern = r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$)'
+  if re.search(pattern, text_lower):
+      return False  # Отвергнуть только если целое слово
+  ```
+  
+- **Результат:** "Сид" теперь не блокируется blacklist словом "СИ"
+- **Реализация:** [passes/pass2_series_filename.py](passes/pass2_series_filename.py) линия 1105-1116
 
 **🆕 Март 2, 2026 - ИСПРАВЛЕНИЕ: Штраф за blacklist в выборе паттернов**
 - ✅ **Новый паттерн:** `"Author - Series service_words. Title"` для файлов типа `"Игнатов Михаил - Путь 10. Защитник. Второй пояс (СИ).fb2"`
