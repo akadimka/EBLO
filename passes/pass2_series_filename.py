@@ -151,22 +151,16 @@ class Pass2SeriesFilename:
                         # Передаём информацию об извлечённом авторе чтобы не отвергать series
                         # если она выглядит как фамилия (но это другое слово чем автор)
                         extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                        if not self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
-                            # Series не прошёл валидацию - используем metadata fallback
-                            if record.metadata_series:
-                                series = record.metadata_series.strip()
-                                clean_series = self._clean_series_name(series)
-                                if self._is_valid_series(clean_series, extracted_author=extracted_author_for_validation):
-                                    record.proposed_series = clean_series
-                                    record.series_source = "metadata"
-                            continue  # Переходим к следующему файлу
+                        if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
+                            # ВСЕГДА используем clean candidate из filename как proposed_series
+                            # Это наиболее надёжный источник информации о серии
+                            # Валидизация только фильтрует очевидно неправильные значения
+                            record.proposed_series = clean_candidate
+                            record.series_source = "filename"
+                            continue  # Обработка завершена, переходим к следующему файлу
                         
-                        # ВСЕГДА используем clean candidate из filename как proposed_series
-                        # Это наиболее надёжный источник информации о серии
-                        # Валидизация только фильтрует очевидно неправильные значения
-                        record.proposed_series = clean_candidate
-                        record.series_source = "filename"
-                        continue  # Обработка завершена, переходим к следующему файлу
+                        # Series не прошёл валидацию - НЕ используем его, fallthrough к bracket/metadata fallback
+                        # (не выполняем continue, чтобы дать шанс fallback методам ниже)
                     
                     # ШАГ 2: Fallback - extractжем из скобок если паттерны не сработали
                     name_without_ext = filename.rsplit('.', 1)[0]
@@ -178,6 +172,7 @@ class Pass2SeriesFilename:
                     
                     # Пытаемся применить паттерны к имени ДО скобок
                     # (это может помочь extract "Бродяга" из "Аскеров - Бродяга (СИ)")
+                    series_candidate = None
                     series_from_before = self._extract_series_from_filename(name_before_brackets, validate=False)
                     if series_from_before:
                         record.extracted_series_candidate = series_from_before
@@ -914,10 +909,44 @@ class Pass2SeriesFilename:
             # "Садов Сергей - Горе победителям (Дилогия)"
             # "Валериев Игорь - 2. Ермак. Поход (Ермак 4-6)"
             # "Авраменко Александр - Солдат удачи 3. Взор Тьмы (Наследник)"
-            # Извлекаем: группу 2 (Series) - части до скобок
-            match = re.match(r'^(.+?)\s*-\s*([^()]+?)\s*\(', filename)
+            # ВАЖНО: проверяем что в скобках, чтобы понять - это паттерн "Series (service_words)" 
+            # или это просто "Title (service_word)" без серии!
+            # "Васильев Сергей - Эпоха перемен (Трилогия)" → скобки содержат ТОЛЬКО служебное слово
+            #    → это НЕ "Author - Series (service_words)" паттерн!
+            match = re.match(r'^(.+?)\s*-\s*([^()]+?)\s*\(([^)]*)\)', filename)
             if match:
-                series = match.group(2).strip()
+                series_candidate = match.group(2).strip()
+                brackets_content = match.group(3).strip()
+                
+                # Проверяем что в скобках - служебные слова или реальная серия?
+                # Если только служебные слова → это не паттерн "Series (service_words)",  
+                # это "Title (service_word)" в котором нет информации о серии
+                service_words_lower = [sw.lower() for sw in self.service_words]
+                brackets_lower = brackets_content.lower()
+                
+                # Проверяем: является ли содержимое скобок чисто служебным словом?
+                # "Трилогия" → is service_word → return empty
+                # "Ермак 4-6" → has actual series name → process and return
+                # "Сборник" → is in skip_list → return empty
+                skip_keywords = ['сборник', 'авторский', 'собрание', 'антология']
+                is_skip_keyword = any(kw in brackets_lower for kw in skip_keywords)
+                
+                is_pure_service_word = any(
+                    brackets_lower.startswith(sw) or brackets_lower == sw
+                    for sw in service_words_lower
+                )
+                
+                # Также проверяем простые числовые диапазоны: "1-3", "4-6"
+                is_numeric_range = bool(re.match(r'^\d+[-–—]\d+$', brackets_content))
+                
+                # Если скобки содержат ТОЛЬКОслужебное слово, число или skip-keyword → это не серия!
+                if is_pure_service_word or is_numeric_range or is_skip_keyword:
+                    # "Эпоха перемен (Трилогия)" или "Что-то (1-3)" → нет информации о серии в файле
+                    # Нужно вернуть пусто и дать возможность fallback на metadata
+                    return ""
+                
+                # Иначе это реальная серия в скобках  
+                series = series_candidate
                 # Удаляем префикс книги: "1. ", "2. ", "3. " и т.д.
                 series = re.sub(r'^\s*\d+\s*[.,]\s*', '', series).strip()
                 # Также удаляем том номер и название внутри серии: "Солдат удачи 3. Взор Тьмы" → "Солдат удачи"
