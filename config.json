@@ -209,6 +209,14 @@
     {
       "pattern": "Author - Series service_words. Title",
       "example": "Игнатов Михаил - Путь 10. Защитник. Второй пояс (СИ).fb2"
+    },
+    {
+      "pattern": "Author. Title (Series. Title. service_words)",
+      "example": "Злотников. Вечный (Мир Вечного 2. Вечный. Тетралогия).fb2"
+    },
+    {
+      "pattern": "Author - Title (Series. service_words) - year",
+      "example": "Земляной Андрей - Один на миллион (Один на миллион. Трилогия) - 2021.fb2"
     }
     
   ],

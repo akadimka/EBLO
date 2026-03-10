@@ -45,6 +45,7 @@ except ImportError:
 from logger import Logger
 from settings_manager import SettingsManager
 from name_normalizer import AuthorName
+from pattern_converter import compile_patterns
 
 
 class Pass2SeriesFilename:
@@ -61,6 +62,11 @@ class Pass2SeriesFilename:
         # Получить паттерны из конфига
         self.file_patterns = self.settings.get_list('author_series_patterns_in_files') or []
         self.metadata_patterns = self.settings.get_list('series_patterns_in_metadata') or []
+        
+        # Скомпилировать паттерны в regex (один раз при инициализации)
+        # Включает как file_patterns, так и metadata_patterns
+        self.compiled_file_patterns = compile_patterns(self.file_patterns)
+        self.compiled_metadata_patterns = compile_patterns(self.metadata_patterns)
         
         # Флаг: последний вызов _extract_series_from_brackets вернул иерархическую серию
         # (MainSeries N из "MainSeries N. SubSeries M-K") — не убирать trailing number
@@ -723,6 +729,62 @@ class Pass2SeriesFilename:
         
         return ""
     
+    def _analyze_filename_structure(self, filename: str) -> dict:
+        """
+        Анализировать структуру имена файла и выделить её элементы.
+        
+        Результат помогает выбрать ЛУЧШИЙ паттерн по соответствию структуре.
+        
+        Returns:
+            {
+                'has_brackets': bool,        # Есть ли скобки () в конце
+                'has_square_brackets': bool, # Есть ли квадратные скобки []
+                'bracket_content': str,      # Содержимое скобок (если есть)
+                'has_dots': int,             # Количество точек как разделителей
+                'has_dash': bool,            # Есть ли " - " (дефис с пробелами)
+                'dashes': int,               # Количество " - "
+                'parts_count': int,          # Количество основных частей (по дефисам/точкам)
+            }
+        """
+        structure = {
+            'has_brackets': False,
+            'has_square_brackets': False,
+            'bracket_content': '',
+            'has_dots': 0,
+            'has_dash': False,
+            'dashes': 0,
+            'parts_count': 0,
+        }
+        
+        # Проверяем скобки в конце
+        bracket_match = re.search(r'\(([^)]+)\)\s*$', filename)
+        if bracket_match:
+            structure['has_brackets'] = True
+            structure['bracket_content'] = bracket_match.group(1)
+        
+        # Проверяем квадратные скобки
+        if '[' in filename and ']' in filename:
+            structure['has_square_brackets'] = True
+        
+        # Считаем точки (как разделители, не в конце как расширение)
+        # Исключаем точку в конце для расширения
+        text_part = filename.rsplit('.', 1)[0] if filename.endswith('.fb2') else filename
+        structure['has_dots'] = text_part.count('. ')
+        
+        # Проверяем дефисы
+        if ' - ' in filename:
+            structure['has_dash'] = True
+            structure['dashes'] = filename.count(' - ')
+        
+        # Считаем основные части (по дефисам)
+        if structure['has_dash']:
+            structure['parts_count'] = structure['dashes'] + 1
+        else:
+            # Если нет дефисов, считаем по точкам
+            structure['parts_count'] = structure['has_dots'] + 1 if structure['has_dots'] > 0 else 1
+        
+        return structure
+    
     def _extract_series_from_filename(self, file_path: str, validate: bool = True) -> str:
         """
         Извлечь серию из имени файла, используя паттерны из конфига.
@@ -746,27 +808,67 @@ class Pass2SeriesFilename:
         # Эти метатеги не должны влиять на извлечение series
         name_for_parsing = re.sub(r'\s*\([СЛ]И\)\s*$', '', name_without_ext).strip()
         
-        # ШАГ 0: Найти ЛУЧШИЙ паттерн на основе оценки соответствия
+        # ШАГ 0: Найти ЛУЧШИЙ паттерн на основе оценки соответствия структуре файла
+        # Применяем ВСЕ паттерны, не только первый!
         best_series = None
-        best_score = -1
+        best_score = -100.0  # Низкий стартовый score
+        best_pattern = None
         
-        if self.file_patterns:
-            for pattern_obj in self.file_patterns:
-                pattern_str = pattern_obj.get('pattern', '')
-                series_candidate = self._apply_config_pattern(pattern_str, name_for_parsing)
+        # Анализируем структуру файла один раз
+        filename_structure = self._analyze_filename_structure(name_for_parsing)
+        
+        if self.compiled_file_patterns:
+            for pattern_str, compiled_regex, group_names in self.compiled_file_patterns:
+                # Применить скомпилированный regex
+                match = compiled_regex.match(name_for_parsing)
                 
-                if series_candidate:
-                    # Оценить соответствие паттерна структуре файла
-                    score = self._score_pattern_match(pattern_str, name_for_parsing, series_candidate)
+                if match:
+                    # Попытаться извлечь группу "series" из match
+                    series_candidate = None
                     
-                    # Если это лучший результат - запомнить
-                    if score > best_score:
+                    # Ищем группу "series" среди извлеченных групп
+                    # Она может быть названа 'series', 'series_service_words', и т.д.
+                    series_group_name = None
+                    for g_name in group_names:
+                        if 'series' in g_name:
+                            series_group_name = g_name
+                            break
+                    
+                    if series_group_name:
+                        # Извлекли группу с "series" в имени
+                        raw_series = match.group(series_group_name).strip()
+                        
+                        # Если имя группы содержит "service_words" или паттерн имеет скобки,
+                        # это значит что нужна специальная обработка содержимого скобок
+                        words = raw_series.split()
+                        last_word = words[-1] if words else ""
+                        
+                        if 'service_words' in series_group_name or '. ' in raw_series or '-' in last_word:
+                            # Применяем логику _extract_series_from_brackets для очистки
+                            series_candidate = self._extract_series_from_brackets(raw_series)
+                        else:
+                            # Иначе берем как есть
+                            series_candidate = raw_series
+                    
+                    # Если нет явной группы "series", проверяем есть ли скобки в паттерне
+                    # это означает что series информация в скобках
+                    if not series_candidate and '(' in pattern_str and ')' in pattern_str:
+                        # Используем старую логику _apply_config_pattern для обработки скобок
+                        series_candidate = self._apply_config_pattern(pattern_str, name_for_parsing)
+                    
+                    if series_candidate:
+                        # КЛЮЧЕВОЙ МОМЕНТ: ОЦЕНИТЬ соответствие паттерна структуре файла
+                        score = self._score_pattern_match(pattern_str, name_for_parsing, series_candidate)
+                        
                         # Валидируем series но пропускаем check на автора
                         # (потому что здесь нет контекста об авторе из record)
-                        # True validation с контекстом произойдёт позже
-                        if not validate or self._is_valid_series(series_candidate, skip_author_check=True):
+                        is_valid = not validate or self._is_valid_series(series_candidate, skip_author_check=True)
+                        
+                        # ВЫБИРАЕМ ЛУЧШИЙ: If score is better AND series is valid
+                        if is_valid and score > best_score:
                             best_series = series_candidate
                             best_score = score
+                            best_pattern = pattern_str
         
         if best_series:
             # Проверка 1: если best_series - это serve_word, не возвращаем его
@@ -1524,6 +1626,19 @@ class Pass2SeriesFilename:
         else:
             if '(' not in filename:
                 score += 2
+        
+        # КРИТИЧНА ПРОВЕРКА: Если файл имеет скобки с series info, а паттерн 
+        # это "Author - Series (...)" то это НЕПРАВИЛЬНЫЙ паттерн!
+        # "Author - Series" означает что part после "-" это series.
+        # Но если файл имеет "(something in brackets)", то структура это
+        # "Author - Title (Series info)", не "Author - Series (number)".
+        # Штрафуем такое несоответствие!
+        has_brackets = '(' in filename and ')' in filename
+        if pattern == 'Author - Series (service_words)' and has_brackets:
+            # Большой штраф за неправильное п interpretac паттерна структуры
+            score -= 5
+            if score < -1:
+                return -1
 
         # service_words в паттерне
         max_score += 1
