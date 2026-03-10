@@ -1,8 +1,61 @@
-# Архитектура системы регенерации CSV (Версия 2.7)
+# Архитектура системы регенерации CSV (Версия 2.8)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
 **📋 Полная история изменений и исправлений:** см. [CHANGELOG.md](CHANGELOG.md)
+
+**🆕 Март 10, 2026 - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Защита folder_dataset источника от перезаписи**
+
+#### 7️⃣ Folder Dataset Protection in Pass2 (Authoritative Source Preservation)
+- **Критическая проблема:** Pass2 перезаписывала `author_source="folder_dataset"` на `"filename"` при успешном извлечении автора из имени файла
+  - Файл: `"Роберт Дж. Сойер\Сойер. Вспомни, что будет.fb2"`
+  - Pass1 ПРАВИЛЬНО устанавливал: `author_source="folder_dataset"` (из папки)
+  - Pass2 НЕПРАВИЛЬНО переписывал на: `author_source="filename"` (из filename "Сойер")
+  - Результат в CSV: неправильный источник автора
+  
+- **Корневая причина:** Логика Pass2 проверяла, нужно ли пропустить файл:
+  ```python
+  if (record.author_source == "folder_dataset" and not needs_filename_fallback):
+      continue  # Пропустить - правильно!
+  ```
+  
+  НО, потом обрабатывала извлечение ВСЕХ файлов, включая успешно пропущенные:
+  ```python
+  if author:  # если извлекли из filename
+      record.author_source = "filename"  # ← ПЕРЕПИСАЛИ! ОШИБКА!
+  ```
+  
+  Логический разрыв: начало пропускает, конец переписывает.
+  
+- **Фундаментальный принцип:** Иерархия источников:
+  1. **folder_dataset** (папка!) — АВТОРИТЕТНА, никогда не перезаписывается
+  2. **filename** — применяется только если нет folder_dataset
+  3. **metadata** — fallback последнего варианта
+  
+  Пользователь ЯВНО создаёт папку иерархию для авторов. Это самый надежный источник информации.
+  
+- **Решение:** Добавлена защита в Pass2 перед любой перезаписью:
+  ```python
+  if author:
+      # НИКОГДА не переписываем folder_dataset
+      if record.author_source != "folder_dataset":
+          record.proposed_author = author
+          record.author_source = "filename"
+          # ... дальнейшая обработка
+      # else: Файл из folder, оставляем как есть
+  ```
+  
+- **Результат:** Все файлы в папках авторов теперь правильно сохраняют `author_source="folder_dataset"`:
+  ```
+  БЫЛО:
+    author_source: filename  ← НЕПРАВИЛЬНО
+  
+  СТАЛО:
+    author_source: folder_dataset  ← ПРАВИЛЬНО ✅
+  ```
+  
+- **Реализация:** [passes/pass2_filename.py](passes/pass2_filename.py) линия 467-481
+- **Коммит:** `b2800bf` - Fix: Protect folder_dataset source from being overwritten by filename extraction
 
 **🆕 Март 6, 2026 (Четвёртая волна) - ИСПРАВЛЕНИЕ: Preserve metadata-confirmed series during cleanup**
 
