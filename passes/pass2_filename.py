@@ -4,6 +4,11 @@ PASS 2: Extract authors from file names.
 Uses structural analysis to match filename against all known patterns
 in config.json author_series_patterns_in_files, then extracts author
 based on best pattern match.
+
+⚠️ CRITICAL RULE: Folder hierarchy extraction (folder_dataset source) is AUTHORITATIVE
+and takes absolute priority over all other sources including filename extraction.
+Files with author_source="folder_dataset" are NEVER modified in this pass.
+This reflects the user's explicit folder structure which is the most reliable source.
 """
 
 from typing import List, Optional
@@ -22,7 +27,12 @@ except ImportError:
 
 
 class Pass2Filename:
-    """PASS 2: Extract authors from filenames for records without folder_dataset."""
+    """PASS 2: Extract authors from filenames.
+    
+    CRITICAL RULE: Files with author_source="folder_dataset" are NEVER modified.
+    Folder hierarchy extraction is the most reliable source and takes absolute priority.
+    Only files without folder_dataset source (empty, metadata, filename, etc.) can be processed.
+    """
     
     # Words that indicate the extracted text is NOT an author name
     # IMPORTANT: Use COMPLETE meaningful keywords only, avoid words that are common surnames
@@ -389,11 +399,14 @@ class Pass2Filename:
     def execute(self, records: List) -> None:
         """Execute PASS 2: Extract authors from filenames.
         
-        PRIORITY: FILE -> METADATA (never the other way!)
+        CRITICAL RULE: folder_dataset source is AUTHORITATIVE and NEVER OVERWRITTEN!
         
-        For each record:
-        1. If author_source == "folder_dataset" → skip (already has from PASS 1)
-        2. ALWAYS try to extract from filename using structural analysis
+        Folder hierarchy extraction indicates the user explicitly created folder structure
+        for this author. This is the most reliable source and takes absolute priority.
+        
+        Processing order for each record:
+        1. If author_source == "folder_dataset" → SKIP (never override, keep as-is)
+        2. Try to extract author from filename using structural analysis
         3. If extraction succeeds → set as author, source="filename" (OVERRIDES metadata)
         4. If extraction fails → keep what was (metadata or empty)
         
@@ -473,16 +486,21 @@ class Pass2Filename:
             
             if author:
                 # Successfully extracted from filename
-                # This OVERRIDES metadata (FILE -> METADATA priority)
-                record.proposed_author = author
-                record.author_source = "filename"
-                record.needs_filename_fallback = False  # Clear the fallback flag since we found something
-                processed_count += 1
-                
-                # BUILD AUTHOR CACHE: Track this extraction for future abbreviation expansion
-                # This helps expand abbreviated names in subsequent files
-                # e.g., if we extract "Живой Алексей", cache that we've seen this full form
-                self._build_author_cache_from_extraction(author)
+                # IMPORTANT: NEVER OVERWRITE folder_dataset source!
+                # Folder hierarchy extraction is AUTHORITATIVE and should never be changed
+                if record.author_source != "folder_dataset":
+                    # No folder_dataset - use filename extraction
+                    # This OVERRIDES metadata (FILE -> METADATA priority)
+                    record.proposed_author = author
+                    record.author_source = "filename"
+                    record.needs_filename_fallback = False  # Clear the fallback flag since we found something
+                    processed_count += 1
+                    
+                    # BUILD AUTHOR CACHE: Track this extraction for future abbreviation expansion
+                    # This helps expand abbreviated names in subsequent files
+                    # e.g., if we extract "Живой Алексей", cache that we've seen this full form
+                    self._build_author_cache_from_extraction(author)
+                # else: Already has folder_dataset source - NEVER override it, keep existing
             # else: keep existing (might be metadata or empty)
         
         print(f"[PASS 2] Extracted {processed_count} authors from filenames, skipped {skipped_count} folder_dataset records")
