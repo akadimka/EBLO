@@ -1087,6 +1087,42 @@ class Pass2SeriesFilename:
                 self._last_was_hierarchical = True
                 return part0
         
+        # НОВОЕ: Если есть service word в конце БЕЗ точки
+        # "Я иду искать! Тетралогия" -> "Я иду искать!"
+        # "Демон 1-3" -> "Демон"
+        service_markers = {
+            'том', 'volume', 'vol', 'т.', 'v.',  # Volume/tome markers
+            'часть', 'part', 'п.', 'pt.',  # Part markers
+            'выпуск', 'issue', 'вып.',  # Issue markers
+            'книга', 'book', 'кн.',  # Book markers
+            'дилогия', 'duology', 'трилогия', 'trilogy',  # Series count
+            'тетралогия', 'tetralogy', 'пенталогия', 'pentalogy',
+            'роман-эпопея', 'epic novel',
+        }
+        
+        # Ищём service words в конце контента (отделённые пробелом или в начале слова)
+        # "Я иду искать! Тетралогия" -> parts = ["Я иду искать!", "Тетралогия"]
+        # "Демон 1-3" -> parts = ["Демон", "1-3"]
+        words = content.split()
+        if len(words) > 1:
+            last_word_lower = words[-1].lower()
+            
+            # Проверяем, является ли последнее слово service word
+            is_last_service_word = any(
+                last_word_lower.startswith(sw.lower()) or 
+                last_word_lower == sw.lower()
+                for sw in service_markers
+            )
+            
+            # Или это диапазон номеров
+            is_numeric_range = bool(re.match(r'^\d+[-–—]\d+$', words[-1]))
+            
+            if is_last_service_word or is_numeric_range:
+                # Возьмём все слова кроме последнего
+                series_candidate = ' '.join(words[:-1]).strip()
+                if series_candidate:
+                    return series_candidate
+        
         # Если есть числовой диапазон (1-3, 4-6), берем до него
         series_candidate = re.sub(r'\s*[\d\-]+\s*$', '', content).strip()
         

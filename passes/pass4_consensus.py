@@ -2,6 +2,7 @@
 PASS 4: Apply consensus author to files in same folder.
 """
 
+import re
 from pathlib import Path
 from typing import List, Dict, Optional
 from author_normalizer_extended import AuthorNormalizer
@@ -128,10 +129,31 @@ class Pass4Consensus:
                     record.metadata_series.strip().lower() == series.lower()
                 )
                 
+                # NEW FIX: Check if the filename contains evidence of a legitimate series pattern
+                # Pattern: "(Series. service_word)" or "(Series service_word)" like "(Солдат удачи. Тетралогия)" or "(Эпоха перемен Трилогия)"
+                # This indicates the original filename HAD a service word before extraction
+                has_pattern_evidence = False
+                if record.file_path and record.series_source == "filename":
+                    # Look for pattern: (series_name. service_word) or (series_name service_word) in filename
+                    filename = Path(record.file_path).name
+                    # Build regex to match (proposed_series. service_word) or (proposed_series service_word)
+                    # Need to escape special chars in series name
+                    series_escaped = re.escape(series)
+                    # Match: (Series_Name.? [service_word])  - dot is optional
+                    # This covers:
+                    # - "(Солдат удачи. Тетралогия)" 
+                    # - "(Эпоха перемен Трилогия)"
+                    # - "(Демон 1-3)"
+                    pattern = r'\(' + series_escaped + r'\.?\s+(?:\w+|[\d\-]+)\)'
+                    if re.search(pattern, filename):
+                        has_pattern_evidence = True
+                
                 # If NO service markers AND from filename source AND NOT confirmed in metadata
-                # This is likely a title/subtitle, not a series
+                # AND NOT from a legitimate (Series. service_words) pattern
+                # → This is likely a title/subtitle, not a series
                 # (Single files tend to have made-up "series" from titles)
-                if not has_service_marker and record.series_source == "filename" and not is_confirmed_in_metadata:
+                if (not has_service_marker and record.series_source == "filename" and 
+                    not is_confirmed_in_metadata and not has_pattern_evidence):
                     # Clear it
                     record.proposed_series = ""
                     record.series_source = ""
