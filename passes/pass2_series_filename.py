@@ -1315,40 +1315,54 @@ class Pass2SeriesFilename:
     
     def _extract_main_series_from_multi_level(self, content: str) -> str:
         """
-        Извлечь главную серию из комплексугруппы с subseries и subsubseries.
+        Извлечь иерархию сери из многоуровневой группы.
         
         Обрабатывает паттерны вроде:
-        - "Сид 1. Принцип талиона 1. Геката 1" → "Сид"
-        - "Мир Вечного 2. Вечный. Тетралогия" → "Мир Вечного"
+        - "Сид 1. Принцип талиона 1. Геката 1" → "Сид\Принцип талиона\Геката"
+        - "Сид 1. Принцип талиона 1" → "Сид\Принцип талиона"
+        - "Сид 1" → "Сид"
+        - "Мир Вечного 2. Вечный. Тетралогия" → "Мир Вечного\Вечный"
         - "Дракон 1-3" → "Дракон"
         
         Args:
             content: Содержимое группы (может быть Series. SubSeries. SubSubSeries)
             
         Returns:
-            Имя главной серии (без номера и без подсерий)
+            Иерархия серий разделенная backslash (без номеров)
         """
         if not content:
             return ""
         
         # Разделяем по точке+пробел (это разделитель уровней)
         parts = content.split('. ')
-        first_part = parts[0].strip() if parts else ""
         
-        if not first_part:
+        if not parts:
             return ""
         
-        # Из первой части удаляем номер в конце
+        # Обрабатываем каждую часть - из каждой удаляем номер в конце
         # "Сид 1" → "Сид"
-        # "Принцип талиона 1" → "Принцип талиона"  
-        # Ищем последовательность чисел/диапазонов в конце
-        series_without_number = re.sub(
-            r'\s*[\d\-\,\–]+\s*$',  # Числа, дефисы, диапазоны в конце
-            '',
-            first_part
-        ).strip()
+        # "Принцип талиона 1" → "Принцип талиона"
+        # "Геката 1" → "Геката"
+        hierarchy = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            
+            # Ищем последовательность чисел/диапазонов в конце
+            # и также служебные слова вроде "Тетралогия"
+            series_name = re.sub(
+                r'\s*(?:[\d\-\,\–]+|Дилогия|Трилогия|Тетралогия|Пентагония|Серия)\s*$',
+                '',
+                part,
+                flags=re.IGNORECASE
+            ).strip()
+            
+            if series_name:  # Добавляем только непустые части
+                hierarchy.append(series_name)
         
-        return series_without_number if series_without_number else first_part
+        # Объединяем через backslash
+        return '\\'.join(hierarchy) if hierarchy else ""
 
     def _extract_series_from_brackets(self, content: str) -> str:
         """
