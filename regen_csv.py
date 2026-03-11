@@ -44,6 +44,9 @@ class RegenCSVService:
         self.logger = Logger()
         self.extractor = FB2AuthorExtractor(config_path)
         
+        # Load configuration lists
+        self.collection_keywords = self.settings.get_list('collection_keywords')
+        
         # Working directory (where FB2 files are scanned from)
         self.work_dir = Path(self.settings.get_last_scan_path())
         self.folder_parse_limit = self.settings.get_folder_parse_limit()
