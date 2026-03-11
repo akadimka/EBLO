@@ -203,6 +203,10 @@
       "example": "Земляной Андрей, Орлов Борис - Академик (Странник 4-5) - 2022.fb2"
     },
     {
+      "pattern": "Author, Author. Title (Series. Title. service_words)",
+      "example": "Злотников, Николаев. Бешеный медведь (Мир вечного 1. Охота на охотника. Тетралогия).fb2"
+    },
+    {
       "pattern": "Author - Title (Series service_words)",
       "example": "Валериев Игорь - 2. Ермак. Поход (Ермак 4-6).fb2"
     },

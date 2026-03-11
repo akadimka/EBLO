@@ -47,11 +47,13 @@ def convert_simple_pattern_to_regex(pattern_str: str) -> str:
     - "(Author) - Title" → "^\\((?P<author>[^)]+)\\)\\s*-\\s+(?P<title>.+)$"
     - "[Series] - (Author)" → "^\\[(?P<series>[^\\]]+)\\]\\s*-\\s+\\((?P<author>[^)]+)\\)$"
     - "Author - Title" → "^(?P<author>.+?)\\s*-\\s+(?P<title>.+)$"
+    - "Author, Author. Title" → "^(?P<author>.+?),\s*(?P<author_2>.+?)\.\s+(?P<title>.+)$"
     
     Правила:
     - (Name) - содержимое в круглых скобках, группа = name.lower()
     - [Name] - содержимое в квадратных скобках, группа = name.lower()
     - Name - текст без скобок, группа = name.lower()
+    - Если группа повторяется, добавляется суффикс _2, _3 и т.д.
     """
     if not pattern_str or not isinstance(pattern_str, str):
         return ""
@@ -65,6 +67,7 @@ def convert_simple_pattern_to_regex(pattern_str: str) -> str:
     # Найти все токены и их позиции
     tokens = []
     last_end = 0
+    group_name_counts = {}  # Отслеживать количество использований каждого имени
     
     for match in re.finditer(token_pattern, pattern_str):
         # Текст перед этим токеном
@@ -76,29 +79,35 @@ def convert_simple_pattern_to_regex(pattern_str: str) -> str:
         plain_group = match.group(3)    # Name
         
         if bracket_group:
-            group_name = _normalize_group_name(bracket_group)
+            base_group_name = _normalize_group_name(bracket_group)
             bracket_type = '()'
-            tokens.append({
-                'before': before_text,
-                'name': group_name,
-                'bracket_type': bracket_type
-            })
         elif square_group:
-            group_name = _normalize_group_name(square_group)
+            base_group_name = _normalize_group_name(square_group)
             bracket_type = '[]'
-            tokens.append({
-                'before': before_text,
-                'name': group_name,
-                'bracket_type': bracket_type
-            })
         elif plain_group:
-            group_name = _normalize_group_name(plain_group)
+            base_group_name = _normalize_group_name(plain_group)
             bracket_type = 'plain'
-            tokens.append({
-                'before': before_text,
-                'name': group_name,
-                'bracket_type': bracket_type
-            })
+        
+        # Обработка дублирующихся имен групп - добавляем суффикс _2, _3 и т.д.
+        if base_group_name in group_name_counts:
+            group_name_counts[base_group_name] += 1
+            # Добавляем суффикс к имени группы
+            if group_name_counts[base_group_name] == 2:
+                # Для второго появления добавляем _2
+                final_group_name = base_group_name + '_2'
+            else:
+                # Для третьего + добавляем соответствующий номер
+                final_group_name = base_group_name + '_' + str(group_name_counts[base_group_name])
+        else:
+            # Первое появление - используем base имя без суффикса
+            group_name_counts[base_group_name] = 1
+            final_group_name = base_group_name
+        
+        tokens.append({
+            'before': before_text,
+            'name': final_group_name,
+            'bracket_type': bracket_type
+        })
         
         last_end = match.end()
     

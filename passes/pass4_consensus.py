@@ -131,22 +131,36 @@ class Pass4Consensus:
                 
                 # NEW FIX: Check if the filename contains evidence of a legitimate series pattern
                 # Pattern: "(Series. service_word)" or "(Series service_word)" like "(Солдат удачи. Тетралогия)" or "(Эпоха перемен Трилогия)"
-                # This indicates the original filename HAD a service word before extraction
+                # Also handles "(Series N. Additional info. service_word)" like "(Мир вечного 1. Охота на охотника. Тетралогия)"
+                # Also recognizes "(Series N-M)" patterns which are multi-file series indicators like "(Легион 1-3)", "(Легион 4-6)"
+                # Also recognizes "(Novels/Romany из цикла «Series»)" patterns like "(Романы из цикла «Артуа»)"
+                # This indicates the original filename HAD a service word or multi-file pattern before extraction
                 has_pattern_evidence = False
                 if record.file_path and record.series_source == "filename":
-                    # Look for pattern: (series_name. service_word) or (series_name service_word) in filename
                     filename = Path(record.file_path).name
-                    # Build regex to match (proposed_series. service_word) or (proposed_series service_word)
-                    # Need to escape special chars in series name
-                    series_escaped = re.escape(series)
-                    # Match: (Series_Name.? [service_word])  - dot is optional
-                    # This covers:
-                    # - "(Солдат удачи. Тетралогия)" 
-                    # - "(Эпоха перемен Трилогия)"
-                    # - "(Демон 1-3)"
-                    pattern = r'\(' + series_escaped + r'\.?\s+(?:\w+|[\d\-]+)\)'
-                    if re.search(pattern, filename):
-                        has_pattern_evidence = True
+                    
+                    # Find ALL brackets in the filename
+                    all_brackets = re.findall(r'\([^)]*\)', filename)
+                    
+                    for bracket_content in all_brackets:
+                        bracket_lower = bracket_content.lower()
+                        
+                        # Check if this bracket content has service markers
+                        have_service_marker_in_brackets = any(marker in bracket_lower for marker in service_markers)
+                        if have_service_marker_in_brackets:
+                            has_pattern_evidence = True
+                            break
+                        
+                        # Check for multi-file patterns like "N-M" which strongly indicate series
+                        if re.search(r'\d+[-,]\d+', bracket_content):
+                            has_pattern_evidence = True
+                            break
+                        
+                        # Check for "из цикла" or "из серии" patterns
+                        # Examples: (Романы из цикла «Артуа»), (Книги из цикла «Серия»)
+                        if re.search(r'из\s+(?:цикла|серии)', bracket_lower):
+                            has_pattern_evidence = True
+                            break
                 
                 # If NO service markers AND from filename source AND NOT confirmed in metadata
                 # AND NOT from a legitimate (Series. service_words) pattern

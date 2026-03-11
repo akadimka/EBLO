@@ -865,7 +865,9 @@ class Pass2SeriesFilename:
                         is_valid = not validate or self._is_valid_series(series_candidate, skip_author_check=True)
                         
                         # ВЫБИРАЕМ ЛУЧШИЙ: If score is better AND series is valid
-                        if is_valid and score > best_score:
+                        # NOTE: используем >= instead of > чтобы более специфичные паттерны (в конце списка)
+                        # могли replace earlier patterns if score is the same
+                        if is_valid and score >= best_score:
                             best_series = series_candidate
                             best_score = score
                             best_pattern = pattern_str
@@ -1657,8 +1659,16 @@ class Pass2SeriesFilename:
             "Author - Title (Series. service_words)",
             "Author - Title (Series service_words)",
             "Author. Title (Series. service_words)",
+            "Author. Title (Series. Title. service_words)",
             "Author, Author - Title (Series. service_words)",
             "Author, Author. Title (Series)",
+            "Author, Author. Title (Series. Title. service_words)",
+            # Patterns with year metadata at the end
+            "Author - Title (Series. service_words) - year",
+            "Author - Series (service_words) - year",
+            "Author - Title (Series service_words) - year",
+            "Author. Title (Series. service_words) - year",
+            "Author, Author. Title (Series. Title. service_words) - year",
         ]
         if pattern in bracket_series_patterns:
             # Проверяем что extracted_series это не service_word перед начислением бонуса
