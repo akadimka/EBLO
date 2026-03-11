@@ -1630,17 +1630,43 @@ class Pass2SeriesFilename:
                 score += 2
         
         # КРИТИЧНА ПРОВЕРКА: Если файл имеет скобки с series info, а паттерн 
-        # это "Author - Series (...)" то это НЕПРАВИЛЬНЫЙ паттерн!
-        # "Author - Series" означает что part после "-" это series.
-        # Но если файл имеет "(something in brackets)", то структура это
-        # "Author - Title (Series info)", не "Author - Series (number)".
-        # Штрафуем такое несоответствие!
+        # это "Author - Series (...)" - нужно проверить ЧТО в скобках!
+        # 
+        # ПРАВИЛЬНО: "Author - Series (service_word)" 
+        #   пример: "Горе победителям (Дилогия)" - в скобках ТОЛЬКО служебное слово
+        # 
+        # НЕПРАВИЛЬНО: "Author - Title (Series. Details)"
+        #   пример: "Заголовок (Серия 1-3)" - в скобках сложная структура
+        #
         has_brackets = '(' in filename and ')' in filename
         if pattern == 'Author - Series (service_words)' and has_brackets:
-            # Большой штраф за неправильное п interpretac паттерна структуры
-            score -= 5
-            if score < -1:
-                return -1
+            # Проверяем что находится в скобках
+            bracket_match = re.search(r'\(([^)]+)\)\s*$', filename)
+            if bracket_match:
+                bracket_content = bracket_match.group(1).strip().lower()
+                
+                # Проверяем наличие сложной структуры (точки, запятые и т.д.)
+                has_complex_structure = '.' in bracket_content or ',' in bracket_content
+                
+                # Проверяем: это ТОЛЬКО service_word (одно слово из списка)?
+                is_only_service_word = False
+                for sw in self.service_words:
+                    if bracket_content == sw.lower():
+                        is_only_service_word = True
+                        break
+                
+                if is_only_service_word and not has_complex_structure:
+                    # ✓ ПРАВИЛЬНО: в скобках только служебное слово (Дилогия, Трилогия и т.д.)
+                    # Это РОВНО соответствует паттерну "Author - Series (service_words)"
+                    # Даём БОНУС за правильное распознавание структуры
+                    score += 3
+                elif has_complex_structure:
+                    # ✗ НЕПРАВИЛЬНО: в скобках сложная структура с точками/запятыми
+                    # Это структура "Author - Title (info)", не "Author - Series (service_word)"
+                    # Штрафуем за неправильный паттерн
+                    score -= 5
+                    if score < -1:
+                        return -1
 
         # service_words в паттерне
         max_score += 1
@@ -1656,6 +1682,7 @@ class Pass2SeriesFilename:
         # это не означает что скобки содержали название серии.
         max_score += 3
         bracket_series_patterns = [
+            "Author - Series (service_words)",  # Добавлен: "Author - Series (service_word)"
             "Author - Title (Series. service_words)",
             "Author - Title (Series service_words)",
             "Author. Title (Series. service_words)",
