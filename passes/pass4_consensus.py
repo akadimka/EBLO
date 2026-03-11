@@ -100,16 +100,8 @@ class Pass4Consensus:
                     author_series_count[key] = []
                 author_series_count[key].append(record)
         
-        # Service words that indicate THIS IS a series (not just a title)
-        # If series contains these, it's likely genuine
-        service_markers = {
-            'том', 'volume', 'vol', 'т.', 'v.',  # Volume/tome markers
-            'часть', 'part', 'п.', 'pt.',  # Part markers
-            'выпуск', 'issue', 'вып.',  # Issue markers
-            'книга', 'book', 'кн.',  # Book markers
-            'сборник', 'collection',  # Collection
-            'трилогия', 'trilogy', 'дилогия', 'duology', 'тетралогия', 'tetralogy',  # Series count
-        }
+        # Load service words from config (markers that indicate THIS IS a series, not just a title)
+        service_markers = set(self.settings.get_list('service_words')) if self.settings else set()
         
         # Check each (author, series) pair
         for (author, series), records_with_series in author_series_count.items():
@@ -177,9 +169,7 @@ class Pass4Consensus:
         
         # SPECIAL HANDLING: If metadata contains specific series values, they take absolute priority
         # These values override all other extraction methods
-        special_series_values = [
-            "Шерлок Холмс. Свободные продолжения"
-        ]
+        special_series_values = self.settings.get_list('special_series_values') if self.settings else []
         
         for record in records:
             if record.metadata_series:
