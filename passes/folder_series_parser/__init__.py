@@ -12,7 +12,8 @@ from typing import Tuple, Optional
 def parse_series_from_folder_name(
     folder_name: str, 
     known_authors: set = None,
-    service_words: list = None
+    service_words: list = None,
+    collection_keywords: list = None
 ) -> Tuple[str, str]:
     """
     Парсить название папки и извлечь серию (если это именно серия, не автор).
@@ -23,6 +24,7 @@ def parse_series_from_folder_name(
         folder_name: Имя папки для парсинга
         known_authors: Набор известных авторов для проверки
         service_words: Список служебных слов
+        collection_keywords: Ключевые слова коллекций
     
     Returns:
         (series_name, series_source)
@@ -41,7 +43,8 @@ def parse_series_from_folder_name(
             folder_name, 
             best_pattern,
             known_authors=known_authors,
-            service_words=service_words
+            service_words=service_words,
+            collection_keywords=collection_keywords
         )
         if series:
             return (series, "folder_dataset")

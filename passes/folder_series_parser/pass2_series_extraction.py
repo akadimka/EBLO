@@ -12,7 +12,8 @@ def extract_series_from_folder_name(
     folder_name: str,
     pattern: str,
     known_authors: set = None,
-    service_words: list = None
+    service_words: list = None,
+    collection_keywords: list = None
 ) -> Optional[str]:
     """
     Извлечь серию по выбранному паттерну.
@@ -25,6 +26,7 @@ def extract_series_from_folder_name(
         pattern: Выбранный паттерн ("Series (Author)", "[Series]", etc)
         known_authors: Набор известных авторов для проверки (опционально)
         service_words: Служебные слова для фильтрации (опционально)
+        collection_keywords: Ключевые слова коллекций для фильтрации (опционально)
     
     Returns:
         Название серии или пустая строка если не смогли извлечь
@@ -67,9 +69,11 @@ def extract_series_from_folder_name(
         pass  # Если ошибка при парсинге - значит это вероятно серия
     
     # ✅ ФИЛЬТР: Исключить очевидные сборники
-    blacklist = ["сборник", "антология", "коллекция", "архив", "разное", "другое"]
+    if not collection_keywords:
+        collection_keywords = ["сборник", "антология", "коллекция", "архив", "разное", "другое"]
+    
     series_lower = series.lower()
-    if any(word in series_lower for word in blacklist):
+    if any(word.lower() in series_lower for word in collection_keywords):
         return ""
     
     return series

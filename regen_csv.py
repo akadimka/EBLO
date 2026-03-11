@@ -184,19 +184,17 @@ class RegenCSVService:
     def _clear_series_for_compilations(self) -> None:
         """Clear series for compilation/collection records.
         
-        If proposed_author contains 'сборник' (compilation), 
+        If proposed_author contains collection keyword, 
         proposed_series should be empty.
         """
-        compilation_keywords = ['сборник', 'compilation', 'сборник', 'антология', 'anthology']
-        
         for record in self.records:
             if not record.proposed_author:
                 continue
             
             author_lower = record.proposed_author.lower()
             
-            # Check if author contains compilation keyword
-            if any(kw in author_lower for kw in compilation_keywords):
+            # Check if author contains collection keyword
+            if any(kw.lower() in author_lower for kw in self.collection_keywords):
                 # Clear the series for compilations
                 record.proposed_series = ""
                 record.series_source = ""

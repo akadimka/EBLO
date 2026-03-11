@@ -195,8 +195,7 @@ class Pass2SeriesFilename:
                             # Если в скобках есть слово в конце (типов/дилогия/коллекция)
                             # "Сборник" и подобное - нужно пропустить
                             content_lower = content_in_brackets.lower()
-                            skip_keywords = ['сборник', 'сборник', 'авторский', 'собрание', 'антология']
-                            if any(kw in content_lower for kw in skip_keywords):
+                            if any(kw.lower() in content_lower for kw in self.collection_keywords):
                                 # Это сборник, не серия - пропускаем
                                 pass
                             else:
@@ -241,7 +240,7 @@ class Pass2SeriesFilename:
                                     # Проверяем, является ли часть после точки служебным словом
                                     is_service_word_after_dot = any(
                                         after_dot.startswith(sw.lower()) 
-                                        for sw in ['том', 'дилогия', 'трилогия', 'тетралогия', 'пенталогия', 'роман-эпопея']
+                                        for sw in self.service_words
                                     )
                                     if is_service_word_after_dot:
                                         # Это служебное слово - берем только первую часть
@@ -1193,10 +1192,7 @@ class Pass2SeriesFilename:
                 # Анализируем что в скобках
                 service_words_lower = [sw.lower() for sw in self.service_words]
                 brackets_lower = brackets_content.lower()
-                
-                # Проверяем различные случаи:
-                skip_keywords = ['сборник', 'авторский', 'собрание', 'антология']
-                is_skip_keyword = any(kw in brackets_lower for kw in skip_keywords)
+                is_skip_keyword = any(kw.lower() in brackets_lower for kw in self.collection_keywords)
                 
                 is_pure_service_word = any(
                     brackets_lower.startswith(sw) or brackets_lower == sw
@@ -1419,10 +1415,7 @@ class Pass2SeriesFilename:
             
             # Проверка служебных слов + blacklist + collection_keywords
             # "Мир Алекса Королёва. Сборник" → after_dot="сборник" → берём "Мир Алекса Королёва"
-            blacklist_words = [w.lower() for w in self.filename_blacklist]
-            collection_words = [w.lower() for w in self.collection_keywords]
-            service_check_words = ['том', 'дилогия', 'трилогия', 'тетралогия', 'пенталогия', 'роман-эпопея']
-            all_check_words = service_check_words + blacklist_words + collection_words
+            all_check_words = self.service_words + self.filename_blacklist + self.collection_keywords
             is_service_word = any(
                 after_dot_lower.startswith(sw.lower()) 
                 for sw in all_check_words
@@ -1456,15 +1449,8 @@ class Pass2SeriesFilename:
         # НОВОЕ: Если есть service word в конце БЕЗ точки
         # "Я иду искать! Тетралогия" -> "Я иду искать!"
         # "Демон 1-3" -> "Демон"
-        service_markers = {
-            'том', 'volume', 'vol', 'т.', 'v.',  # Volume/tome markers
-            'часть', 'part', 'п.', 'pt.',  # Part markers
-            'выпуск', 'issue', 'вып.',  # Issue markers
-            'книга', 'book', 'кн.',  # Book markers
-            'дилогия', 'duology', 'трилогия', 'trilogy',  # Series count
-            'тетралогия', 'tetralogy', 'пенталогия', 'pentalogy',
-            'роман-эпопея', 'epic novel',
-        }
+        # service_markers используются для проверки последнего слова
+        service_markers = self.service_words
         
         # Ищём service words в конце контента (отделённые пробелом или в начале слова)
         # "Я иду искать! Тетралогия" -> parts = ["Я иду искать!", "Тетралогия"]
@@ -1477,7 +1463,7 @@ class Pass2SeriesFilename:
             is_last_service_word = any(
                 last_word_lower.startswith(sw.lower()) or 
                 last_word_lower == sw.lower()
-                for sw in service_markers
+                for sw in self.service_words
             )
             
             # Или это диапазон номеров
