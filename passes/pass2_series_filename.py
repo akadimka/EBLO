@@ -758,8 +758,12 @@ class Pass2SeriesFilename:
             'parts_count': 0,
         }
         
-        # Проверяем скобки в конце
-        bracket_match = re.search(r'\(([^)]+)\)\s*$', filename)
+        # Проверяем скобки - ищем ПОСЛЕДНИЕ скобки в строке
+        # (они могут быть в конце или в середине, если потом идет дополнительный текст)
+        # Примеры:
+        # "Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия).fb2" → скобки в конце ✓
+        # "Посняков Андрей - Вещий князь (Вещий князь 1-4) Др. издание.fb2" → скобки в середине ✓
+        bracket_match = re.search(r'\(([^)]+)\)', filename)
         if bracket_match:
             structure['has_brackets'] = True
             structure['bracket_content'] = bracket_match.group(1)
