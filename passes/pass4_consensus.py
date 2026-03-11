@@ -153,6 +153,13 @@ class Pass4Consensus:
                         if re.search(r'из\s+(?:цикла|серии)', bracket_lower):
                             has_pattern_evidence = True
                             break
+                        
+                        # Check для multi-level series patterns like "Series N. SubSeries M. SubSubSeries K"
+                        # Examples: (Сид 1. Принцип талиона 1. Геката 1), (Война 1. Мир 2. Система 3)
+                        # Наличие 2+ точек-пробелов является веским доказательством иерархической структуры серии
+                        if bracket_content.count('. ') >= 2:
+                            has_pattern_evidence = True
+                            break
                 
                 # If NO service markers AND from filename source AND NOT confirmed in metadata
                 # AND NOT from a legitimate (Series. service_words) pattern

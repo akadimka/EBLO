@@ -126,6 +126,7 @@
     "трилогия",
     "trilogy",
     "дилогия",
+    "дилогии",
     "duology",
     "тетралогия",
     "tetralogy",
@@ -238,6 +239,14 @@
     {
       "pattern": "Author - Title (Series. service_words) - year",
       "example": "Земляной Андрей - Один на миллион (Один на миллион. Трилогия) - 2021.fb2"
+    },
+    {
+      "pattern": "Author - Title (Series service_words) Text",
+      "example": "Посняков Андрей - Вещий князь (Вещий князь 1-4) Др. издание.fb2"
+    },
+    {
+      "pattern": "Author - Title (Series service_words. SubSeries service_words. SubSubSeries service_words)",
+      "example": "Филимонов Олег - Злой среди чужих (Сид 1. Принцип талиона 1. Геката 1).fb2"
     }
     
   ],

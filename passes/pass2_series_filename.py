@@ -740,6 +740,7 @@ class Pass2SeriesFilename:
                 'has_brackets': bool,        # Есть ли скобки () в конце
                 'has_square_brackets': bool, # Есть ли квадратные скобки []
                 'bracket_content': str,      # Содержимое скобок (если есть)
+                'bracket_parts': int,        # Количество частей в скобках (по '. ')
                 'has_dots': int,             # Количество точек как разделителей
                 'has_dash': bool,            # Есть ли " - " (дефис с пробелами)
                 'dashes': int,               # Количество " - "
@@ -750,6 +751,7 @@ class Pass2SeriesFilename:
             'has_brackets': False,
             'has_square_brackets': False,
             'bracket_content': '',
+            'bracket_parts': 0,
             'has_dots': 0,
             'has_dash': False,
             'dashes': 0,
@@ -761,6 +763,9 @@ class Pass2SeriesFilename:
         if bracket_match:
             structure['has_brackets'] = True
             structure['bracket_content'] = bracket_match.group(1)
+            # Считаем части внутри скобок (разделены на '. ')
+            # "Серия (Точка, Точка)" имеет как '. ' (две точки с пробелом)
+            structure['bracket_parts'] = structure['bracket_content'].count('. ') + 1
         
         # Проверяем квадратные скобки
         if '[' in filename and ']' in filename:
@@ -785,6 +790,116 @@ class Pass2SeriesFilename:
         
         return structure
     
+    def _analyze_pattern_structure(self, pattern_str: str) -> dict:
+        """
+        Анализировать структуру паттерна и выделить его элементы.
+        
+        Паттерны имеют вид: "Author - Title (Series. service_words)" и т.д.
+        
+        Returns:
+            {
+                'has_brackets': bool,        # Есть ли скобки () в паттерне
+                'has_square_brackets': bool, # Есть ли квадратные скобки []
+                'bracket_parts': int,        # Сколько частей в скобках (по '. ')
+                'has_dash': bool,            # Есть ли " - " в паттерне
+                'dashes': int,               # Количество " - "
+                'main_parts': int,           # Количество основных блоков вне скобок
+            }
+        """
+        structure = {
+            'has_brackets': False,
+            'has_square_brackets': False,
+            'bracket_parts': 0,
+            'has_dash': False,
+            'dashes': 0,
+            'main_parts': 0,
+        }
+        
+        # Проверяем скобки
+        if '(' in pattern_str and ')' in pattern_str:
+            structure['has_brackets'] = True
+            # Извлекаем содержимое скобок
+            bracket_match = re.search(r'\(([^)]+)\)', pattern_str)
+            if bracket_match:
+                bracket_content = bracket_match.group(1)
+                # Считаем части внутри скобок (разделены на '. ')
+                # "Series. service_words" → 2 части
+                # "Series service_words. SubSeries service_words. SubSubSeries" → 3 части
+                structure['bracket_parts'] = bracket_content.count('. ') + 1
+        
+        # Проверяем квадратные скобки
+        if '[' in pattern_str and ']' in pattern_str:
+            structure['has_square_brackets'] = True
+        
+        # Проверяем дефисы
+        if ' - ' in pattern_str:
+            structure['has_dash'] = True
+            structure['dashes'] = pattern_str.count(' - ')
+        
+        # Считаем основные части (блоки вне скобок)
+        # Удаляем содеримое скобок и считаем оставшиеся части
+        pattern_without_brackets = re.sub(r'\([^)]*\)', '', pattern_str)
+        if ' - ' in pattern_without_brackets:
+            structure['main_parts'] = pattern_without_brackets.count(' - ') + 1
+        else:
+            structure['main_parts'] = 1 if pattern_without_brackets.strip() else 0
+        
+        return structure
+    
+    def _structures_match(self, file_structure: dict, pattern_structure: dict) -> bool:
+        """
+        Сравнить структуру файла со структурой паттерна.
+        
+        Паттерн подходит файлу если:
+        - Both have/don't have brackets
+        - If both have brackets: number of parts inside brackets should match
+        - Dash count should match
+        
+        Args:
+            file_structure: Результат _analyze_filename_structure()
+            pattern_structure: Результат _analyze_pattern_structure()
+            
+        Returns:
+            True если структуры совпадают
+        """
+        # ОСНОВНОЙ КРИТЕРИЙ: Структуры должны совпадать
+        
+        # DEBUG
+        import sys
+        if 'сид' in str(file_structure.get('bracket_content', '')).lower():
+            print(f"[_structures_match] file_has_brackets={file_structure['has_brackets']}, pattern_has_brackets={pattern_structure['has_brackets']}", file=sys.stderr)
+        
+        # 1. Скобки: beide или обе есть, nebo обе нет
+        if file_structure['has_brackets'] != pattern_structure['has_brackets']:
+            return False
+        
+        # 2. Если есть скобки - проверяем, сколько уровней (по точкам внутри скобок)
+        # Файл: "Сид 1. Принцип талиона 1. Геката 1" → 2 точки = 3 уровня
+        # Паттерн: "Series. SubSeries. SubSubSeries" → две точки, описывает 3 уровня → bracket_parts=3
+        if file_structure['has_brackets'] and pattern_structure['has_brackets']:
+            # Считаем точки в содеримом скобок файла
+            bracket_content = file_structure['bracket_content']
+            file_bracket_parts = bracket_content.count('. ') + 1 if bracket_content else 0
+            pattern_bracket_parts = pattern_structure['bracket_parts']
+            
+            # Если в файле есть точки (многоуровневая структура), требуем точное совпадение
+            # Например, если файл имеет "Серия 1. Подсерия 2. Подподсерия 3" (3 уровня),
+            # паттерн ДОЛЖЕН быть для 3 уровней, а не для 2 уровней
+            if file_bracket_parts > 1:
+                # Требуем точное совпадение для многоуровневых структур
+                if file_bracket_parts != pattern_bracket_parts:
+                    return False
+            else:
+                # Для простых одноуровневых структур допускаем небольшой допуск
+                if abs(file_bracket_parts - pattern_bracket_parts) > 1:
+                    return False
+        
+        # 3. Дефисы: количество должно совпадать (или быть близко)
+        if abs(file_structure['dashes'] - pattern_structure['dashes']) > 1:
+            return False
+        
+        return True
+    
     def _extract_series_from_filename(self, file_path: str, validate: bool = True) -> str:
         """
         Извлечь серию из имени файла, используя паттерны из конфига.
@@ -808,6 +923,11 @@ class Pass2SeriesFilename:
         # Эти метатеги не должны влиять на извлечение series
         name_for_parsing = re.sub(r'\s*\([СЛ]И\)\s*$', '', name_without_ext).strip()
         
+        # DEBUG
+        if 'сид' in name_for_parsing.lower():
+            import sys
+            print(f"[DEBUG] name_for_parsing='{name_for_parsing}'", file=sys.stderr)
+        
         # ШАГ 0: Найти ЛУЧШИЙ паттерн на основе оценки соответствия структуре файла
         # Применяем ВСЕ паттерны, не только первый!
         best_series = None
@@ -817,8 +937,27 @@ class Pass2SeriesFilename:
         # Анализируем структуру файла один раз
         filename_structure = self._analyze_filename_structure(name_for_parsing)
         
+        # DEBUG
+        if 'сид' in name_for_parsing.lower():
+            import sys
+            print(f"[DEBUG] filename_structure['has_brackets']={filename_structure['has_brackets']}", file=sys.stderr)
+        
         if self.compiled_file_patterns:
             for pattern_str, compiled_regex, group_names in self.compiled_file_patterns:
+                # ШАГ 1: ПРОВЕРКА СТРУКТУРЫ - паттерн соответствует структуре файла?
+                pattern_structure = self._analyze_pattern_structure(pattern_str)
+                structures_match = self._structures_match(filename_structure, pattern_structure)
+                
+                # DEBUG для Филимонова
+                if 'сид' in name_for_parsing.lower():
+                    import sys
+                    if structures_match:
+                        print(f"[MATCH] {pattern_str[:60]:60s} | file_br={filename_structure['has_brackets']} pattern_br={pattern_structure['has_brackets']}", file=sys.stderr)
+                    
+                if not structures_match:
+                    # Структуры не совпадают - пропускаем этот паттерн
+                    continue
+                
                 # Применить скомпилированный regex
                 match = compiled_regex.match(name_for_parsing)
                 
@@ -838,12 +977,13 @@ class Pass2SeriesFilename:
                         # Извлекли группу с "series" в имени
                         raw_series = match.group(series_group_name).strip()
                         
-                        # Если имя группы содержит "service_words" или паттерн имеет скобки,
-                        # это значит что нужна специальная обработка содержимого скобок
-                        words = raw_series.split()
-                        last_word = words[-1] if words else ""
-                        
-                        if 'service_words' in series_group_name or '. ' in raw_series or '-' in last_word:
+                        # ПРОВЕРКА: это комплексная группа с subseries/subsubseries?
+                        # Имя группы вроде: "series_service_words__subseries_service_words__subsubseries_service_words"
+                        if 'subseries' in series_group_name or 'subsubseries' in series_group_name:
+                            # Используем специальную обработку для многоуровневых серий
+                            # "Сид 1. Принцип талиона 1. Геката 1" → "Сид"
+                            series_candidate = self._extract_main_series_from_multi_level(raw_series)
+                        elif 'service_words' in series_group_name or '. ' in raw_series or '-' in raw_series.split()[-1:]:
                             # Применяем логику _extract_series_from_brackets для очистки
                             series_candidate = self._extract_series_from_brackets(raw_series)
                         else:
@@ -871,8 +1011,10 @@ class Pass2SeriesFilename:
                             best_series = series_candidate
                             best_score = score
                             best_pattern = pattern_str
+    
         
         if best_series:
+            
             # Проверка 1: если best_series - это serve_word, не возвращаем его
             # Serve_words это служебные слова, не названия серий
             # ВАЖНО: сравниваем целое слово, не префикс!
@@ -891,9 +1033,23 @@ class Pass2SeriesFilename:
                 # Проверка 2: КРИТИЧНО - проверить blacklist даже если validate=False
                 # Blacklist всегда должна проверяться, это не результат валидации
                 # а фильтр для явно запрещенных слов
+                # ВАЖНО: проверяем ПОЛНОЕ совпадение целого слова, не подстроку!
+                # "СИ" не должна совпадать с "Сид" - это разные слова
                 is_blacklisted = False
                 for bl_word in self.filename_blacklist:
-                    if bl_word.lower() in best_series_lower:
+                    bl_word_lower = bl_word.lower().strip()
+                    
+                    # Проверяем только полные совпадения целого слова:
+                    # 1. Полное совпадение: "Тетралогия" == "Тетралогия"
+                    # 2. Слово в начале: "Тетралогия и еще" → "Тетралогия" match
+                    # 3. Слово в конце: "что-то Тетралогия" → "Тетралогия" match
+                    # 4. Слово в середине: "то Тетралогия то" → "Тетралогия" match
+                    # НО НЕ: "СИ" не совпадает с "Сид" (это не целое слово)
+                    
+                    if (best_series_lower == bl_word_lower or
+                        best_series_lower.startswith(bl_word_lower + ' ') or
+                        best_series_lower.endswith(' ' + bl_word_lower) or
+                        ' ' + bl_word_lower + ' ' in ' ' + best_series_lower + ' '):
                         is_blacklisted = True
                         break
                 
@@ -935,8 +1091,12 @@ class Pass2SeriesFilename:
             
             # Если содержит " - ", это скорее всего "Author - Series" паттерн
             # Нужно пропустить и дать обработаться config pattern
+            # КЛЮЧЕВОЙ МОМЕНТ: мы уже ПЫТАЛИСЬ с config pattern! 
+            # Если config pattern не вернул результат (best_series = None), 
+            # то это не работает для этого файла - не нужно возвращать неправильный результат!
+            # Лучше вернуть пусто чем неправильно
             if ' - ' in potential_series:
-                pass  # Skip: let config pattern handle "Author - Series.Title"
+                pass  # Skip: config pattern was first priority, don't fall back to Rule 3
             # Если это просто одно слово без пробелов и без  специальных символов
             # то это скорее всего фамилия автора, а не название серии
             elif ' ' not in potential_series and len(potential_series) < 50:
@@ -1149,6 +1309,43 @@ class Pass2SeriesFilename:
         
         return ""
     
+    def _extract_main_series_from_multi_level(self, content: str) -> str:
+        """
+        Извлечь главную серию из комплексугруппы с subseries и subsubseries.
+        
+        Обрабатывает паттерны вроде:
+        - "Сид 1. Принцип талиона 1. Геката 1" → "Сид"
+        - "Мир Вечного 2. Вечный. Тетралогия" → "Мир Вечного"
+        - "Дракон 1-3" → "Дракон"
+        
+        Args:
+            content: Содержимое группы (может быть Series. SubSeries. SubSubSeries)
+            
+        Returns:
+            Имя главной серии (без номера и без подсерий)
+        """
+        if not content:
+            return ""
+        
+        # Разделяем по точке+пробел (это разделитель уровней)
+        parts = content.split('. ')
+        first_part = parts[0].strip() if parts else ""
+        
+        if not first_part:
+            return ""
+        
+        # Из первой части удаляем номер в конце
+        # "Сид 1" → "Сид"
+        # "Принцип талиона 1" → "Принцип талиона"  
+        # Ищем последовательность чисел/диапазонов в конце
+        series_without_number = re.sub(
+            r'\s*[\d\-\,\–]+\s*$',  # Числа, дефисы, диапазоны в конце
+            '',
+            first_part
+        ).strip()
+        
+        return series_without_number if series_without_number else first_part
+
     def _extract_series_from_brackets(self, content: str) -> str:
         """
         Извлечь имя серии из содержимого скобок.
@@ -1696,6 +1893,8 @@ class Pass2SeriesFilename:
             "Author - Title (Series service_words) - year",
             "Author. Title (Series. service_words) - year",
             "Author, Author. Title (Series. Title. service_words) - year",
+            # Multi-level series patterns (главная серия. подсерия. подподсерия)
+            "Author - Title (Series service_words. SubSeries service_words. SubSubSeries service_words)",
         ]
         if pattern in bracket_series_patterns:
             # Проверяем что extracted_series это не service_word перед начислением бонуса
@@ -1710,7 +1909,7 @@ class Pass2SeriesFilename:
             # Только даём бонус если это НЕ service_word
             if not is_service_word:
                 score += 3
-
+        
         # Длина извлечённой серии: больше слов = надёжнее
         word_count = len(extracted_series.split())
         max_score += 6
