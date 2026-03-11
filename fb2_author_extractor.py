@@ -56,14 +56,8 @@ class FB2AuthorExtractor:
             self.settings.settings.get('abbreviations_preserve_case', [])
         )
         
-        # Маркеры сборников/антологий
-        self.anthology_markers = [
-            'сборник', 'антология', 'коллекция', 'хиты', 'лучшее', 'избранное',
-            'сборник рассказов', 'сборник повестей', 'сборник произведений',
-            'best of', 'anthology', 'collection', 'digest',
-            'сборник военной', 'сборник научной', 'сборник фантастики',
-            'избранные произведения', 'лучшие рассказы', 'лучшие повести'
-        ]
+        # Маркеры сборников/антологий из конфига
+        self.anthology_markers = self.settings.get_list('collection_keywords')
     
     def resolve_author_by_priority(
         self,
@@ -943,8 +937,8 @@ class FB2AuthorExtractor:
     def _looks_like_series_description(self, text: str) -> bool:
         """Check if text looks like series name, not author name."""
         try:
-            # Blacklist слова, указывающие на серию/сборник
-            blacklist = ['выпуск', 'сборник', 'серия', 'цикл', 'книга', 'том', 'часть', 'номер', 'сборка']
+            # Blacklist слова, указывающие на серию/сборник (из конфига)
+            blacklist = self.settings.get_list('filename_blacklist') + self.settings.get_list('collection_keywords')
             text_lower = text.lower()
             
             # Если содержит blacklist слова - это серия

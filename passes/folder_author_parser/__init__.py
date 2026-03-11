@@ -10,20 +10,7 @@ from .pass0_structural_analysis import analyze_structure
 from .pass1_pattern_selection import select_pattern
 from .pass2_author_extraction import extract_author
 
-# Blacklist categories
-BLACKLIST_STARTS = [
-    'Серия',
-    'Сборник',
-    'Коллекция',
-    'Антология',
-    'Цикл',
-    'Подборка',
-    'Архив',
-    'Разное',
-    'Другое',
-    'Unknown',
-    'Various',
-]
+# Blacklist categories загружаются из конфига в функциях
 
 
 def parse_author_from_folder_name(folder_name: str) -> str:
@@ -59,8 +46,20 @@ def parse_author_from_folder_name(folder_name: str) -> str:
     name = folder_name.strip()
     
     # ==================== Check blacklist ====================
+    # Загружаем категории из конфига
+    try:
+        from settings_manager import SettingsManager
+        settings = SettingsManager()
+        blacklist_starts = settings.get_list('collection_keywords') + ['Unknown', 'Various']
+    except Exception:
+        # Fallback если конфиг недоступен
+        blacklist_starts = [
+            'Серия', 'Сборник', 'Коллекция', 'Антология', 'Цикл', 'Подборка',
+            'Архив', 'Разное', 'Другое', 'Unknown', 'Various'
+        ]
+    
     name_lower = name.lower()
-    for word in BLACKLIST_STARTS:
+    for word in blacklist_starts:
         if name_lower.startswith(word.lower()):
             return ""  # This is a category, not an author
     
@@ -81,5 +80,4 @@ __all__ = [
     'analyze_structure',
     'select_pattern',
     'extract_author',
-    'BLACKLIST_STARTS',
 ]

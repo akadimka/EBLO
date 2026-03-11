@@ -70,7 +70,14 @@ def extract_series_from_folder_name(
     
     # ✅ ФИЛЬТР: Исключить очевидные сборники
     if not collection_keywords:
-        collection_keywords = ["сборник", "антология", "коллекция", "архив", "разное", "другое"]
+        # Fallback: загрузить из конфига если не передан как параметр
+        try:
+            from settings_manager import SettingsManager
+            settings = SettingsManager()
+            collection_keywords = settings.get_list('collection_keywords')
+        except Exception:
+            # Final fallback если конфиг недоступен
+            collection_keywords = ["сборник", "антология", "коллекция", "архив", "разное", "другое"]
     
     series_lower = series.lower()
     if any(word.lower() in series_lower for word in collection_keywords):
