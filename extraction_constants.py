@@ -2,22 +2,43 @@
 Константы для извлечения авторов и серий из различных источников.
 
 Определяет приоритеты источников и конфигурацию уровня уверенности.
+
+ПРИОРИТЕТЫ ВСЕГДА ЧИТАЮТСЯ ИЗ config.json И НИКОГДА НЕ МЕНЯЮТСЯ!
 """
+
+try:
+    from settings_manager import SettingsManager
+    _settings = SettingsManager('config.json')
+    _priority_config = _settings.settings.get('extraction_priority_order', {})
+    _author_priorities = _priority_config.get('author', {})
+    _series_priorities = _priority_config.get('series', {})
+except Exception:
+    # Fallback если конфиг не загрузился
+    _author_priorities = {'FOLDER_STRUCTURE': 3, 'FILENAME': 2, 'FB2_METADATA': 1}
+    _series_priorities = {'FOLDER_STRUCTURE': 3, 'FILENAME': 2, 'FB2_METADATA': 1}
 
 
 class AuthorExtractionPriority:
     """
-    Приоритет источников для извлечения авторов.
+    Приоритет источников для извлечения авторов (ИЗ CONFIG.JSON).
     
-    Числовое значение определяет порядок: выше число = выше приоритет.
-    Порядок обработки: от 1 к 3 (но выбирается по наибольшему приоритету).
+    Числовое значение определяет приоритет: выше число = выше приоритет.
+    
+    ПРИОРИТЕТЫ:
+    - FOLDER_STRUCTURE = 3 (МАКСИМАЛЬНЫЙ)
+    - FILENAME = 2 (СРЕДНИЙ)
+    - FB2_METADATA = 1 (МИНИМАЛЬНЫЙ)
     """
-    FOLDER_STRUCTURE = 1    # Уровень 1: структура папок
-    FILENAME = 2            # Уровень 2: название файла
-    FB2_METADATA = 3        # Уровень 3: метаданные FB2
+    FOLDER_STRUCTURE = _author_priorities.get('FOLDER_STRUCTURE', 3)
+    FILENAME = _author_priorities.get('FILENAME', 2)
+    FB2_METADATA = _author_priorities.get('FB2_METADATA', 1)
     
-    # Порядок итерации для попытки извлечения (от низшего к высшему приоритету)
-    ORDER = [FOLDER_STRUCTURE, FILENAME, FB2_METADATA]
+    # Порядок итерации (от нижнего к верхнему приоритету)
+    ORDER = sorted([
+        ('folder', FOLDER_STRUCTURE),
+        ('filename', FILENAME),
+        ('metadata', FB2_METADATA)
+    ], key=lambda x: x[1])
     
     # Человеко-читаемые названия
     NAMES = {
@@ -39,15 +60,25 @@ class AuthorExtractionPriority:
 
 class SeriesExtractionPriority:
     """
-    Приоритет источников для извлечения серий.
+    Приоритет источников для извлечения серий (ИЗ CONFIG.JSON).
     
-    Аналогично авторам, но может иметь отличающиеся приоритеты.
+    Числовое значение определяет приоритет: выше число = выше приоритет.
+    
+    ПРИОРИТЕТЫ:
+    - FOLDER_STRUCTURE = 3 (МАКСИМАЛЬНЫЙ)
+    - FILENAME = 2 (СРЕДНИЙ)
+    - FB2_METADATA = 1 (МИНИМАЛЬНЫЙ)
     """
-    FOLDER_STRUCTURE = 1    # Уровень 1: структура папок
-    FILENAME = 2            # Уровень 2: название файла
-    FB2_METADATA = 3        # Уровень 3: метаданные FB2
+    FOLDER_STRUCTURE = _series_priorities.get('FOLDER_STRUCTURE', 3)
+    FILENAME = _series_priorities.get('FILENAME', 2)
+    FB2_METADATA = _series_priorities.get('FB2_METADATA', 1)
     
-    ORDER = [FOLDER_STRUCTURE, FILENAME, FB2_METADATA]
+    # Порядок итерации (от нижнего к верхнему приоритету)
+    ORDER = sorted([
+        ('folder', FOLDER_STRUCTURE),
+        ('filename', FILENAME),
+        ('metadata', FB2_METADATA)
+    ], key=lambda x: x[1])
     
     NAMES = {
         FOLDER_STRUCTURE: 'folder',

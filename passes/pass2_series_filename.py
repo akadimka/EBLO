@@ -74,6 +74,15 @@ class BlockLevelPatternSelector:
             'has_dash': ' - ' in before,
         }
         
+        # Анализируем содержимое скобок - считаем иерархию (точки внутри)
+        if parts['has_brackets'] and parts['content_in_brackets']:
+            bracket_content = parts['content_in_brackets']
+            # Количество точек + 1 = количество уровней
+            # "Сид 1. Принцип талиона 1. Геката 1" → 2 точки = 3 уровня
+            parts['bracket_levels'] = bracket_content.count('. ') + 1
+        else:
+            parts['bracket_levels'] = 0
+        
         return parts
     
     @staticmethod
@@ -81,17 +90,31 @@ class BlockLevelPatternSelector:
         """Разбирает что требует паттерн"""
         
         bracket_section = None
+        before_brackets = pattern  # По умолчанию весь паттерн перед скобками
+        
         if '(' in pattern and ')' in pattern:
-            bracket_section = pattern[pattern.find('('):]
+            bracket_start = pattern.find('(')
+            bracket_section = pattern[bracket_start:]
+            before_brackets = pattern[:bracket_start].strip()
+        
+        # Определяем требуемое количество уровней в скобках
+        # "Series" → 1 уровень
+        # "Series. service_words" → 2 уровня
+        # "Series. Title. service_words" → 3 уровня
+        bracket_levels = 0
+        if bracket_section:
+            # Считаем точки внутри скобок: "Series. Title. service_words" → 2 точки = 3 уровня
+            bracket_levels = bracket_section.count('. ') + 1
         
         reqs = {
             'pattern': pattern,
-            'requires_comma': ',' in pattern,
-            'requires_dot': '. ' in pattern,
-            'requires_dash': ' - ' in pattern,
+            'requires_comma': ',' in before_brackets,  # Проверяем только ДО скобок
+            'requires_dot': '. ' in before_brackets,   # Проверяем только ДО скобок
+            'requires_dash': ' - ' in before_brackets,  # Проверяем только ДО скобок
             'requires_brackets': '(' in pattern,
             'bracket_requires_service_words': 'service_words' in (bracket_section or ''),
             'bracket_complexity': (bracket_section or '').count('.') + 1 if bracket_section else 0,
+            'bracket_levels': bracket_levels,  # Количество уровней иерархии требуемое паттерном
         }
         
         return reqs
@@ -148,6 +171,22 @@ class BlockLevelPatternSelector:
         # ════ ПРОВЕРКА СОДЕРЖИМОГО СКОБОК ════
         
         if file_blocks['has_brackets'] and pattern_reqs['requires_brackets']:
+            # ════ ПРОВЕРКА СОВПАДЕНИЯ ИЕРАРХИИ ════
+            # Количество уровней в файле должно совпадать с требуемым паттерном
+            # Но это не hard disqualifier - просто штраф в score
+            file_levels = file_blocks.get('bracket_levels', 0)
+            pattern_levels = pattern_reqs['bracket_levels']
+            
+            # НАКАЗЫВАЕМ за несовпадение иерархии:
+            # файл с 3 уровнями не должен совпадать с паттерном на 1 уровень
+            levels_diff = abs(file_levels - pattern_levels)
+            if levels_diff > 0:
+                # Штраф -5 за каждый уровень разницы
+                score -= (5 * levels_diff)
+            else:
+                # Бонус за совпадение иерархии
+                score += 10
+            
             bracket_content = file_blocks['content_in_brackets'] or ''
             
             # Проверяем наличие служебных слов (Дилогия, Тетралогия и т.д.), но НЕ числовых диапазонов!

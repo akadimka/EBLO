@@ -374,6 +374,90 @@ class Pass2Filename:
         
         return True
     
+    def _is_incomplete_name(self, author: str) -> bool:
+        """Check if author name is incomplete (only surname, initials, etc).
+        
+        Examples of incomplete:
+        - "Живой" (single word/surname only)
+        - "Кумин" (single word)
+        - "Михеев М." (surname + initial)
+        - "М. Живой" (initial + surname)
+        
+        Examples of complete:
+        - "Живой Алексей" (surname + first name)
+        - "Демченко Антон" (surname + first name)
+        
+        Args:
+            author: Author name to check
+            
+        Returns:
+            True if incomplete, False if complete
+        """
+        if not author:
+            return True
+        
+        words = author.split()
+        
+        # Single word → incomplete (only surname or initial)
+        if len(words) == 1:
+            return True
+        
+        # Two words: check if any is just initial (single letter + dot or single letter)
+        # "Кумин. И" or "М. Кумин" or "И М" → incomplete
+        # "Живой Алексей" → complete
+        has_short = any(
+            (len(w) == 1 and w.isalpha()) or  # Single letter like "И"
+            (len(w) == 2 and w[1] == '.' and w[0].isalpha())  # Initial like "И."
+            for w in words
+        )
+        
+        if has_short:
+            return True  # At least one word is short → incomplete name
+        
+        # All words are full words → complete
+        return False
+    
+    def _try_expand_from_metadata(self, incomplete_author: str, metadata_authors: str) -> str:
+        """Try to expand incomplete author name from metadata.
+        
+        If incomplete_author is like "Живой" or "Кумин. И", find the full version
+        in metadata_authors and return it.
+        
+        Args:
+            incomplete_author: Short name from filename ("Кумин" or "Михеев М.")
+            metadata_authors: Full authors string from FB2 metadata ("Вячислав Кумин; ...")
+            
+        Returns:
+            Full author name if found, otherwise original incomplete_author
+        """
+        if not metadata_authors:
+            return incomplete_author
+        
+        # Extract surnames from incomplete_author
+        incomplete_parts = incomplete_author.split()
+        
+        # Take first word (usually surname) for matching
+        surname_candidate = incomplete_parts[0].lower()
+        
+        # Split metadata into individual authors (separated by "; " or ", ")
+        meta_authors = [a.strip() for a in metadata_authors.replace('; ', '|').replace(', ', '|').split('|')]
+        
+        for meta_author in meta_authors:
+            if not meta_author:
+                continue
+            
+            meta_words = meta_author.split()
+            
+            # Try to find matching surname in metadata
+            # E.g., if looking for "Кумин", check if metadata has "...Кумин..."
+            for word in meta_words:
+                if word.lower() == surname_candidate:
+                    # Found match! Return full metadata author
+                    return meta_author
+        
+        # No clear match found - return original
+        return incomplete_author
+    
     def _count_authors(self, authors_str: str) -> int:
         """Count number of authors in metadata authors string.
         
@@ -430,6 +514,8 @@ class Pass2Filename:
         
         processed_count = 0
         skipped_count = 0
+        error_count = 0
+        test_count = 0
         
         for i, record in enumerate(records):
             # Skip files with folder_dataset source ONLY if:
@@ -489,21 +575,44 @@ class Pass2Filename:
                 # IMPORTANT: NEVER OVERWRITE folder_dataset source!
                 # Folder hierarchy extraction is AUTHORITATIVE and should never be changed
                 if record.author_source != "folder_dataset":
+                    # Check if extracted author is incomplete (single name, initials, etc.)
+                    expanded_author = author
+                    use_hybrid_source = False
+                    
+                    if self._is_incomplete_name(author):
+                        # Try to expand from metadata_authors
+                        if record.metadata_authors:
+                            expanded = self._try_expand_from_metadata(author, record.metadata_authors)
+                            if expanded and expanded != author:
+                                expanded_author = expanded
+                                use_hybrid_source = True  # Mark as hybrid source
+                    
                     # No folder_dataset - use filename extraction
                     # This OVERRIDES metadata (FILE -> METADATA priority)
-                    record.proposed_author = author
-                    record.author_source = "filename"
+                    record.proposed_author = expanded_author
+                    record.author_source = "filename+metadata" if use_hybrid_source else "filename"
                     record.needs_filename_fallback = False  # Clear the fallback flag since we found something
                     processed_count += 1
                     
                     # BUILD AUTHOR CACHE: Track this extraction for future abbreviation expansion
                     # This helps expand abbreviated names in subsequent files
                     # e.g., if we extract "Живой Алексей", cache that we've seen this full form
-                    self._build_author_cache_from_extraction(author)
+                    self._build_author_cache_from_extraction(expanded_author)
                 # else: Already has folder_dataset source - NEVER override it, keep existing
-            # else: keep existing (might be metadata or empty)
+            else:
+                # Filename extraction failed (author is empty)
+                # Fallback: Use metadata if available (with hybrid source)
+                if (record.author_source != "folder_dataset" and 
+                    record.metadata_authors and 
+                    not record.proposed_author):  # Only if not already set
+                    # Use metadata as fallback, mark as hybrid (filename attempt + metadata fallback)
+                    record.proposed_author = record.metadata_authors
+                    record.author_source = "metadata"  # Couldn't extract from filename
+                    record.needs_filename_fallback = False
+                    processed_count += 1
+                # else: keep existing (might be metadata or empty)
         
-        print(f"[PASS 2] Extracted {processed_count} authors from filenames, skipped {skipped_count} folder_dataset records")
+        print(f"[PASS 2] Extracted {processed_count} authors from filenames, skipped {skipped_count} folder_dataset records, errors: {error_count}")
     
     def _extract_by_pattern(self, filename: str, pattern: str, struct: dict) -> str:
         """Extract author from filename based on matched pattern.
@@ -653,14 +762,15 @@ class Pass2Filename:
         return ""
     
     def _extract_author_from_filename(self, filename: str, fb2_path: Optional[Path] = None) -> str:
-        """Extract author name from filename using structural pattern matching.
+        """Extract author name from filename using BLOCK-LEVEL pattern matching.
         
-        1. Analyze filename structure
-        2. Score all patterns from config
-        3. Pick best matching pattern (with tie-breaker for specificity)
-        4. Extract author based on that pattern
-        5. VALIDATE that extracted name is a real author name
-        6. Optionally expand/validate using FB2 metadata
+        New algorithm:
+        1. Tokenize filename into blocks (delimited by ' - ', '. ', parens)
+        2. Tokenize patterns into block types
+        3. Match filename blocks against pattern block types
+        4. Extract block marked as "Author" type
+        5. VALIDATE extracted name
+        6. Return or fall through to metadata
         
         Args:
             filename: Filename without extension
@@ -672,69 +782,65 @@ class Pass2Filename:
         if not filename:
             return ""
         
-        # Analyze structure
-        struct = analyze_file_structure(filename, self.service_words)
-        
-        # Score all patterns
-        best_pattern = None
-        best_score = 0.0
-        best_pattern_specificity = 0  # Tie-breaker: more specific patterns win
-        
-        for pattern_obj in self.patterns:
-            pattern = pattern_obj.get('pattern', '')
-            score = score_pattern_match(struct, pattern, self.service_words)
+        try:
+            # Import block-level matcher
+            from block_level_pattern_matcher import BlockLevelPatternMatcher
             
-            # Calculate specificity as a tie-breaker
-            # More components = more specific pattern
-            # E.g., "Author, Author. Title (Series)" is more specific than "Author. Title"
-            specificity = pattern.count(',') * 10 + pattern.count('(') * 5 + pattern.count('.') * 2
+            # Create matcher with service words
+            matcher = BlockLevelPatternMatcher(service_words=list(self.service_words))
             
-            # Update best if:
-            # 1. Score is higher, OR
-            # 2. Score is same but pattern is more specific (tie-breaker)
-            if score > best_score or (score == best_score and specificity > best_pattern_specificity):
-                best_score = score
-                best_pattern = pattern
-                best_pattern_specificity = specificity
-        
-        # Extract author based on best matching pattern
-        if best_pattern and best_score > 0.3:  # Minimum threshold
-            author = self._extract_by_pattern(filename, best_pattern, struct)
+            # Find best pattern match using block-level comparison
+            best_score, best_pattern, author, series = matcher.find_best_pattern_match(filename, self.patterns)
+            
+            # Need minimum score threshold to proceed
+            if best_score < 0.6:  # Threshold for block matching
+                #self.logger.log(f"[PASS 2] Block score too low: {best_score:.2f} < 0.6 for '{filename}'")
+                return ""
+            
+            # Validate extracted author
+            if not author or not author.strip():
+                #self.logger.log(f"[PASS 2] No author block extracted for '{filename}'")
+                return ""
+            
+            author = author.strip()
             
             # Handle comma-separated authors (co-authorship)
-            if author and ', ' in author:
+            if ', ' in author:
                 authors = [a.strip() for a in author.split(', ')]
                 validated_authors = []
                 
                 for single_author in authors:
-                    # VALIDATE each author independently
                     looks_like = self._looks_like_author_name(single_author)
                     is_valid = validate_author_name(single_author) if single_author else False
                     if single_author and looks_like and is_valid:
-                        # Validate and expand using FB2 metadata if available
                         expanded = self._validate_and_expand_author(single_author, fb2_path)
                         validated_authors.append(expanded)
                     elif single_author:
-                        # Keep as-is if validation fails (some edge cases)
                         validated_authors.append(single_author)
                 
                 if validated_authors:
-                    # Return validated co-authors
                     author = ', '.join(validated_authors)
-                    self.logger.log(f"[PASS 2] Extracted '{author}' from '{filename}' using pattern '{best_pattern}' (score={best_score:.2f})")
+                    self.logger.log(f"[PASS 2] ✓ Extracted '{author}' from '{filename}' (block-level)")
                     return author
-                # If validation fails for all co-authors, fall through
+                # else: validation failed, fall through
+            
             # Single author case
             if author and self._looks_like_author_name(author) and validate_author_name(author):
-                # Validate and expand using FB2 metadata if available
                 author = self._validate_and_expand_author(author, fb2_path)
-                self.logger.log(f"[PASS 2] Extracted '{author}' from '{filename}' using pattern '{best_pattern}' (score={best_score:.2f})")
+                self.logger.log(f"[PASS 2] ✓ Extracted '{author}' from '{filename}' (block-level)")
                 return author
-            elif author:
-                # Extracted but failed validation
-                self.logger.log(f"[PASS 2 DEBUG] Extracted '{author}' from '{filename}' but failed validation")
-        else:
-            self.logger.log(f"[PASS 2 DEBUG] Extraction failed for pattern '{best_pattern}' (score={best_score:.2f})")
+            else:
+                #self.logger.log(f"[PASS 2] Block extraction failed validation for '{author}' from '{filename}'")
+                return ""
+        
+        except ImportError as e:
+            self.logger.log(f"[PASS 2] ImportError: BlockLevelPatternMatcher - {e}")
+            return ""
+        except Exception as e:
+            import traceback
+            self.logger.log(f"[PASS 2] Block-level matching error for '{filename}': {e}")
+            traceback.print_exc()
+            return ""
         
         self.logger.log(f"[PASS 2 DEBUG] No pattern match {'(score=' + str(best_score) + ')' if best_score > 0 else ''}")
         
