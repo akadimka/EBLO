@@ -217,8 +217,12 @@
       "example": "Демченко. Хольмградские истории (Хольмградские истории. Трилогия).fb2"
     },
     {
-      "pattern": "Author, Author - Title (Series. service_words)",
-      "example": "Земляной Андрей, Орлов Борис - Академик (Странник 4-5) - 2022.fb2"
+      "pattern": "Author, Author - Title (Series service_words)",
+      "example": "Земляной Андрей, Орлов Борис - Академик (Странник 4-5).fb2"
+    },
+    {
+      "pattern": "Author, Author. Title (Series service_words)",
+      "example": "Зурков, Черепнев. Бешеный прапорщик (Бешеный прапорщик 1-3).fb2"
     },
     {
       "pattern": "Author, Author. Title (Series. Title. service_words)",
