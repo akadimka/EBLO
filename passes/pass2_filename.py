@@ -761,16 +761,53 @@ class Pass2Filename:
             return author
         return ""
     
+    def _clean_filename_for_extraction(self, filename: str) -> str:
+        """Remove blacklist markers from filename before pattern matching.
+        
+        CRITICAL: Blacklist markers like "(СИ)" add extra blocks to the filename structure,
+        which breaks block-count-based pattern matching. They must be removed BEFORE tokenization.
+        
+        This affects how blocks are counted:
+        - "Автор - Название (СИ)" has 2 blocks IF we remove "(СИ)" first
+        - "Автор - Название (СИ)" has 3 blocks if we keep "(СИ)" as a separate block
+        
+        Args:
+            filename: Original filename
+            
+        Returns:
+            Filename with blacklist markers removed
+        """
+        import re
+        
+        cleaned = filename
+        
+        # Remove blacklist elements from the END of filename
+        # Start from the end and remove matching blacklist patterns
+        # Only remove if they appear at END of string (after all meaningful content)
+        
+        # Pattern 1: "(СИ)" or variations at the end
+        cleaned = re.sub(r'\s*\(СИ\)\s*$', '', cleaned, flags=re.IGNORECASE)
+        
+        # Pattern 2: Other known meta-patterns that shouldn't create extra blocks
+        # Remove tags/meta in parens at the end
+        cleaned = re.sub(r'\s*\([^)]*издание[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\(пер\.\s*[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\(перевод[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\(пер\)\s*$', '', cleaned, flags=re.IGNORECASE)
+        
+        return cleaned.strip()
+    
     def _extract_author_from_filename(self, filename: str, fb2_path: Optional[Path] = None) -> str:
         """Extract author name from filename using BLOCK-LEVEL pattern matching.
         
         New algorithm:
-        1. Tokenize filename into blocks (delimited by ' - ', '. ', parens)
-        2. Tokenize patterns into block types
-        3. Match filename blocks against pattern block types
-        4. Extract block marked as "Author" type
-        5. VALIDATE extracted name
-        6. Return or fall through to metadata
+        1. CLEAN filename from blacklist markers (like "(СИ)") to preserve block count
+        2. Tokenize cleaned filename into blocks (delimited by ' - ', '. ', parens)
+        3. Tokenize patterns into block types
+        4. Match filename blocks against pattern block types
+        5. Extract block marked as "Author" type
+        6. VALIDATE extracted name
+        7. Return or fall through to metadata
         
         Args:
             filename: Filename without extension
@@ -786,6 +823,10 @@ class Pass2Filename:
             # Import block-level matcher
             from block_level_pattern_matcher import BlockLevelPatternMatcher
             
+            # CRITICAL: Remove blacklist markers from filename BEFORE pattern matching
+            # "(СИ)" at the end creates an extra block that breaks pattern matching!
+            cleaned_filename = self._clean_filename_for_extraction(filename)
+            
             # Create matcher with service words and known author names
             matcher = BlockLevelPatternMatcher(
                 service_words=list(self.service_words),
@@ -793,8 +834,8 @@ class Pass2Filename:
                 female_names=self.female_names
             )
             
-            # Find best pattern match using block-level comparison
-            best_score, best_pattern, author, series = matcher.find_best_pattern_match(filename, self.patterns)
+            # Find best pattern match using block-level comparison on CLEANED filename
+            best_score, best_pattern, author, series = matcher.find_best_pattern_match(cleaned_filename, self.patterns)
             
             # Need minimum score threshold to proceed
             if best_score < 0.6:  # Threshold for block matching
