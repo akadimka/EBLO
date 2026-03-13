@@ -440,6 +440,57 @@ class Pass4Consensus:
         
         self.logger.log(f"[PASS 4] Applied proposed series consensus to {proposed_consensus_count} records")
         
+        # SERIES AUTHOR CONSENSUS
+        # For each series with multiple files, apply the most common author to all files
+        # in that series. This handles cases where a multi-author series has inconsistent
+        # author assignments across files.
+        # 
+        # Example:
+        #   File 1: Series="Врата Валгаллы", Author="Ильин Сергей, Ипатова Наталия"
+        #   File 2: Series="Врата Валгаллы", Author="Ильин Сергей, Ипатова Наталия"
+        #   File 3: Series="Врата Валгаллы", Author="Ипатова Наталия"
+        # → All get: Author="Ильин Сергей, Ипатова Наталия" (2/3 files)
+        print("[PASS 4] Applying series author consensus...")
+        series_author_consensus_count = 0
+        
+        # Group records by proposed_series
+        series_groups = {}
+        for record in records:
+            if record.proposed_series:
+                series = record.proposed_series
+                if series not in series_groups:
+                    series_groups[series] = []
+                series_groups[series].append(record)
+        
+        # Apply author consensus within each series
+        for series, series_records in series_groups.items():
+            # Only apply consensus if there are 2+ files in the series
+            if len(series_records) < 2:
+                continue
+            
+            # Count author occurrences (only for files with valid authors)
+            author_counts = {}
+            for record in series_records:
+                if record.proposed_author and record.proposed_author != "Сборник":
+                    author = record.proposed_author
+                    author_counts[author] = author_counts.get(author, 0) + 1
+            
+            if not author_counts:
+                continue
+            
+            # Find most common author
+            consensus_author = max(author_counts, key=author_counts.get)
+            
+            # Apply to all files with different authors
+            for record in series_records:
+                if (record.proposed_author and 
+                    record.proposed_author != consensus_author and
+                    record.proposed_author != "Сборник"):
+                    record.proposed_author = consensus_author
+                    series_author_consensus_count += 1
+        
+        self.logger.log(f"[PASS 4] Applied series author consensus to {series_author_consensus_count} records")
+        
         # HIERARCHICAL SERIES UNIFICATION
         # For files of the same author with hierarchical series variants (e.g., "Серия" and "Серия. Подсерия"),
         # unify all to the shortest/base version if it appears most frequently
