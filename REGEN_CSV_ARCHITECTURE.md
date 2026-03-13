@@ -6,6 +6,64 @@
 
 **❗ НОВОЕ: Поддержка многоуровневых иерархий серий:** см. [SERIES_HIERARCHY.md](SERIES_HIERARCHY.md)
 
+**🆕 Март 13, 2026 - ИСПРАВЛЕНИЕ: Сохранение single-file серий в Series Collection папках**
+
+#### 9️⃣ Single-File Series Preservation in Series Collection Folders (Pass4 Consensus)
+- **Проблема:** Pass4 удалял series "Комсомолец" для файла в Series Collection папке
+  - Файл: `"Серия - «Боевая фантастика»(ЛенИздат)\Федин Андрей - Комсомолец 1. Комсомолец.fb2"`
+  - Pass2 извлекает: `proposed_series='Комсомолец'`, `series_source='filename'` ✓
+  - Pass4 удаляет: `proposed_series=''` ✗ (считает single-file серию за "false series")
+  - Result in CSV: `proposed_series=""` (пусто)
+  
+- **Корневая причина:** Pass4 имеет логику "false series cleanup" которая удаляет одиночные серии (встречаются в одном файле) без service маркеров ("Трилогия", "Дилогия" и т.д.)
+  ```python
+  # Было (неправильно):
+  if (len(records_with_series) == 1 and 
+      not has_service_marker and 
+      record.series_source == "filename"):
+      record.proposed_series = ""  # ✗ Удаляет even если это Series Collection folder!
+  ```
+  
+  Проблема: Для Series Collection папок (как "Серия - «Боевая фантастика»..."), single-file серия из filename паттерна `"Author - Series N. Title"` это валидная серия, не "false series"!
+  
+- **Решение:** Добавлена исключение для Series Collection папок перед удалением:
+  ```python
+  # Стало (правильно):
+  # Check if file is in a Series Collection folder (depth=2 with "Серия" in parent name)
+  is_series_collection_folder = False
+  if record.file_path:
+      file_path_parts = Path(record.file_path).parts
+      if len(file_path_parts) >= 1:
+          parent_folder = file_path_parts[0]
+          is_series_collection_folder = (
+              parent_folder.startswith('Серия') or
+              'Серия' in parent_folder
+          )
+  
+  # Only clear if it's NOT in a Series Collection folder
+  if not is_series_collection_folder:
+      record.proposed_series = ""
+      record.series_source = ""
+  ```
+  
+  **Логика:** Series Collection папки (определены по "Серия" префиксу в имени) содержат надежно извлеченные серии из filename паттерна `"Author - Series N. Title"`. Даже если файл один - это реальная серия, не "false series".
+  
+- **Результат:** Федин файл теперь правильно сохраняет серию:
+  ```
+  file_path: Серия - «Боевая фантастика»(ЛенИздат)\Федин Андрей - Комсомолец 1. Комсомолец.fb2
+  proposed_series: 'Комсомолец'  ← БЫЛО ПУСТО, теперь исправлено!
+  series_source: 'filename'
+  ```
+  
+- **Реализация:** [passes/pass4_consensus.py](passes/pass4_consensus.py) линия 171-190 (False series cleanup logic)
+
+- **Протестировано:**
+  - ✅ Федин Андрей - Комсомолец: series сохранена
+  - ✅ Авраменко Александр - Солдат удачи: series сохранена (по-прежнему работает)
+  - ✅ Другие файлы без series: не было регрессии
+
+- **Коммит:** Исправление Pass4 для Series Collection папок
+
 **🆕 Март 13, 2026 - УЛУЧШЕНИЕ: Поддержка многоуровневых иерархий серий**
 
 #### 8️⃣ Multi-Level Series Hierarchy Extraction (BlockLevelPatternMatcher + Normalization)

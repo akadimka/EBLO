@@ -163,14 +163,30 @@ class Pass4Consensus:
                 
                 # If NO service markers AND from filename source AND NOT confirmed in metadata
                 # AND NOT from a legitimate (Series. service_words) pattern
-                # → This is likely a title/subtitle, not a series
-                # (Single files tend to have made-up "series" from titles)
+                # → Check if this is in a Series Collection folder before removing
                 if (not has_service_marker and record.series_source == "filename" and 
                     not is_confirmed_in_metadata and not has_pattern_evidence):
-                    # Clear it
-                    record.proposed_series = ""
-                    record.series_source = ""
-                    false_series_count += 1
+                    
+                    # EXCEPTION: If file is in a Series Collection folder (depth=2 with "Серия" in parent name),
+                    # Trust the extraction because it came from a reliable "Author - Series N. Title" pattern
+                    is_series_collection_folder = False
+                    if record.file_path:
+                        file_path_parts = Path(record.file_path).parts
+                        if len(file_path_parts) >= 1:
+                            parent_folder = file_path_parts[0]
+                            # Check if parent folder is a Series Collection
+                            is_series_collection_folder = (
+                                parent_folder.startswith('Серия') or
+                                'Серия' in parent_folder
+                            )
+                    
+                    # Only clear if it's NOT in a Series Collection folder
+                    if not is_series_collection_folder:
+                        # Clear it
+                        record.proposed_series = ""
+                        record.series_source = ""
+                        false_series_count += 1
+
         
         self.logger.log(f"[PASS 4] Removed {false_series_count} false series (single-file titles)")
         
