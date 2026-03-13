@@ -445,11 +445,17 @@ class Pass4Consensus:
         # in that series. This handles cases where a multi-author series has inconsistent
         # author assignments across files.
         # 
+        # Files with corrected authors get special source marker: "{original_source}+series-consensus"
+        # Examples:
+        #   "filename+series-consensus" - had filename source, corrected by series consensus
+        #   "metadata+series-consensus" - had metadata source, corrected by series consensus
+        # 
         # Example:
-        #   File 1: Series="Врата Валгаллы", Author="Ильин Сергей, Ипатова Наталия"
-        #   File 2: Series="Врата Валгаллы", Author="Ильин Сергей, Ипатова Наталия"
-        #   File 3: Series="Врата Валгаллы", Author="Ипатова Наталия"
+        #   File 1: Series="Врата Валгаллы", Author="Ильин Сергей, Ипатова Наталия", source="filename"
+        #   File 2: Series="Врата Валгаллы", Author="Ильин Сергей, Ипатова Наталия", source="filename"
+        #   File 3: Series="Врата Валгаллы", Author="Ипатова Наталия", source="filename"
         # → All get: Author="Ильин Сергей, Ипатова Наталия" (2/3 files)
+        #   File 3 source becomes: "filename+series-consensus"
         print("[PASS 4] Applying series author consensus...")
         series_author_consensus_count = 0
         
@@ -486,7 +492,14 @@ class Pass4Consensus:
                 if (record.proposed_author and 
                     record.proposed_author != consensus_author and
                     record.proposed_author != "Сборник"):
+                    # Save original source and append "+series-consensus"
+                    original_source = record.author_source or ""
                     record.proposed_author = consensus_author
+                    # Mark that this author was corrected by series consensus
+                    if original_source:
+                        record.author_source = f"{original_source}+series-consensus"
+                    else:
+                        record.author_source = "series-consensus"
                     series_author_consensus_count += 1
         
         self.logger.log(f"[PASS 4] Applied series author consensus to {series_author_consensus_count} records")
