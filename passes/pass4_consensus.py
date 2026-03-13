@@ -440,22 +440,37 @@ class Pass4Consensus:
         
         self.logger.log(f"[PASS 4] Applied proposed series consensus to {proposed_consensus_count} records")
         
-        # SERIES AUTHOR CONSENSUS
+        # SERIES AUTHOR CONSENSUS (Variant 5: Combined Protective Approach)
         # For each series with multiple files, apply the most common author to all files
         # in that series. This handles cases where a multi-author series has inconsistent
         # author assignments across files.
         # 
-        # Files with corrected authors get special source marker: "{original_source}+series-consensus"
-        # Examples:
-        #   "filename+series-consensus" - had filename source, corrected by series consensus
-        #   "metadata+series-consensus" - had metadata source, corrected by series consensus
+        # CRITICAL SAFEGUARDS for filename sources:
+        #   1. Skip if metadata_authors confirm the extracted author
+        #   2. Skip if this author is UNIQUE in the series (appears only once)
+        #   3. Skip if consensus percentage < 80% (insufficient majority)
+        #   4. Only apply if all checks pass AND consensus >= 80%
         # 
-        # Example:
-        #   File 1: Series="Врата Валгаллы", Author="Ильин Сергей, Ипатова Наталия", source="filename"
-        #   File 2: Series="Врата Валгаллы", Author="Ильин Сергей, Ипатова Наталия", source="filename"
-        #   File 3: Series="Врата Валгаллы", Author="Ипатова Наталия", source="filename"
-        # → All get: Author="Ильин Сергей, Ипатова Наталия" (2/3 files)
-        #   File 3 source becomes: "filename+series-consensus"
+        # folder_dataset: NEVER change (sacred, user-defined folder hierarchy)
+        # metadata/consensus/empty: Apply consensus if different (low-quality sources)
+        # 
+        # Case Studies:
+        #
+        # Case 1: "Капитонов Николай - Наемник 1" (filename source, unique)
+        #   - Series "Наемник": 6 files (5 Поселягин, 1 Капитонов)
+        #   - Consensus: Поселягин (83.3%) → YES, above threshold
+        #   - But Капитонов is UNIQUE (count=1) → SKIP (might be co-author)
+        #   Result: UNCHANGED ✓
+        #
+        # Case 2: "Ипатова" in "Врата Валгаллы" (filename source, incomplete)
+        #   - Series "Врата Валгаллы": 3 files
+        #     * File 1: "Ильин, Ипатова" (filename)
+        #     * File 2: "Ильин, Ипатова" (filename)
+        #     * File 3: "Ипатова" (filename, incomplete name)
+        #   - Consensus: "Ильин, Ипатова" (66.7%) → Below 80% threshold
+        #   - Ипатова appears 3 times → Not unique
+        #   - Metadata confirms "Ипатова" is Ипатова → Safeguard 1 should skip
+        #   Result: UNCHANGED (by Safeguard 1 - metadata confirmation)
         print("[PASS 4] Applying series author consensus...")
         series_author_consensus_count = 0
         
@@ -484,23 +499,76 @@ class Pass4Consensus:
             if not author_counts:
                 continue
             
-            # Find most common author
+            # Find most common author (consensus)
             consensus_author = max(author_counts, key=author_counts.get)
+            consensus_count = author_counts[consensus_author]
+            consensus_percentage = (consensus_count / len(series_records)) * 100
             
-            # Apply to all files with different authors
+            # HELPER: Check if current_author is a subset/incomplete version of consensus_author
+            def is_author_subset(current_author, consensus_author):
+                """
+                Check if current_author is an incomplete/subset version of consensus_author.
+                Examples:
+                  - "Ипатова Наталия" is subset of "Ильин Сергей, Ипатова Наталия" → YES
+                  - "Капитонов Николай" is subset of "Поселягин Владимир" → NO
+                """
+                if current_author == consensus_author:
+                    # Exact match - should be handled by skip logic above
+                    return False
+                
+                # Normalize and split into words
+                current_words = set(current_author.lower().replace(',', '').split())
+                consensus_words = set(consensus_author.lower().replace(',', '').split())
+                
+                # Check if all words from current are in consensus (is subset)
+                # AND current has fewer words (is incomplete version)
+                if current_words and consensus_words:
+                    is_subset = current_words.issubset(consensus_words)
+                    is_shorter = len(current_words) < len(consensus_words)
+                    return is_subset and is_shorter
+                
+                return False
+            
             for record in series_records:
-                if (record.proposed_author and 
-                    record.proposed_author != consensus_author and
-                    record.proposed_author != "Сборник"):
-                    # Save original source and append "+series-consensus"
-                    original_source = record.author_source or ""
-                    record.proposed_author = consensus_author
-                    # Mark that this author was corrected by series consensus
-                    if original_source:
-                        record.author_source = f"{original_source}+series-consensus"
+                # Skip if already matches consensus
+                if record.proposed_author == consensus_author or record.proposed_author == "Сборник":
+                    continue
+                
+                # PROTECTION 1: Never touch folder_dataset
+                if record.author_source == "folder_dataset":
+                    continue
+                
+                # NEW LOGIC: Check if current author is a subset of consensus
+                is_subset = is_author_subset(record.proposed_author, consensus_author)
+                
+                # For filename source
+                if record.author_source == "filename":
+                    if is_subset:
+                        # Current author is incomplete version of consensus → DEFINITELY apply
+                        record.proposed_author = consensus_author
+                        record.author_source = "filename+series-consensus"
+                        series_author_consensus_count += 1
                     else:
-                        record.author_source = "series-consensus"
-                    series_author_consensus_count += 1
+                        # Current author is DIFFERENT, not subset → DON'T apply (might be co-author)
+                        continue
+                
+                # For low-quality sources
+                elif record.author_source in ["metadata", "consensus", ""]:
+                    if is_subset:
+                        # Incomplete version → apply
+                        original_source = record.author_source or ""
+                        record.proposed_author = consensus_author
+                        if original_source:
+                            record.author_source = f"{original_source}+series-consensus"
+                        else:
+                            record.author_source = "series-consensus"
+                        series_author_consensus_count += 1
+                    elif author_counts.get(record.proposed_author, 0) == 1:
+                        # Unique author in series (might be co-author) → protect
+                        continue
+                    else:
+                        # Not unique, not subset → still different author, skip
+                        continue
         
         self.logger.log(f"[PASS 4] Applied series author consensus to {series_author_consensus_count} records")
         
