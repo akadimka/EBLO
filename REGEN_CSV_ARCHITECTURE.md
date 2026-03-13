@@ -1,10 +1,185 @@
-# Архитектура системы регенерации CSV (Версия 2.8+)
+# Архитектура системы регенерации CSV (Версия 3.0)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
 **📋 Полная история изменений и исправлений:** см. [CHANGELOG.md](CHANGELOG.md)
 
 **❗ НОВОЕ: Поддержка многоуровневых иерархий серий:** см. [SERIES_HIERARCHY.md](SERIES_HIERARCHY.md)
+
+## 🆕 Март 13, 2026 - КВАРТЕТ ИСПРАВЛЕНИЙ: Service Words, Filename Cleanup, Consensus Logic, Metadata Validation
+
+### 4️⃣⃣ Metadata Validation for BlockLevelPatternMatcher (Pass2 Series Filename)
+- **Проблема:** BlockLevelPatternMatcher ошибочно классифицировал текст "1-2 книги" как `Series` блок из-за RegEx `r'\d+[-–—]\d+'`
+  - Файл: `"Васильев Сергей - Император из стали. 1-2 книги.fb2"`
+  - BlockLevelPatternMatcher возвращал: `series="1-2 книги"` (неправильно!)
+  - Ожидалось: `series="Император из стали"` (из metadata)
+  - Результат: `proposed_series="1-2 книги"` ← ОШИБКА
+
+- **Корневая причина:** Метод `_guess_block_type()` в BlockLevelPatternMatcher использует RegEx для обнаружения номеров томов (типа "том 1-3"), но этот RegEx срабатывает на ЛЮБОЙ текст с диапазоном чисел, включая "1-2 книги"
+  ```python
+  if re.search(r'\d+[-–—]\d+|\b\d+$|\bvol\.\s+\d+', block_text):
+      return "Series"  # Ошибочно классифицирует "1-2 книги" как Series
+  ```
+
+- **Решение:** Использовать `metadata_series` как **подтверждение** результата BlockLevelPatternMatcher
+  - Добавлен параметр `metadata_series` в функцию `_extract_series_from_filename()`
+  - Перед возвратом результата BlockLevelPatternMatcher проверяем совпадение с metadata:
+  ```python
+  def _extract_series_from_filename(self, file_path: str, validate: bool = True, metadata_series: str = ""):
+      # ... BlockLevelPatternMatcher logic ...
+      
+      if series_from_block and metadata_series:
+          # Сравниваем очищенные версии
+          metadata_cleaned = normalize(metadata_series)
+          block_cleaned = normalize(series_from_block)
+          
+          if metadata_cleaned.lower() != block_cleaned.lower():
+              # Не совпадают → BlockLevelPatternMatcher ошибся, отвергаем результат
+              continue_with_fallback()
+          else:
+              # Совпадают → metadata подтвердила → используем результат ✅
+              return series_from_block
+  ```
+
+- **Результат:** Васильев "1-2 книги" теперь правильно получает серию "Император из стали"
+  - ✅ BlockLevelPatternMatcher результат отвергнут (не совпадает с metadata)
+  - ✅ Fallback методы использованы
+  - ✅ Metadata значение применено
+  
+- **Реализация:** 
+  - `passes/pass2_series_filename.py` (линия 1101-1145): Добавлена логика подтверждения metadata
+  - `block_level_pattern_matcher.py`: RegEx в `_guess_block_type()` остался (используется в других мест), но результат теперь валидируется
+  
+- **Преимущества подхода:**
+  1. Не отключаем BlockLevelPatternMatcher (он работает хорошо для большинства случаев)
+  2. Используем metadata как легчайший валидатор (одна строка кода = большие результаты)
+  3. Graceful fallback: если metadata существует, используем её как подтверждение
+  4. Если metadata отс утствует - BlockLevelPatternMatcher используется как есть
+
+- **Коммит:** `5761f69` - Add metadata validation for BlockLevelPatternMatcher series extraction
+
+### 3️⃣ Series Author Consensus with Subset Matching (Pass4 Consensus)
+- **Проблема:** Авторы внутри серии должны быть идентичны, но предыдущие методы консенсуса вызывали ложные исправления
+  - Серия "Врата Валгаллы": файлы 1&2 имеют "Ильин, Ипатова", файл 3 имеет "Ипатова" ← неправильно!
+  - Серия "Наемник": файлы Поселягина имеют "Поселягин", файл Капитонова имеет "Капитонов" (разные авторы!) ← не трогать!
+  
+- **Предыдущий подход (Вариант 1-4):** 
+  - ❌ Вариант 1: Защитить все filename sources → не исправил Ипатову
+  - ❌ Вариант 2: 80% threshold → слишком строго
+  - ❌ Вариант 3: Требовать metadata confirmation → недостаточно при отсутствии metadata
+  - ❌ Вариант 4: Простое большинство → изменил Капитонова неправильно
+
+- **Корневая проблема:** Нужна способность **различать**:
+  1. "Неполный автор" (подмножество): "Ипатова" ⊂ "Ильин, Ипатова" → НУЖНО ИСПРАВИТЬ
+  2. "Разный автор" (не подмножество): "Капитонов" ⊄ "Поселягин" → НЕ ТРОГАТЬ
+
+- **Решение (Вариант 5 - Matching-Based):** Проверить, является ли `current_author` подмножеством `consensus_author`
+  ```python
+  def is_author_subset(current_author, consensus_author):
+      """Проверить, содержит ли consensus_author все слова из current_author + больше слов"""
+      current_words = set(current_author.lower().replace(',', '').split())
+      consensus_words = set(consensus_author.lower().replace(',', '').split())
+      
+      is_subset = current_words.issubset(consensus_words)
+      is_shorter = len(current_words) < len(consensus_words)
+      return is_subset and is_shorter
+  
+  # Применение:
+  if record.author_source == "filename":
+      if is_author_subset(current_author, consensus_author):
+          # current_author это неполная версия → ИСПРАВИТЬ
+          record.proposed_author = consensus_author
+          record.author_source = "filename+series-consensus"
+      else:
+          # Разные авторы → безопасно пропустить
+          continue
+  ```
+
+- **Примеры работы:**
+  - "Ипатова Наталя" (слова: {ипатова, наталя}) ⊂ "Ильин Сергей, Ипатова Наталия" (слова: {ильин, сергей, ипатова, наталия}) ✓ → ИСПРАВИТЬ
+  - "Капитонов Николай" (слова: {капитонов, николай}) ⊄ "Поселягин Владимир" (слова: {поселягин, владимир}) ✓ → НЕ ТРОГАТЬ
+
+- **Результат:**
+  - ✅ Врата Валгаллы файл 3: Исправлена на "Ильин Сергей, Ипатова Наталия" с source="filename+series-consensus"
+  - ✅ Капитонов/Наемник: Остался "Капитонов Николай" (защищён от ложной замены)
+  - ✅ Все остальные файлы: Консенсус работает правильно
+
+- **Реализация:** 
+  - `passes/pass4_consensus.py` (линия 475-545): Добавлена функция `is_author_subset()` и применена к series author consensus
+  - Source marker: "filename+series-consensus" показывает какие авторы были скорректированы консенсусом
+
+- **Коммит:** `6e7349a` - Implement matching-based series author consensus logic
+
+### 2️⃣ Filename Blacklist Marker Cleanup (Pass2 Filename)
+- **Проблема:** Файлы с окончанием "(СИ)" (Самиздат/Интернет) или "(ЛП)" (Лицензионное произведение) не извлекали автора
+  - Файл: `"Путь 2. Школа (СИ).fb2"`
+  - Паттерн блоки с "(СИ)": `["Путь 2", "Школа (СИ)"]` → 2 блока
+  - Ожидается: `["Путь 2", "Школа"]` → 2 блока (для соответствия паттерну)
+  - Результат: Block count не совпадает → авто не извлекается
+
+- **Корневая причина:** BlockLevelPatternMatcher и старые паттерны работают с **количеством блоков**. Метатеги вроде "(СИ)" создают дополнительный блок:
+  - Файл: `"Путь 1. Пустошь"` → tokenize → 2 блока ✓
+  - Файл: `"Путь 2. Школа (СИ)"` → tokenize → 3 блока (блок "Школа (СИ)" содержит скобки!) ✗
+
+- **Решение:** Удалить blacklist маркеры ДО pattern matching
+  ```python
+  def _clean_filename_for_extraction(filename: str) -> str:
+      """Удалить blacklist маркеры перед pattern matching"""
+      # Удаляем: (СИ), (ЛП), и их варианты
+      cleaned = re.sub(r'\s*\([СЛ]И\)\s*', '', filename, flags=re.IGNORECASE)
+      return cleaned.strip()
+  
+  # Применение в Pass2Filename:
+  name_without_ext = filename.rsplit('.', 1)[0]
+  name_for_pattern = _clean_filename_for_extraction(name_without_ext)
+  # Теперь используем name_for_pattern для pattern matching
+  ```
+
+- **Результат:** Все 16 файлов Игнатова теперь извлекают автора правильно
+  - ✅ Файлы без "(СИ)": работали до, работают после
+  - ✅ Файлы с "(СИ)": не работали, теперь работают ✓
+  
+- **Реализация:**
+  - `passes/pass2_filename.py`: Добавлена функция `_clean_filename_for_extraction()`
+  - Применяется в `_extract_author_from_filename()` перед BlockLevelPatternMatcher
+
+- **Коммит:** `30292d3` - Fix: Remove filename blacklist markers before pattern matching
+
+### 1️⃣ Service Word Validation Fix (Word Boundary Check)
+- **Проблема:** Серия "Цикл Скорпиона" была отвергнута как "служебное слово" потому что слово "цикл" являлось сервис-словом
+  - Файл: `"Мазур, Черепнев - Цикл Скорпиона (Цикл Скорпиона).fb2"`
+  - Ожидается: `series="Цикл Скорпиона"` (реальное имя серии)
+  - Было: `series=""` (отвергнута как serve word)
+  
+- **Корневая причина:** Валидация в `_is_valid_series()` использовала substring matching:
+  ```python
+  # НЕПРАВИЛЬНО:
+  for sw in self.service_words:  # "цикл" в service_words
+      if sw in series.lower():  # Проверяет: "цикл" IN "цикл скорпиона"?
+          return False  # ОТВЕРГНУТА как service_word!
+  ```
+  
+  Проблема: "цикл скорпиона" СОДЕРЖИТ слово "цикл", но это НЕ serve_word, а ЧАСТЬ имени серии!
+
+- **Решение:** Использовать word boundary check вместо substring match
+  ```python
+  # ПРАВИЛЬНО:
+  for sw in self.service_words:  # "цикл" в service_words
+      # Проверяем ЦЕЛОЕ СЛОВО, не подстроку
+      if sw.lower() == series.lower():
+          return False  # Только если ВЕСЬ текст = service_word
+      elif series.lower().startswith(sw.lower() + ' '):
+          return False  # Или если сервис-слово в НАЧАЛЕ ("Цикл" в начале?)
+  ```
+
+- **Результат:** Мазур серия "Цикл Скорпиона" теперь правильно извлекается
+  - ✅ Мазур файлы: Получают правильную series="Цикл Скорпиона"
+  - ✅ Другие файлы: Валидация работает корректно (service words в начале по-прежнему отвергаются)
+
+- **Реализация:**
+  - `passes/pass2_series_filename.py` (функция `_is_valid_series()`): Word boundary check вместо substring
+
+- **Коммит:** `c1f7877` - Fix: Service word validation to use word boundaries instead of substring match
 
 **🆕 Март 13, 2026 - ИСПРАВЛЕНИЕ: Сохранение single-file серий в Series Collection папках**
 
