@@ -305,7 +305,7 @@ class Pass2SeriesFilename:
                     filename = Path(record.file_path).name
                     
                     # ШАГ 1: Попробуем использовать паттерны из конфига
-                    series_from_patterns = self._extract_series_from_filename(record.file_path, validate=False)
+                    series_from_patterns = self._extract_series_from_filename(record.file_path, validate=False, metadata_series=record.metadata_series)
                     
                     if series_from_patterns:
                         record.extracted_series_candidate = series_from_patterns
@@ -359,7 +359,7 @@ class Pass2SeriesFilename:
                     # Пытаемся применить паттерны к имени ДО скобок
                     # (это может помочь extract "Бродяга" из "Аскеров - Бродяга (СИ)")
                     series_candidate = None
-                    series_from_before = self._extract_series_from_filename(name_before_brackets, validate=False)
+                    series_from_before = self._extract_series_from_filename(name_before_brackets, validate=False, metadata_series=record.metadata_series)
                     if series_from_before:
                         record.extracted_series_candidate = series_from_before
                         series_candidate = series_from_before
@@ -454,7 +454,7 @@ class Pass2SeriesFilename:
                     # Это поддерживает "Author - Series.Title" формат
                     if not record.proposed_series:
                         filename = Path(record.file_path).name
-                        series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
+                        series_candidate = self._extract_series_from_filename(record.file_path, validate=False, metadata_series=record.metadata_series)
                         if series_candidate:
                             record.extracted_series_candidate = series_candidate
                             clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
@@ -479,7 +479,7 @@ class Pass2SeriesFilename:
                 name_without_ext = filename.rsplit('.', 1)[0]
                 
                 # ШАГ 1: Попробуем извлечь серию используя новые правила
-                series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
+                series_candidate = self._extract_series_from_filename(record.file_path, validate=False, metadata_series=record.metadata_series)
                 if series_candidate:
                     record.extracted_series_candidate = series_candidate
                     
@@ -549,7 +549,7 @@ class Pass2SeriesFilename:
             
             # Если файл в подпапке (глубина >= 3) - парсим имя файла
             # ШАГ 1: Попытаться извлечь из имени файла
-            series_candidate = self._extract_series_from_filename(record.file_path, validate=False)
+            series_candidate = self._extract_series_from_filename(record.file_path, validate=False, metadata_series=record.metadata_series)
             
             # ВСЕГДА сохранять candidate (даже если он не валиден) для PASS 4 consensus
             if series_candidate:
@@ -1078,14 +1078,15 @@ class Pass2SeriesFilename:
         
         return True
     
-    def _extract_series_from_filename(self, file_path: str, validate: bool = True) -> str:
+    def _extract_series_from_filename(self, file_path: str, validate: bool = True, metadata_series: str = "") -> str:
         """
         Извлечь серию из имени файла, используя паттерны из конфига.
         
         ОБНОВЛЕНО: Теперь использует BlockLevelPatternMatcher для точного извлечения!
+        + ДОБАВЛЕНО: Подтверждение результата с помощью metadata_series
         
         Применяет (в порядке приоритета):
-        1. BlockLevelPatternMatcher (структурный анализ блоков)
+        1. BlockLevelPatternMatcher (структурный анализ блоков) + подтверждение metadata
         2. Паттерны из конфига (author_series_patterns_in_files)
         3. [Серия] - квадратные скобки в начале
         4. Серия (лат. буквы/цифры) - скобки в конце с сервис-словами
@@ -1094,6 +1095,7 @@ class Pass2SeriesFilename:
         Args:
             file_path: Путь к файлу
             validate: Если True - проверять валидность; если False - возвращать raw candidate
+            metadata_series: Метаинформация о серии из FB2 (для подтверждения результата BlockLevelPatternMatcher)
         """
         filename = Path(file_path).name
         name_without_ext = filename.rsplit('.', 1)[0]
@@ -1118,15 +1120,39 @@ class Pass2SeriesFilename:
                 
                 # Проверяем что это валидная серия
                 if series_from_block and (not validate or self._is_valid_series(series_from_block, skip_author_check=True)):
-                    # Обработать через _extract_main_series_from_multi_level() для удаления номеров томов/иерархии
-                    # Examples:
-                    #   "Сид 1. Принцип талиона 1. Геката 1" → "Сид\Принцип талиона\Геката"
-                    #   "Варлок 1-3" → "Варлок"
-                    processed_series = self._extract_main_series_from_multi_level(series_from_block)
-                    if processed_series:
-                        return processed_series
-                    # Не проверяем blacklist для series из блок-матчера, т.к. это надёжный метод
-                    return series_from_block
+                    # ✅ ДОБАВЛЕНО: Подтверждение результата с помощью metadata
+                    # Если есть metadata_series - проверяем совпадает ли она с найденной
+                    if metadata_series:
+                        # Очищаем оба значения для сравнения
+                        metadata_cleaned = self._extract_series_from_brackets(
+                            self._extract_main_series_from_multi_level(metadata_series)
+                        ).strip()
+                        series_from_block_cleaned = self._extract_main_series_from_multi_level(series_from_block).strip()
+                        
+                        # Если НЕ совпадают - это сигнал, что BlockLevelPatternMatcher ошибся
+                        # Не возвращаем результат, продолжаем со старыми методами
+                        if metadata_cleaned.lower() != series_from_block_cleaned.lower():
+                            # ВНИМАНИЕ: Результат BlockLevelPatternMatcher не совпадает с metadata!
+                            # Это может быть ошибка распознавания (例: "1-2 книги" вместо "Император из стали")
+                            # Продолжаем без этого результата
+                            pass
+                        else:
+                            # ✅ Metadata подтвердила результат BlockLevelPatternMatcher!
+                            processed_series = self._extract_main_series_from_multi_level(series_from_block)
+                            if processed_series:
+                                return processed_series
+                            return series_from_block
+                    else:
+                        # Нет metadata для проверки, используем результат BlockLevelPatternMatcher как есть
+                        # Обработать через _extract_main_series_from_multi_level() для удаления номеров томов/иерархии
+                        # Examples:
+                        #   "Сид 1. Принцип талиона 1. Геката 1" → "Сид\Принцип талиона\Геката"
+                        #   "Варлок 1-3" → "Варлок"
+                        processed_series = self._extract_main_series_from_multi_level(series_from_block)
+                        if processed_series:
+                            return processed_series
+                        # Не проверяем blacklist для series из блок-матчера, т.к. это надёжный метод
+                        return series_from_block
         except Exception as e:
             # Если случится ошибка, продолжаем со старым методом
             pass
