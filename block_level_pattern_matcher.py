@@ -62,14 +62,24 @@ class BlockLevelPatternMatcher:
     def tokenize_filename(self, filename: str) -> List[Block]:
         """Break filename into structural blocks.
         
-        Splits on major delimiters:
-        1. ' - ' (space-dash-space) → block separator ("Author - Title")
-        2. '. ' (dot-space) → block separator ("Author. Title")
-        3. () → treated as block (with type hint)
+        Splits on delimiters according to unified principle:
+        1. ' - ' (space-dash-space) → block separator
+        2. '.' (dot, including '. ') → block separator
+        3. '(' and ')' (parentheses) → block separators (content inside treated as parenthesized block)
+        
+        Block division is position-independent. All delimiters are treated uniformly.
+        
+        CRITICAL RULE: Text AFTER the LAST closing ')' is kept as a SINGLE BLOCK 
+        (not further split by delimiters). This ensures proper pattern matching.
         
         Examples:
             "Янковский Дмитрий - Охотник (Тетралогия)" → 3 blocks
             "Мах. Квест империя" → 2 blocks
+            "Посняков Андрей - Вещий князь (Вещий князь 1-4) Др. издание" → 4 blocks:
+              1. "Посняков Андрей"
+              2. "Вещий князь"
+              3. "Вещий князь 1-4" (parenthesized)
+              4. "Др. издание" (single block - NOT split further!)
         
         Args:
             filename: Filename string
@@ -84,61 +94,94 @@ class BlockLevelPatternMatcher:
         text = filename.rstrip('.fb2') if filename.endswith('.fb2') else filename
         text = text.strip()
         
-        blocks = []
+        # Find position of last closing parenthesis
+        last_paren_pos = text.rfind(')')
         
-        # Choose primary delimiter (priority: ' - ' > '. ')
-        if ' - ' in text:
-            parts = text.split(' - ')
-        elif '. ' in text:
-            parts = text.split('. ')
-        else:
-            parts = [text]
+        # If no parentheses, just split normally on delimiters
+        if last_paren_pos == -1:
+            return self._tokenize_with_delimiters(text)
         
-        for part in parts:
-            part = part.strip()
-            if not part:
-                continue
+        # Split into two parts: before/including last ')', and after
+        before_last_paren = text[:last_paren_pos + 1]
+        after_last_paren = text[last_paren_pos + 1:].strip()
+        
+        # Tokenize everything before and including last ')' with normal delimiter splitting
+        blocks = self._tokenize_with_delimiters(before_last_paren)
+        
+        # Add text after last ')' as a SINGLE BLOCK (no further delimiter splitting!)
+        if after_last_paren:
+            blocks.append(Block(
+                text=after_last_paren,
+                block_type="text",
+                position=len(blocks),
+                is_parenthesized=False
+            ))
+        
+        return blocks
+    
+    def _tokenize_with_delimiters(self, text: str) -> List[Block]:
+        """Internal: tokenize text using unified delimiter pattern.
+        
+        Splits on ' - ', '.', '(', ')' uniformly.
+        Tracks parenthesis depth to mark blocks.
+        
+        Args:
+            text: Text to tokenize
             
-            # Check if this part contains parentheses
-            if '(' in part and ')' in part:
-                # Extract parenthesized content
-                match = re.search(r'\(([^)]+)\)', part)
-                if match:
-                    paren_content = match.group(1)
-                    remainder = part[:match.start()] + part[match.end():]
-                    remainder = remainder.strip()
-                    
-                    # Add remainder as block
-                    if remainder:
-                        blocks.append(Block(
-                            text=remainder,
-                            block_type="text",
-                            position=len(blocks),
-                            is_parenthesized=False
-                        ))
-                    
-                    # Add parenthesized content as separate block
-                    blocks.append(Block(
-                        text=paren_content,
-                        block_type="parenthesized",
-                        position=len(blocks),
-                        is_parenthesized=True
-                    ))
-            else:
-                # Regular text block
+        Returns:
+            List of Block objects
+        """
+        if not text:
+            return []
+        
+        blocks = []
+        delimiter_pattern = r'\s+-\s+|\.\s*|[()]'
+        
+        paren_depth = 0
+        block_text_pos = 0
+        
+        for match in re.finditer(delimiter_pattern, text):
+            delimiter = match.group()
+            block_text = text[block_text_pos:match.start()]
+            block_text = block_text.strip()
+            
+            # Add block if not empty
+            if block_text:
+                is_inside_parens = paren_depth > 0
                 blocks.append(Block(
-                    text=part,
+                    text=block_text,
                     block_type="text",
                     position=len(blocks),
-                    is_parenthesized=False
+                    is_parenthesized=is_inside_parens
                 ))
+            
+            # Update parenthesis depth based on current delimiter
+            if delimiter == '(':
+                paren_depth += 1
+            elif delimiter == ')':
+                paren_depth = max(0, paren_depth - 1)
+            
+            block_text_pos = match.end()
+        
+        # Final block after last delimiter
+        block_text = text[block_text_pos:]
+        block_text = block_text.strip()
+        if block_text:
+            is_inside_parens = paren_depth > 0
+            blocks.append(Block(
+                text=block_text,
+                block_type="text",
+                position=len(blocks),
+                is_parenthesized=is_inside_parens
+            ))
         
         return blocks
     
     def tokenize_pattern(self, pattern: str) -> List[Dict]:
         """Break pattern into structural block types.
         
-        Splits pattern on same delimiters as filename, but tracks expected TYPE.
+        Uses same unified delimiter logic as tokenize_filename.
+        Splits on ' - ', '.', '(', ')' uniformly.
         
         Example:
             "Author - Title (Series. service_words)"
@@ -159,56 +202,48 @@ class BlockLevelPatternMatcher:
         
         pattern_blocks = []
         
-        # Split on ' - '
-        dash_parts = pattern.split(' - ')
+        # Split using same delimiter pattern as tokenize_filename
+        delimiter_pattern = r'\s+-\s+|\.\s*|[()]'
         
-        for part_idx, part in enumerate(dash_parts):
-            part = part.strip()
-            if not part:
-                continue
+        paren_depth = 0
+        block_text_pos = 0
+        
+        for match in re.finditer(delimiter_pattern, pattern):
+            delimiter = match.group()
+            block_text = pattern[block_text_pos:match.start()]
+            block_text = block_text.strip()
             
-            # Split on '. ' within this part
-            dot_parts = part.split('. ')
+            # Add block if not empty
+            if block_text:
+                is_inside_parens = paren_depth > 0
+                block_type = self._normalize_block_type(block_text)
+                pattern_blocks.append({
+                    "type": block_type,
+                    "text": block_text,
+                    "position": len(pattern_blocks),
+                    "parenthesized": is_inside_parens
+                })
             
-            for sub_idx, sub_part in enumerate(dot_parts):
-                sub_part = sub_part.strip()
-                if not sub_part:
-                    continue
-                
-                # Check for parentheses
-                if '(' in sub_part and ')' in sub_part:
-                    match = re.search(r'\(([^)]+)\)', sub_part)
-                    if match:
-                        paren_content = match.group(1)
-                        remainder = sub_part[:match.start()] + sub_part[match.end():]
-                        remainder = remainder.strip()
-                        
-                        # Add remainder
-                        if remainder:
-                            block_type = self._normalize_block_type(remainder)
-                            pattern_blocks.append({
-                                "type": block_type,
-                                "text": remainder,
-                                "position": len(pattern_blocks),
-                                "parenthesized": False
-                            })
-                        
-                        # Add parenthesized content
-                        block_type = self._normalize_block_type(paren_content)
-                        pattern_blocks.append({
-                            "type": block_type,
-                            "text": paren_content,
-                            "position": len(pattern_blocks),
-                            "parenthesized": True
-                        })
-                else:
-                    block_type = self._normalize_block_type(sub_part)
-                    pattern_blocks.append({
-                        "type": block_type,
-                        "text": sub_part,
-                        "position": len(pattern_blocks),
-                        "parenthesized": False
-                    })
+            # Update parenthesis depth
+            if delimiter == '(':
+                paren_depth += 1
+            elif delimiter == ')':
+                paren_depth = max(0, paren_depth - 1)
+            
+            block_text_pos = match.end()
+        
+        # Don't forget the last block
+        block_text = pattern[block_text_pos:]
+        block_text = block_text.strip()
+        if block_text:
+            is_inside_parens = paren_depth > 0
+            block_type = self._normalize_block_type(block_text)
+            pattern_blocks.append({
+                "type": block_type,
+                "text": block_text,
+                "position": len(pattern_blocks),
+                "parenthesized": is_inside_parens
+            })
         
         return pattern_blocks
     
@@ -276,7 +311,7 @@ class BlockLevelPatternMatcher:
         score = 0.0
         max_score = 0.0
         author_block = None
-        series_block = None
+        series_blocks = []  # Collect ALL series blocks for multi-level hierarchies
         type_match_count = 0  # Count how many blocks had correct type match
         
         for fname_block, pblock in zip(filename_blocks, pattern_blocks):
@@ -298,7 +333,10 @@ class BlockLevelPatternMatcher:
                 if expected_type == "Author":
                     author_block = fname_block.text
                 elif expected_type == "Series":
-                    series_block = fname_block.text
+                    series_blocks.append(fname_block.text)  # Collect all series blocks
+        
+        # Reconstruct full series hierarchy from all blocks (e.g., "Сид 1. Принцип талиона 1. Геката 1")
+        series_block = '. '.join(series_blocks) if series_blocks else None
         
         normalized_score = score / max_score if max_score > 0 else 0.0
         # Store type_match_count as attribute on return value for tie-breaking

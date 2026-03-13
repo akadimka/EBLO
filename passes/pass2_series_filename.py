@@ -46,6 +46,7 @@ from logger import Logger
 from settings_manager import SettingsManager
 from name_normalizer import AuthorName
 from pattern_converter import compile_patterns
+from block_level_pattern_matcher import BlockLevelPatternMatcher
 
 
 class BlockLevelPatternSelector:
@@ -228,6 +229,7 @@ class Pass2SeriesFilename:
         self.logger = logger or Logger()
         self.settings = SettingsManager('config.json')
         self.block_selector = BlockLevelPatternSelector()
+        self.block_matcher = BlockLevelPatternMatcher()  # NEW: для точного извлечения серий
         # Получить списки из config.json
         self.collection_keywords = self.settings.get_list('collection_keywords')
         self.service_words = self.settings.get_list('service_words')
@@ -1073,11 +1075,14 @@ class Pass2SeriesFilename:
         """
         Извлечь серию из имени файла, используя паттерны из конфига.
         
+        ОБНОВЛЕНО: Теперь использует BlockLevelPatternMatcher для точного извлечения!
+        
         Применяет (в порядке приоритета):
-        1. Паттерны из конфига (author_series_patterns_in_files)
-        2. [Серия] - квадратные скобки в начале
-        3. Серия (лат. буквы/цифры) - скобки в конце с сервис-словами
-        4. Серия. Название - точка как разделитель в начале
+        1. BlockLevelPatternMatcher (структурный анализ блоков)
+        2. Паттерны из конфига (author_series_patterns_in_files)
+        3. [Серия] - квадратные скобки в начале
+        4. Серия (лат. буквы/цифры) - скобки в конце с сервис-словами
+        5. Серия. Название - точка как разделитель в начале
         
         Args:
             file_path: Путь к файлу
@@ -1092,7 +1097,37 @@ class Pass2SeriesFilename:
         # Эти метатеги не должны влиять на извлечение series
         name_for_parsing = re.sub(r'\s*\([СЛ]И\)\s*$', '', name_without_ext).strip()
         
-        # ШАГ 0: Найти ЛУЧШИЙ паттерн используя БЛОЧНЫЙ АНАЛИЗ
+        # ══════════════════════════════════════════════════════════════════
+        # ШАГ 1 (NEW): Попробовать BlockLevelPatternMatcher 🎯
+        # ══════════════════════════════════════════════════════════════════
+        try:
+            series_from_block = None
+            file_patterns = self.settings.get_author_series_patterns_in_files() or []
+            
+            if file_patterns:
+                best_score, best_pattern, _, series_from_block = self.block_matcher.find_best_pattern_match(
+                    name_for_parsing, file_patterns
+                )
+                
+                # Проверяем что это валидная серия
+                if series_from_block and (not validate or self._is_valid_series(series_from_block, skip_author_check=True)):
+                    # Обработать через _extract_main_series_from_multi_level() для удаления номеров томов/иерархии
+                    # Examples:
+                    #   "Сид 1. Принцип талиона 1. Геката 1" → "Сид\Принцип талиона\Геката"
+                    #   "Варлок 1-3" → "Варлок"
+                    processed_series = self._extract_main_series_from_multi_level(series_from_block)
+                    if processed_series:
+                        return processed_series
+                    # Не проверяем blacklist для series из блок-матчера, т.к. это надёжный метод
+                    return series_from_block
+        except Exception as e:
+            # Если случится ошибка, продолжаем со старым методом
+            pass
+        
+        # ══════════════════════════════════════════════════════════════════
+        # ШАГ 2 (OLD): Резервный метод - старые паттерны
+        # ══════════════════════════════════════════════════════════════════
+        
         # Анализируем структуру файла один раз
         file_blocks = self.block_selector.analyze_filename_blocks(name_for_parsing)
         

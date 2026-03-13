@@ -255,6 +255,10 @@
     {
       "pattern": "Author - Series (service_words)",
       "example": "Садов Сергей - Горе победителям (Дилогия).fb2"
+    },
+    {
+      "pattern": "Author - Series. Series (service_words)",
+      "example": "Садов Сергей - Цена победы. Горе победителям (Дилогии).fb2"
     }
     
   ],

@@ -1,8 +1,68 @@
-# Архитектура системы регенерации CSV (Версия 2.8)
+# Архитектура системы регенерации CSV (Версия 2.8+)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
 **📋 Полная история изменений и исправлений:** см. [CHANGELOG.md](CHANGELOG.md)
+
+**❗ НОВОЕ: Поддержка многоуровневых иерархий серий:** см. [SERIES_HIERARCHY.md](SERIES_HIERARCHY.md)
+
+**🆕 Март 13, 2026 - УЛУЧШЕНИЕ: Поддержка многоуровневых иерархий серий**
+
+#### 8️⃣ Multi-Level Series Hierarchy Extraction (BlockLevelPatternMatcher + Normalization)
+- **Проблема:** BlockLevelPatternMatcher извлекал только ПОСЛЕДНИЙ блок серии из многоуровневых паттернов
+  - Файл: `"Филимонов Олег - Злой среди чужих (Сид 1. Принцип талиона 1. Геката 1).fb2"`
+  - Паттерн: `"Author - Title (Series. SubSeries. SubSubSeries)"`
+  - БЫЛО: `proposed_series="Геката"` (только последний блок)
+  - НУЖНО: `proposed_series="Сид\Принцип талиона\Геката"` (полная иерархия)
+  
+- **Корневая причина:** В классе `BlockLevelPatternMatcher.score_pattern_match()` использовалась одинарная переменная `series_block`, которая перезаписывалась при каждом срабатывании `expected_type == "Series"`. Результат: сохранялся только последний блок.
+
+- **Решение:** Двухэтапный подход
+  
+  **Этап 1 - BlockLevelPatternMatcher:** Собрать ВСЕ Series блоки
+  ```python
+  series_blocks = []  # Collect ALL series blocks
+  
+  for fname_block, pblock in zip(filename_blocks, pattern_blocks):
+      if fname_type == expected_type:
+          if expected_type == "Series":
+              series_blocks.append(fname_block.text)  # ADD to list
+  
+  # Reconstruct with '. ' separator
+  series_block = '. '.join(series_blocks) if series_blocks else None
+  ```
+  
+  РЕЗУЛЬТАТ: `"Сид 1. Принцип талиона 1. Геката 1"` (все блоки сохранены!)
+  
+  **Этап 2 - Pass2SeriesFilename:** Нормализовать через `_extract_main_series_from_multi_level()`
+  ```python
+  # ВСЕГДА применять нормализацию (убрать условие про '. ')
+  processed_series = self._extract_main_series_from_multi_level(series_from_block)
+  ```
+  
+  РЕЗУЛЬТАТ: `"Сид\Принцип талиона\Геката"` (номера удалены, объединено со `\`)
+
+- **Метод `_extract_main_series_from_multi_level()`:** Существовал в коде (commit 90f68ce), работает корректно для всех случаев:
+  - Многоуровневые: `"Сид 1. Принцип талиона 1. Геката 1"` → `"Сид\Принцип талиона\Геката"`
+  - Однозровневые: `"Варлок 1-3"` → `"Варлок"`
+  - Простые: `"Авраменко"` → `"Авраменко"`
+
+- **Протестировано:**
+  - ✅ Филимонов: `Сид\Принцип талиона\Геката` (многоуровневая)
+  - ✅ Широков: `Варлок` (однозровневая, очищено от томов)
+  - ✅ Авраменко, Анисимов, Архипов: без изменений (простые серии)
+  - ✅ Красницкий: `Отрок\Сотник` (двухуровневая)
+
+- **Реализация:**
+  - `block_level_pattern_matcher.py` (строки 325-350): Собрать все Series блоки в список
+  - `passes/pass2_series_filename.py` (строки 1113-1122): Обязательно применить нормализацию
+  
+- **Принципиальное изменение:**
+  1. BlockLevelPatternMatcher теперь возвращает ПОЛНЫЙ контент паттерна (например, "A 1. B 1. C 1")
+  2. Pass2SeriesFilename обезвреживает номера и объединяет слои со слешем
+  3. Иерархия теперь полностью сохраняется с разделителем `\`
+
+- **Документация:** см. [SERIES_HIERARCHY.md](SERIES_HIERARCHY.md) — полное описание алгоритма и примеры
 
 **🆕 Март 10, 2026 - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Защита folder_dataset источника от перезаписи**
 
@@ -98,6 +158,7 @@
   ```
   
 - **Реализация:** [passes/pass4_consensus.py](passes/pass4_consensus.py) линия 123-132
+
 - **Коммит:** `4f48df0` - Fix: Preserve series values confirmed in FB2 metadata during false-series cleanup
 
 **🆕 Март 6, 2026 - ИСПРАВЛЕНИЕ КРИТИЧЕСКИХ ОШИБОК В СИСТЕМЕ ИЗВЛЕЧЕНИЯ СЕРИЙ**
