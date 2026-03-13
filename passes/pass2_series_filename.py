@@ -1702,24 +1702,41 @@ class Pass2SeriesFilename:
                 return False
         
         # ПРОВЕРКА 3: Исключить сервис-слова (том, книга, выпуск)
-        # Но только если они в начале как отдельное слово, не как часть названия!
-        # "том 1" → исключить, "Томск" → сохранить
+        # ВАЖНО: Отвергаем ТОЛЬКО если это просто service_word или service_word + число!
+        # НЕ отвергаем легитимные названия серий типа "Цикл Скорпиона" или "Серия Огня"!
+        # 
+        # Примеры что отвергаем ("том 1", "выпуск", "книга 3", "цикл")
+        # Примеры что СОХРАНЯЕМ ("Цикл Скорпиона", "Том Риддл", "Серия Огня")
+        import re
         for service_word in self.service_words:
             service_word_lower = service_word.lower()
-            # Проверяем если service_word это одна буква - только если это слово целиком
-            if len(service_word_lower) == 1:
-                # Для однобуквенных сокращений требуем точку после них: "т. " или "т."
-                if text_lower.startswith(service_word_lower + ' ') or \
-                   text_lower.startswith(service_word_lower + '.'):
+            words = text_lower.split()
+            
+            if not words:
+                continue
+            
+            first_word = words[0]
+            
+            # 1. Отвергаем если текст это РОВНО service_word ("том", "выпуск")
+            if first_word == service_word_lower and len(words) == 1:
+                return False
+            
+            # 2. Отвергаем если это service_word + число ("том 1", "выпуск 5", "книга 2")
+            if first_word == service_word_lower and len(words) >= 2:
+                second_word = words[1]
+                # Проверяем что второе слово это число, римская цифра или "и" (для "и т.д.")
+                if re.match(r'^\d+$', second_word) or \
+                   re.match(r'^[IVX]+$', second_word, re.IGNORECASE) or \
+                   second_word in ['и', '-']:
                     return False
-            else:
-                # Для многобуквенных слов проверяем начало строки
-                if text_lower.startswith(service_word_lower + ' ') or \
-                   text_lower.startswith(service_word_lower):
-                    # Но требуем чтобы это было целое слово в начале
-                    # "том фантастика" → исключить, но "томск" → сохранить
-                    words = text_lower.split()
-                    if words and words[0] == service_word_lower:
+            
+            # 3. Специальная проверка для однобуквенных сокращений типа "т."
+            # Отвергаем "т. 1" или "т. " но не "т.сервис-слово-другое"
+            if len(service_word_lower) == 1:
+                if text_lower.startswith(service_word_lower + '.'):
+                    # Это может быть "т. 1" или просто "т."
+                    remainder = text_lower[2:].strip()
+                    if not remainder or re.match(r'^\d+', remainder):
                         return False
         
         # ПРОВЕРКА 4: Убедиться что это НЕ похоже на автора!
