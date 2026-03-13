@@ -786,8 +786,12 @@ class Pass2Filename:
             # Import block-level matcher
             from block_level_pattern_matcher import BlockLevelPatternMatcher
             
-            # Create matcher with service words
-            matcher = BlockLevelPatternMatcher(service_words=list(self.service_words))
+            # Create matcher with service words and known author names
+            matcher = BlockLevelPatternMatcher(
+                service_words=list(self.service_words),
+                male_names=self.male_names,
+                female_names=self.female_names
+            )
             
             # Find best pattern match using block-level comparison
             best_score, best_pattern, author, series = matcher.find_best_pattern_match(filename, self.patterns)

@@ -31,9 +31,10 @@ class Block:
     block_type: str        # Type: "Author", "Title", "Series", "service_words", etc.
     position: int          # Position in block list
     is_parenthesized: bool # True if wrapped in ()
+    delimiter: str = None  # Delimiter BEFORE this block (e.g., " - ", ". ", "(", ")")
     
     def __repr__(self):
-        return f'Block("{self.text}", type={self.block_type})'
+        return f'Block("{self.text}", type={self.block_type}, delim={self.delimiter!r})'
 
 
 class BlockLevelPatternMatcher:
@@ -51,13 +52,21 @@ class BlockLevelPatternMatcher:
         'герой', 'герои', 'боец', 'боцена', 'воїн', 'война'
     }
     
-    def __init__(self, service_words: List[str] = None):
+    def __init__(self, service_words: List[str] = None, male_names: set = None, female_names: set = None):
         """Initialize matcher.
         
         Args:
             service_words: List of service words (series markers like "Тетралогия", "Дилогия")
+            male_names: Set of known male first names for author validation (optional)
+            female_names: Set of known female first names for author validation (optional)
         """
         self.service_words = set(w.lower() for w in (service_words or []))
+        # Combine known author names for first-block validation
+        self.known_author_names = set()
+        if male_names:
+            self.known_author_names.update(n.lower() for n in male_names)
+        if female_names:
+            self.known_author_names.update(n.lower() for n in female_names)
     
     def tokenize_filename(self, filename: str) -> List[Block]:
         """Break filename into structural blocks.
@@ -114,7 +123,8 @@ class BlockLevelPatternMatcher:
                 text=after_last_paren,
                 block_type="text",
                 position=len(blocks),
-                is_parenthesized=False
+                is_parenthesized=False,
+                delimiter=')'  # Delimiter before this block is the closing paren
             ))
         
         return blocks
@@ -124,6 +134,7 @@ class BlockLevelPatternMatcher:
         
         Splits on ' - ', '.', '(', ')' uniformly.
         Tracks parenthesis depth to mark blocks.
+        Stores delimiter information for each block.
         
         Args:
             text: Text to tokenize
@@ -139,6 +150,7 @@ class BlockLevelPatternMatcher:
         
         paren_depth = 0
         block_text_pos = 0
+        prev_delimiter = None  # Track the delimiter before this block
         
         for match in re.finditer(delimiter_pattern, text):
             delimiter = match.group()
@@ -152,7 +164,8 @@ class BlockLevelPatternMatcher:
                     text=block_text,
                     block_type="text",
                     position=len(blocks),
-                    is_parenthesized=is_inside_parens
+                    is_parenthesized=is_inside_parens,
+                    delimiter=prev_delimiter  # Store delimiter that came BEFORE this block
                 ))
             
             # Update parenthesis depth based on current delimiter
@@ -161,6 +174,7 @@ class BlockLevelPatternMatcher:
             elif delimiter == ')':
                 paren_depth = max(0, paren_depth - 1)
             
+            prev_delimiter = delimiter  # Next block will have this as its prefix delimiter
             block_text_pos = match.end()
         
         # Final block after last delimiter
@@ -172,7 +186,8 @@ class BlockLevelPatternMatcher:
                 text=block_text,
                 block_type="text",
                 position=len(blocks),
-                is_parenthesized=is_inside_parens
+                is_parenthesized=is_inside_parens,
+                delimiter=prev_delimiter  # Last block's prefix delimiter
             ))
         
         return blocks
@@ -186,16 +201,16 @@ class BlockLevelPatternMatcher:
         Example:
             "Author - Title (Series. service_words)"
             → [
-                {"type": "Author", "text": "Author", "position": 0, "parenthesized": False},
-                {"type": "Title", "text": "Title", "position": 1, "parenthesized": False},
-                {"type": "Series", "text": "Series", "position": 2, "parenthesized": True}
+                {"type": "Author", "text": "Author", "position": 0, "parenthesized": False, "delimiter": None},
+                {"type": "Title", "text": "Title", "position": 1, "parenthesized": False, "delimiter": " - "},
+                {"type": "Series", "text": "Series", "position": 2, "parenthesized": True, "delimiter": "("}
               ]
         
         Args:
             pattern: Pattern string (e.g., "Author - Title (Series)")
             
         Returns:
-            List of dicts with {type, text, position, parenthesized}
+            List of dicts with {type, text, position, parenthesized, delimiter}
         """
         if not pattern:
             return []
@@ -207,6 +222,7 @@ class BlockLevelPatternMatcher:
         
         paren_depth = 0
         block_text_pos = 0
+        prev_delimiter = None
         
         for match in re.finditer(delimiter_pattern, pattern):
             delimiter = match.group()
@@ -221,7 +237,8 @@ class BlockLevelPatternMatcher:
                     "type": block_type,
                     "text": block_text,
                     "position": len(pattern_blocks),
-                    "parenthesized": is_inside_parens
+                    "parenthesized": is_inside_parens,
+                    "delimiter": prev_delimiter
                 })
             
             # Update parenthesis depth
@@ -230,6 +247,7 @@ class BlockLevelPatternMatcher:
             elif delimiter == ')':
                 paren_depth = max(0, paren_depth - 1)
             
+            prev_delimiter = delimiter
             block_text_pos = match.end()
         
         # Don't forget the last block
@@ -242,7 +260,8 @@ class BlockLevelPatternMatcher:
                 "type": block_type,
                 "text": block_text,
                 "position": len(pattern_blocks),
-                "parenthesized": is_inside_parens
+                "parenthesized": is_inside_parens,
+                "delimiter": prev_delimiter
             })
         
         return pattern_blocks
@@ -307,6 +326,13 @@ class BlockLevelPatternMatcher:
         if len(filename_blocks) != len(pattern_blocks):
             return 0.0, pattern, None, None
         
+        # CRITICAL: Check if first block contains known author names
+        first_block_is_known_author = False
+        if self.known_author_names and filename_blocks:
+            first_block_words = set(w.lower() for w in filename_blocks[0].text.split())
+            if first_block_words & self.known_author_names:
+                first_block_is_known_author = True
+        
         # Score each block match
         score = 0.0
         max_score = 0.0
@@ -314,19 +340,45 @@ class BlockLevelPatternMatcher:
         series_blocks = []  # Collect ALL series blocks for multi-level hierarchies
         type_match_count = 0  # Count how many blocks had correct type match
         
-        for fname_block, pblock in zip(filename_blocks, pattern_blocks):
-            max_score += 1.0
+        for position, (fname_block, pblock) in enumerate(zip(filename_blocks, pattern_blocks)):
+            max_score += 1.0 + 0.1  # 1.0 for type match, 0.1 for potential delimiter bonus
             
             # Match parenthesization
             if fname_block.is_parenthesized == pblock['parenthesized']:
                 score += 0.5
             
             # Match block type expectation
-            fname_type = self._guess_block_type(fname_block.text)
             expected_type = pblock['type']
+            
+            # PENALTY: If first block contains known author name but pattern expects Title at pos 0
+            if position == 0 and first_block_is_known_author and expected_type == "Title":
+                # Pattern structure is WRONG for this filename
+                # Pattern like "Title - Author" makes no sense when first block is a known author
+                score -= 0.5  # Apply penalty
+            
+            # CRITICAL: For FIRST block (position==0) expecting "Author",
+            # check if it's in known author names BEFORE using _guess_block_type()
+            if position == 0 and expected_type == "Author" and self.known_author_names:
+                # Check if ANY word in block matches known author names
+                block_words = set(w.lower() for w in fname_block.text.split())
+                matches = block_words & self.known_author_names  # Set intersection
+                if matches:
+                    fname_type = "Author"  # Confident match from known names
+                else:
+                    fname_type = self._guess_block_type(fname_block.text)
+            else:
+                fname_type = self._guess_block_type(fname_block.text)
+            
+            # Check delimiter match
+            delimiter_match = fname_block.delimiter == pblock['delimiter']
             
             if fname_type == expected_type:
                 score += 0.5  # Type matches!
+                
+                # Bonus: if delimiters also match, add small bonus
+                if delimiter_match:
+                    score += 0.1  # Delimiter match is strong signal
+                
                 type_match_count += 1  # Track for tie-breaking
                 
                 # Track which block is Author/Series

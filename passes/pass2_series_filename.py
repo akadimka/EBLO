@@ -225,11 +225,18 @@ class BlockLevelPatternSelector:
 class Pass2SeriesFilename:
     """Извлечение серий из имён файлов."""
     
-    def __init__(self, logger: Logger = None):
+    def __init__(self, logger: Logger = None, male_names: set = None, female_names: set = None):
         self.logger = logger or Logger()
         self.settings = SettingsManager('config.json')
         self.block_selector = BlockLevelPatternSelector()
-        self.block_matcher = BlockLevelPatternMatcher()  # NEW: для точного извлечения серий
+        self.male_names = male_names or set()
+        self.female_names = female_names or set()
+        # Create block matcher with known author names
+        self.block_matcher = BlockLevelPatternMatcher(
+            service_words=list(self.settings.get_list('service_words')),
+            male_names=self.male_names,
+            female_names=self.female_names
+        )  # NEW: для точного извлечения серий
         # Получить списки из config.json
         self.collection_keywords = self.settings.get_list('collection_keywords')
         self.service_words = self.settings.get_list('service_words')

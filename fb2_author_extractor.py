@@ -1223,16 +1223,16 @@ class FB2AuthorExtractor:
             title_info_content = title_info_match.group(0)
             
             # Найти первого автора ТОЛЬКО в title-info
-            author_pattern = r'<author>.*?</author>'
+            author_pattern = r'<(?:fb:)?author>.*?</(?:fb:)?author>'
             match = re.search(author_pattern, title_info_content, re.DOTALL)
             
             if match:
                 author_text = match.group(0)
                 
                 # Извлечь компоненты имени
-                first_name_match = re.search(r'<first-name>(.*?)</first-name>', author_text)
-                last_name_match = re.search(r'<last-name>(.*?)</last-name>', author_text)
-                middle_name_match = re.search(r'<middle-name>(.*?)</middle-name>', author_text)
+                first_name_match = re.search(r'<(?:fb:)?first-name>(.*?)</(?:fb:)?first-name>', author_text)
+                last_name_match = re.search(r'<(?:fb:)?last-name>(.*?)</(?:fb:)?last-name>', author_text)
+                middle_name_match = re.search(r'<(?:fb:)?middle-name>(.*?)</(?:fb:)?middle-name>', author_text)
                 
                 first_name = first_name_match.group(1) if first_name_match else ''
                 last_name = last_name_match.group(1) if last_name_match else ''
@@ -1283,7 +1283,7 @@ class FB2AuthorExtractor:
             title_info_content = title_info_match.group(0)
             
             # Найти всех авторов в title-info
-            author_pattern = r'<author>.*?</author>'
+            author_pattern = r'<(?:fb:)?author>.*?</(?:fb:)?author>'
             matches = re.finditer(author_pattern, title_info_content, re.DOTALL)
             
             authors = []
@@ -1291,8 +1291,8 @@ class FB2AuthorExtractor:
                 author_text = match.group(0)
                 
                 # Извлечь компоненты имени
-                first_name_match = re.search(r'<first-name>(.*?)</first-name>', author_text)
-                last_name_match = re.search(r'<last-name>(.*?)</last-name>', author_text)
+                first_name_match = re.search(r'<(?:fb:)?first-name>(.*?)</(?:fb:)?first-name>', author_text)
+                last_name_match = re.search(r'<(?:fb:)?last-name>(.*?)</(?:fb:)?last-name>', author_text)
                 
                 first_name = first_name_match.group(1) if first_name_match else ''
                 last_name = last_name_match.group(1) if last_name_match else ''
@@ -1313,13 +1313,26 @@ class FB2AuthorExtractor:
     def _is_blacklisted(self, value: str) -> bool:
         """
         Проверить, находится ли значение в черном списке.
+        Проверяет ЦЕЛЫЕ СЛОВА, а не подстроки.
+        
+        Например:
+        - "СИ" в черном списке НЕ должен блокировать "Сергей Анисимов"
+        - Но "СИ" должен блокировать стоящее отдельно слово "СИ"
         """
         try:
             blacklist = self.settings.get_filename_blacklist()
             value_lower = value.lower()
+            value_words = value_lower.split()
             
             for item in blacklist:
-                if value_lower == item.lower() or item.lower() in value_lower:
+                item_lower = item.lower()
+                
+                # ТОЧНОЕ совпадение со всей строкой
+                if value_lower == item_lower:
+                    return True
+                
+                # Проверка совпадения со СЛОВАМИ (разделённые пробелами)
+                if item_lower in value_words:
                     return True
         except Exception:
             pass

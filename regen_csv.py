@@ -133,7 +133,9 @@ class RegenCSVService:
             
             # ===== SERIES PASS 2 =====
             print("[SERIES] Extracting series from filenames...")
-            pass2_series = Pass2SeriesFilename(self.logger)
+            pass2_series = Pass2SeriesFilename(self.logger,
+                                              male_names=precache.male_names,
+                                              female_names=precache.female_names)
             pass2_series.execute(self.records)
             self.logger.log("[OK] Series PASS 2: Extracted from filenames")
             
