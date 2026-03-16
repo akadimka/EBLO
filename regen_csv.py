@@ -28,6 +28,8 @@ from passes import (
 from passes.pass2_series_filename import Pass2SeriesFilename
 from passes.pass3_series_normalize import Pass3SeriesNormalize
 from passes.folder_series_parser import parse_series_from_folder_name
+from pattern_converter import compile_patterns
+import re
 
 
 class RegenCSVService:
@@ -46,6 +48,11 @@ class RegenCSVService:
         
         # Load configuration lists
         self.collection_keywords = self.settings.get_list('collection_keywords')
+        self.service_words = self.settings.get_list('service_words')
+        
+        # Load folder patterns for series extraction
+        folder_patterns_raw = self.settings.get_author_series_patterns_in_folders()
+        self.folder_patterns = compile_patterns(folder_patterns_raw) if folder_patterns_raw else []
         
         # Working directory (where FB2 files are scanned from)
         self.work_dir = Path(self.settings.get_last_scan_path())
@@ -60,6 +67,48 @@ class RegenCSVService:
         # CSV output path - ALWAYS in project directory
         self.project_dir = Path(__file__).parent
         self.output_csv = self.project_dir / "regen.csv"
+    
+    def _extract_series_from_folder_name(self, folder_name: str) -> str:
+        """
+        Извлечь название серии из имени папки, применяя паттерны.
+        
+        1. Убирает ведущие номера ("1. ", "2) " и т.д.)
+        2. Затем применяет паттерны для извлечения серии из авторов в скобках
+        3. Fallback: берёт всё перед скобками
+        
+        Args:
+            folder_name: Имя папки ("1941 (Иван Байбаков)" или "1. Путь в Царьград")
+        
+        Returns:
+            Название серии или исходное имя папки
+        """
+        # ШАГ 0: СНАЧАЛА убрать ведущие номера ("1. ", "2) " и т.д.)
+        # "1. Путь в Царьград" → "Путь в Царьград"
+        # "2) Варяг" → "Варяг"
+        # НО: "1941 (Иван Байбаков)" оставляем как есть (1941 это часть имени)
+        cleaned = re.sub(r'^\d+[\.\)\-]\s+', '', folder_name).strip()
+        if cleaned and cleaned != folder_name:
+            # Если что-то удалили, используем очищенную версию
+            folder_name = cleaned
+        
+        # ШАГ 1: Попробуем применить паттерны и найти группу "series"
+        for pattern_str, pattern_regex, group_names in self.folder_patterns:
+            match = pattern_regex.search(folder_name)
+            if match:
+                # Ищем группу "series" (нормализовано в нижнем регистре)
+                if 'series' in group_names:
+                    series = match.group('series').strip()
+                    if series:
+                        return series
+        
+        # ШАГ 2: Fallback - простое правило: всё перед скобками это серия
+        # "1941 (Иван Байбаков)" → "1941"
+        match = re.match(r'^(.+?)\s*\([^)]+\)\s*$', folder_name)
+        if match:
+            return match.group(1).strip()
+        
+        # ШАГ 3: Если ничего не помогло, берём всё имя
+        return folder_name.strip()
     
     def regenerate(self) -> bool:
         """Execute full CSV regeneration pipeline.
@@ -115,18 +164,26 @@ class RegenCSVService:
                 # Extract series from file path structure
                 file_path_parts = Path(record.file_path).parts
                 
-                # Logic:
-                # If depth >= 3 (Author/Series/File.fb2) -> series is folder name, take as-is
-                # If depth == 2 (Author/File.fb2) -> no series from folder (handled in PASS2)
-                
-                if len(file_path_parts) >= 3:
-                    # Structure: Author_Folder / Series_Folder / filename
+                if len(file_path_parts) >= 4:
+                    # Depth 4+: Hierarchical series
+                    # Structure: Coll / MainSeries / SubSeries / filename
+                    # parts[-3] = MainSeries_Folder
+                    # parts[-2] = SubSeries_Folder
                     # parts[-1] = filename
-                    # parts[-2] = Series_Folder (THIS IS ALWAYS A FOLDER, not a file!)
-                    series_folder_name = file_path_parts[-2]
                     
-                    # Take folder name as-is, it's the series
-                    record.proposed_series = series_folder_name
+                    main_series = self._extract_series_from_folder_name(file_path_parts[-3])
+                    sub_series = self._extract_series_from_folder_name(file_path_parts[-2])
+                    
+                    # Combine with backslash: "MainSeries\SubSeries"
+                    record.proposed_series = f"{main_series}\\{sub_series}"
+                    record.series_source = "folder_dataset"
+                
+                elif len(file_path_parts) == 3:
+                    # Depth 3: Simple series
+                    # Structure: Coll / Series_Folder / filename
+                    # parts[-2] = Series_Folder
+                    series_folder_name = file_path_parts[-2]
+                    record.proposed_series = self._extract_series_from_folder_name(series_folder_name)
                     record.series_source = "folder_dataset"
             
             self.logger.log("[OK] Series extracted from folder structure")

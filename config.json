@@ -54,7 +54,6 @@
     "download",
     "(АСТ)",
     "СССР",
-    "попаданец",
     "военная фантастика",
     "фантастика",
     "romance",
@@ -364,6 +363,32 @@
     {
       "pattern": "(N).(Surname)",
       "example": "С.Иванов"
+    }
+  ],
+  "series_patterns_in_folders": [
+    {
+      "pattern": "Series (Author)",
+      "example": "1941 (Иван Байбаков)"
+    },
+    {
+      "pattern": "Series (Author, Author)",
+      "example": "Защита Периметра (Абенд Эдвард, Иванов Сергей)"
+    },
+    {
+      "pattern": "Number. Series (Author)",
+      "example": "1. Работа над ошибками (Иван Байбаков)"
+    },
+    {
+      "pattern": "Series - Description",
+      "example": "Демонолог - Цикл"
+    },
+    {
+      "pattern": "(Series) Author",
+      "example": "(Боевой отряд) Петров И."
+    },
+    {
+      "pattern": "Series",
+      "example": "Боевой отряд"
     }
   ],
   "abbreviations_preserve_case": [
