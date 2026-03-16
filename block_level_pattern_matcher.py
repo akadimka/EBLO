@@ -136,6 +136,9 @@ class BlockLevelPatternMatcher:
         Tracks parenthesis depth to mark blocks.
         Stores delimiter information for each block.
         
+        ВАЖНО: многоточие (..., .., ....) НЕ является разделителем и остается частью блока!
+        Пример: "сдаюсь..." остается одним токеном, точки не разбивают его.
+        
         Args:
             text: Text to tokenize
             
@@ -145,6 +148,11 @@ class BlockLevelPatternMatcher:
         if not text:
             return []
         
+        # PREPROCESSING: Replace ellipsis with placeholder to protect it from delimiter splitting
+        # Ellipsis (2+ dots) should stay with the word, not act as delimiter
+        ELLIPSIS_PLACEHOLDER = "\x00ELLIPSIS\x00"  # Use null char as unlikely to appear in text
+        text_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, text)  # Replace "..", "...", etc.
+        
         blocks = []
         delimiter_pattern = r'\s+-\s+|\.\s*|[()]'
         
@@ -152,10 +160,13 @@ class BlockLevelPatternMatcher:
         block_text_pos = 0
         prev_delimiter = None  # Track the delimiter before this block
         
-        for match in re.finditer(delimiter_pattern, text):
+        for match in re.finditer(delimiter_pattern, text_processed):
             delimiter = match.group()
-            block_text = text[block_text_pos:match.start()]
+            block_text = text_processed[block_text_pos:match.start()]
             block_text = block_text.strip()
+            
+            # POSTPROCESSING: Restore ellipsis in block text
+            block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
             
             # Add block if not empty
             if block_text:
@@ -178,8 +189,12 @@ class BlockLevelPatternMatcher:
             block_text_pos = match.end()
         
         # Final block after last delimiter
-        block_text = text[block_text_pos:]
+        block_text = text_processed[block_text_pos:]
         block_text = block_text.strip()
+        
+        # POSTPROCESSING: Restore ellipsis in final block text
+        block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
+        
         if block_text:
             is_inside_parens = paren_depth > 0
             blocks.append(Block(
@@ -198,6 +213,9 @@ class BlockLevelPatternMatcher:
         Uses same unified delimiter logic as tokenize_filename.
         Splits on ' - ', '.', '(', ')' uniformly.
         
+        ВАЖНО: многоточие (..., .., ....) НЕ является разделителем!
+        Пример: "Серия..." остается одним типом, точки не разбивают.
+        
         Example:
             "Author - Title (Series. service_words)"
             → [
@@ -215,6 +233,10 @@ class BlockLevelPatternMatcher:
         if not pattern:
             return []
         
+        # PREPROCESSING: Protect ellipsis from being used as delimiter
+        ELLIPSIS_PLACEHOLDER = "\x00ELLIPSIS\x00"
+        pattern_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, pattern)
+        
         pattern_blocks = []
         
         # Split using same delimiter pattern as tokenize_filename
@@ -224,10 +246,13 @@ class BlockLevelPatternMatcher:
         block_text_pos = 0
         prev_delimiter = None
         
-        for match in re.finditer(delimiter_pattern, pattern):
+        for match in re.finditer(delimiter_pattern, pattern_processed):
             delimiter = match.group()
-            block_text = pattern[block_text_pos:match.start()]
+            block_text = pattern_processed[block_text_pos:match.start()]
             block_text = block_text.strip()
+            
+            # POSTPROCESSING: Restore ellipsis
+            block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
             
             # Add block if not empty
             if block_text:
@@ -251,8 +276,11 @@ class BlockLevelPatternMatcher:
             block_text_pos = match.end()
         
         # Don't forget the last block
-        block_text = pattern[block_text_pos:]
+        block_text = pattern_processed[block_text_pos:]
         block_text = block_text.strip()
+        
+        # POSTPROCESSING: Restore ellipsis
+        block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
         if block_text:
             is_inside_parens = paren_depth > 0
             block_type = self._normalize_block_type(block_text)

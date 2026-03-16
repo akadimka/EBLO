@@ -1179,6 +1179,17 @@ class Pass2SeriesFilename:
                 series_candidate = None
                 series_group_name = None
                 
+                # ✅ ДОБАВЛЕНО: Проверить что Title не состоит только из точек (это false-match)
+                title_candidate = None
+                for g_name in group_names:
+                    if 'title' in g_name:
+                        title_candidate = match.group(g_name).strip() if g_name in group_names else None
+                        break
+                
+                # Если Title это только точки - skip this pattern (it's a false match)
+                if title_candidate and all(c == '.' for c in title_candidate):
+                    continue
+                
                 for g_name in group_names:
                     if 'series' in g_name:
                         series_group_name = g_name
@@ -1187,13 +1198,20 @@ class Pass2SeriesFilename:
                 if series_group_name:
                     raw_series = match.group(series_group_name).strip()
                     
-                    # Применяем соответствующую обработку
-                    if 'subseries' in series_group_name or 'subsubseries' in series_group_name:
-                        series_candidate = self._extract_main_series_from_multi_level(raw_series)
-                    elif 'service_words' in series_group_name or '. ' in raw_series or (raw_series.split() and '-' in raw_series.split()[-1]):
-                        series_candidate = self._extract_series_from_brackets(raw_series)
+                    # ✅ ДОБАВЛЕНО: Отвергнуть если series это только точки
+                    # Это часто бывает false-match когда многоточие в конце файла интерпретируется как разделитель
+                    # Пример: "Авраменко Александр - Я не сдаюсь..." → паттерн видит ".." как "Title"
+                    if raw_series and all(c == '.' for c in raw_series):
+                        # Это только точки, не серия
+                        series_candidate = None
                     else:
-                        series_candidate = raw_series
+                        # Применяем соответствующую обработку
+                        if 'subseries' in series_group_name or 'subsubseries' in series_group_name:
+                            series_candidate = self._extract_main_series_from_multi_level(raw_series)
+                        elif 'service_words' in series_group_name or '. ' in raw_series or (raw_series.split() and '-' in raw_series.split()[-1]):
+                            series_candidate = self._extract_series_from_brackets(raw_series)
+                        else:
+                            series_candidate = raw_series
                 
                 if not series_candidate and '(' in pattern_str and ')' in pattern_str:
                     series_candidate = self._apply_config_pattern(pattern_str, name_for_parsing)
