@@ -1,10 +1,68 @@
-# Архитектура системы регенерации CSV (Версия 3.0)
+# Архитектура системы регенерации CSV (Версия 3.1)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
 **📋 Полная история изменений и исправлений:** см. [CHANGELOG.md](CHANGELOG.md)
 
 **❗ НОВОЕ: Поддержка многоуровневых иерархий серий:** см. [SERIES_HIERARCHY.md](SERIES_HIERARCHY.md)
+
+## 🆕 Март 16, 2026 - ИСПРАВЛЕНИЕ: Обработка многоточия как части блока, а не разделителя
+
+### 5️⃣ Ellipsis as Block Part, Not Delimiter (BlockLevelPatternMatcher + Pass2 Series)
+- **Проблема:** Файлы с многоточием в конце имени создавали false series
+  - Файл: `"Авраменко Александр - Я не сдаюсь....fb2"` (4 точки в конце!)
+  - Паттерн "Author - Series. Title" ошибочно совпадал на: `"Author - Title...."`
+  - Интерпретация:
+    - "Авраменко Александр" → Author ✓
+    - "Я не сдаюсь" → **Series** ❌ (НЕПРАВИЛЬНО!)
+    - ".." → Title ❌ (НЕПРАВИЛЬНО!)
+  - Результат: `proposed_series="Я не сдаюсь"` ← FALSE POSITIVE
+
+- **Корневая причина:** 
+  1. BlockLevelPatternMatcher: Многоточие трактовалось как разделитель (точка в regex `r'\.\s*'`)
+  2. Old patterns: Позволяли extracted series без валидации содержимого
+  
+- **Решение (двухчастное):**
+
+  **Часть 1 - BlockLevelPatternMatcher (block_level_pattern_matcher.py):**
+  - Многоточие (`...`, `..`, `....`) рассматривается как **часть слова**, не разделитель
+  - Использует placeholder техника:
+    ```python
+    # Перед tokenization: Защитить многоточие
+    ELLIPSIS_PLACEHOLDER = "\x00ELLIPSIS\x00"
+    text_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, text)  # ".." / "..." / "...." → placeholder
+    
+    # Tokenize используя text_processed (многоточи не разбивают блоки)
+    
+    # После tokenization: Восстановить многоточие
+    block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
+    ```
+  - Применено в методах: `tokenize_filename()` и `tokenize_pattern()`
+  - Результат: `"Я не сдаюсь..."` → один блок (не разбивается на "Я не сдаюсь" + "..")
+
+  **Часть 2 - Old Pattern Matching (pass2_series_filename.py):**
+  - Отвергнуть matches где Title состоит **только из точек**:
+    ```python
+    if title_candidate and all(c == '.' for c in title_candidate):
+        continue  # Skip this pattern (false match)
+    ```
+  - Отвергнуть `series_candidate` если это **только точки**:
+    ```python
+    if raw_series and all(c == '.' for c in raw_series):
+        series_candidate = None  # Not a real series
+    ```
+  - Результат: Паттерны с точками в Title/Series отвергаются как false-matches
+
+- **Результат:**
+  - ✅ Авраменко "Я не сдаюсь....": `proposed_series=""` (пусто, как должно быть) вместо false "Я не сдаюсь"
+  - ✅ file_title: `"Я не сдаюсь..."` (правильно отождествлена как название)
+  - ✅ Нет регрессий: Солдат удачи (4), Цикл Скорпиона (3), Врата Валгаллы (3) - все сохранены
+
+- **Реализация:** 
+  - `block_level_pattern_matcher.py` (методы `_tokenize_with_delimiters()`, `tokenize_pattern()`): Placeholder техника для многоточия
+  - `passes/pass2_series_filename.py` (lines ~1177, ~1192): Отвергнуть очевидные false-matches
+  
+- **Коммит:** `bc2d5a2` - Fix: Treat ellipsis as part of block, not as delimiter
 
 ## 🆕 Март 13, 2026 - КВАРТЕТ ИСПРАВЛЕНИЙ: Service Words, Filename Cleanup, Consensus Logic, Metadata Validation
 

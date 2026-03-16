@@ -4,6 +4,53 @@
 
 ## [Неопубликовано]
 
+### 🆕 Март 16, 2026 - ИСПРАВЛЕНИЕ: Обработка многоточия как части блока
+
+#### Ellipsis as Block Part, Not Delimiter (Коммит: bc2d5a2)
+- **Проблема:** Файлы с многоточием в конце имени (`.`, `..`, `...`, `....`) создавали false series
+  - Файл: `"Авраменко Александр - Я не сдаюсь....fb2"` (4 точки!)
+  - Паттерн "Author - Series. Title" ошибочно совпадал на `"Author - Title...."`
+  - Интерпретация:
+    - "Авраменко Александр" → Author ✓
+    - "Я не сдаюсь" → **Series** ❌
+    - ".." → Title ❌
+  - Результат: `proposed_series="Я не сдаюсь"` ← FALSE POSITIVE!
+
+- **Корневая причина:**
+  1. **BlockLevelPatternMatcher:** Многоточие трактовалось как разделитель (точка в regex)
+  2. **Old patterns:** Позволяли extracted series/title без валидации содержимого
+
+- **Решение (двухчастное):**
+  
+  **BlockLevelPatternMatcher (block_level_pattern_matcher.py):**
+  - Многоточие (`...`, `..`, `....`) рассматривается как часть слова, не разделитель
+  - Техника: Placeholder во время tokenization, восстановление после
+  ```python
+  ELLIPSIS_PLACEHOLDER = "\x00ELLIPSIS\x00"
+  text_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, text)  # Protect
+  # ... tokenize using text_processed ...
+  block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")  # Restore
+  ```
+  - Методы: `tokenize_filename()` и `tokenize_pattern()`
+  
+  **Old Pattern Matching (pass2_series_filename.py):**
+  - Отвергнуть matches где Title состоит только из точек
+  - Отвергнуть series_candidate если это только точки
+  ```python
+  if raw_series and all(c == '.' for c in raw_series):
+      series_candidate = None  # Not real series
+  ```
+
+- **Результат:**
+  - ✅ Авраменко "Я не сдаюсь....": `proposed_series=""` (пусто, правильно!)
+  - ✅ file_title: `"Я не сдаюсь..."` (правильно идентифицирована)
+  - ✅ Нет регрессий: все существующие series сохранены
+    - Солдат удачи: 4 файла
+    - Цикл Скорпиона: 3 файла
+    - Врата Валгаллы: 3 файла (с consensus)
+
+- **Тип изменения:** Bug fix (false-positive series extraction)
+
 ### 🆕 Март 13, 2026 - Квартет критических исправлений: Service Words, Filename Cleanup, Consensus Logic, Metadata Validation
 
 #### 1. Metadata Validation for BlockLevelPatternMatcher (Коммит: 5761f69)
