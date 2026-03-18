@@ -176,6 +176,10 @@
       "example": "Война и мир - (Лев Толстой).fb2"
     },
     {
+      "pattern": "Title - Title (Author)",
+      "example": "СССР - ответный удар (Анатолий Логинов).fb2"
+    },
+    {
       "pattern": "Title - Author",
       "example": "Война и мир - Лев Толстой.fb2"
     },
@@ -329,66 +333,6 @@
     {
       "pattern": "Series",
       "example": "Демонолог"
-    }
-  ],
-  "author_name_patterns": [
-    {
-      "pattern": "(Name)",
-      "example": "Асташ"
-    },
-    {
-      "pattern": "(Surname) (Name)",
-      "example": "Иванов Сергей"
-    },
-    {
-      "pattern": "(Surname) (Name) (Patronymic)",
-      "example": "Иванов Сергей Владимирович"
-    },
-    {
-      "pattern": "(Name) (Surname)",
-      "example": "Сергей Иванов"
-    },
-    {
-      "pattern": "(Surname) ((Name))",
-      "example": "Иванов (Сергей)"
-    },
-    {
-      "pattern": "(Surname) (Initial). (Name)",
-      "example": "Роберт Дж. Сойер"
-    },
-    {
-      "pattern": "(N). (Surname)",
-      "example": "С. Иванов"
-    },
-    {
-      "pattern": "(N).(Surname)",
-      "example": "С.Иванов"
-    }
-  ],
-  "series_patterns_in_folders": [
-    {
-      "pattern": "Series (Author)",
-      "example": "1941 (Иван Байбаков)"
-    },
-    {
-      "pattern": "Series (Author, Author)",
-      "example": "Защита Периметра (Абенд Эдвард, Иванов Сергей)"
-    },
-    {
-      "pattern": "Number. Series (Author)",
-      "example": "1. Работа над ошибками (Иван Байбаков)"
-    },
-    {
-      "pattern": "Series - Description",
-      "example": "Демонолог - Цикл"
-    },
-    {
-      "pattern": "(Series) Author",
-      "example": "(Боевой отряд) Петров И."
-    },
-    {
-      "pattern": "Series",
-      "example": "Боевой отряд"
     }
   ],
   "abbreviations_preserve_case": [

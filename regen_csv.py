@@ -68,6 +68,39 @@ class RegenCSVService:
         self.project_dir = Path(__file__).parent
         self.output_csv = self.project_dir / "regen.csv"
     
+    def _normalize_name_for_comparison(self, name: str) -> str:
+        """Нормализировать имя для сравнения (lowercase, убрать лишние пробелы).
+        
+        Args:
+            name: Имя для нормализации
+            
+        Returns:
+            Нормализованное имя
+        """
+        if not name:
+            return ""
+        return re.sub(r'\s+', ' ', name.strip().lower())
+    
+    def _is_author_folder(self, folder_name: str, proposed_author: str) -> bool:
+        """Проверить, является ли папка папкой автора.
+        
+        Сравнивает нормализованные имена.
+        
+        Args:
+            folder_name: Имя папки
+            proposed_author: Предложенное имя автора
+            
+        Returns:
+            True если папка = папка автора
+        """
+        if not proposed_author or not folder_name:
+            return False
+        
+        folder_normalized = self._normalize_name_for_comparison(folder_name)
+        author_normalized = self._normalize_name_for_comparison(proposed_author)
+        
+        return folder_normalized == author_normalized
+    
     def _extract_series_from_folder_name(self, folder_name: str) -> str:
         """
         Извлечь название серии из имени папки, применяя паттерны.
@@ -155,7 +188,7 @@ class RegenCSVService:
             pass2_fallback.execute(self.records)
             self.logger.log("[OK] PASS 2 Fallback: Metadata applied")
             
-            # ===== SERIES EXTRACTION: From Folders =====
+            # ===== SERIES EXTRACTION: From Folders (VARIANT B) =====
             print("\n[SERIES] Extracting series from folder structure...")
             for record in self.records:
                 if record.proposed_series:
@@ -164,29 +197,78 @@ class RegenCSVService:
                 # Extract series from file path structure
                 file_path_parts = Path(record.file_path).parts
                 
-                if len(file_path_parts) >= 4:
-                    # Depth 4+: Hierarchical series
-                    # Structure: Coll / MainSeries / SubSeries / filename
-                    # parts[-3] = MainSeries_Folder
-                    # parts[-2] = SubSeries_Folder
-                    # parts[-1] = filename
+                # Key Strategy: Find author folder in path and skip it
+                # Everything below author folder = series/subseries
+                author_folder_index = -1  # Not found by default
+                
+                if record.proposed_author:
+                    # Try to find which folder is the author folder
+                    # by comparing folder names with proposed_author
+                    # (Check regardless of author_source because author might be from filename extraction)
+                    for idx, part in enumerate(file_path_parts[:-1]):  # Exclude filename
+                        if self._is_author_folder(part, record.proposed_author):
+                            author_folder_index = idx
+                            break  # Found the author folder
+                
+                # Now extract series based on structure AFTER author folder
+                if author_folder_index >= 0 and len(file_path_parts) > author_folder_index + 1:
+                    # We found author folder, extract series folders after it
+                    series_folders = file_path_parts[author_folder_index + 1 : -1]  # Exclude author folder and filename
                     
+                    if len(series_folders) == 0:
+                        # No series folder (file directly in author folder)
+                        # Use metadata as fallback for series
+                        if record.metadata_series:
+                            record.proposed_series = record.metadata_series
+                            record.series_source = "metadata"
+                        # IMPORTANT: If no metadata either, leave series_source UNSET
+                        # so Pass 2 can attempt filename extraction per priority cascade
+                    elif len(series_folders) == 1:
+                        # Simple series: Author / Series / File
+                        series_name = self._extract_series_from_folder_name(series_folders[0])
+                        if series_name:  # Only set source if we actually got a series name
+                            record.proposed_series = series_name
+                            record.series_source = "folder_dataset"
+                    else:
+                        # Hierarchical series: Author / MainSeries / SubSeries / ... / File
+                        series_names = [self._extract_series_from_folder_name(folder) for folder in series_folders]
+                        series_combined = "\\".join(series_names)
+                        if series_combined:  # Only set source if we actually got a series
+                            record.proposed_series = series_combined
+                            record.series_source = "folder_dataset"
+                elif len(file_path_parts) >= 4:
+                    # No author folder found, but depth >= 4 (Old behavior: Coll / FB2 / Author / Series / File)
+                    # Try old logic as fallback
                     main_series = self._extract_series_from_folder_name(file_path_parts[-3])
                     sub_series = self._extract_series_from_folder_name(file_path_parts[-2])
                     
-                    # Combine with backslash: "MainSeries\SubSeries"
-                    record.proposed_series = f"{main_series}\\{sub_series}"
-                    record.series_source = "folder_dataset"
+                    # Check if parts look fishy (contain known authors from config)
+                    # If main_series or sub_series look like author names, skip
+                    looks_like_author = (
+                        self._normalize_name_for_comparison(main_series) in 
+                        [self._normalize_name_for_comparison(name) for name in 
+                         (self.settings.get_list('male_names') + self.settings.get_list('female_names'))]
+                    )
+                    
+                    if not looks_like_author:
+                        # Combine with backslash: "MainSeries\SubSeries"
+                        series_combined = f"{main_series}\\{sub_series}"
+                        if series_combined:  # Only set source if we got something
+                            record.proposed_series = series_combined
+                            record.series_source = "folder_dataset"
+                    # else: skip when looks suspicious, will use metadata fallback via Pass 2
                 
                 elif len(file_path_parts) == 3:
-                    # Depth 3: Simple series
-                    # Structure: Coll / Series_Folder / filename
-                    # parts[-2] = Series_Folder
-                    series_folder_name = file_path_parts[-2]
-                    record.proposed_series = self._extract_series_from_folder_name(series_folder_name)
-                    record.series_source = "folder_dataset"
+                    # Depth 3: Coll / Series / File
+                    # Only if author_folder_index not found
+                    if author_folder_index < 0:
+                        series_folder_name = file_path_parts[-2]
+                        series_name = self._extract_series_from_folder_name(series_folder_name)
+                        if series_name:  # Only set source if we got a series
+                            record.proposed_series = series_name
+                            record.series_source = "folder_dataset"
             
-            self.logger.log("[OK] Series extracted from folder structure")
+            self.logger.log("[OK] Series extracted from folder structure (Variant B)")
             
             # ===== SERIES PASS 2 =====
             print("[SERIES] Extracting series from filenames...")
