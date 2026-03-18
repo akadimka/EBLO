@@ -1,8 +1,87 @@
-# Архитектура системы регенерации CSV (Версия 3.2)
+# Архитектура системы регенерации CSV (Версия 3.3)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
-**📋 Полная история изменений и исправлений:** см. [CHANGELOG.md](CHANGELOG.md)
+## 🐛 Март 18, 2026 - ИСПРАВЛЕНИЕ: Детекция фамилий авторов в сериях (Author Surname Detection Bug Fix)
+
+### 7️⃣ Series Extraction: Author Surname and Author List Detection
+- **Проблема:** Фамилии авторов и списки авторов ошибочно извлекались как названия серий
+  - Файл: `"Спасти адмирала Макарова (А.Михайловский).fb2"` → `proposed_series="А.Михайловский"` ❌
+  - Ожидалось: `proposed_series="Спасти адмирала Макарова"` (из metadata)
+  - Файл: `"Спят курганы тёмные (Харников, Дынин).fb2"` → `proposed_series="Харников, Дынин"` ❌
+  - Ожидалось: `proposed_series=""` (это список соавторов, не серия)
+
+- **Корневая причина:**
+  1. Метод `_is_author_surname()` не обрабатывал сокращенный формат "А.Фамилия" (инициал + фамилия)
+  2. Fallback правила для извлечения серий из скобок не проверяли на список авторов (запятые)
+  3. Проверка запятой в execute() проходила слишком поздно
+
+- **Решение (три части):**
+
+  **Часть 1 - Переработан метод `_is_author_surname()` (pass2_series_filename.py)**
+  - Теперь проверяет **ВСЕ части** имени автора, а не только первую
+  - Поддерживает сокращенный формат "А.Фамилия" с инициалом
+  - Regex для извлечения фамилии из сокращения: `r'([А-Яа-яЁё]+)$'`
+  - Логика:
+    ```python
+    def _is_author_surname(self, series_candidate: str, author: str) -> bool:
+        for part in author.split():
+            part_lower = part.lower()
+            part_normalized = re.sub(r'[^\w]', '', part_lower)
+            
+            # Точное совпадение целой части
+            if part_normalized == series_normalized:
+                return True
+            
+            # Для сокращённого формата (А.Фамилия)
+            if '.' in series_lower:
+                match = re.search(r'([А-Яа-яЁё]+)\.?$', series_lower)
+                if match and match.group(1).lower() == part_lower:
+                    return True
+        return False
+    ```
+  - Тесты:
+    - `_is_author_surname('А.Михайловский', 'Александр Михайловский')` → True ✓
+    - `_is_author_surname('Белоус', 'Олег Белоус')` → True ✓
+    - `_is_author_surname('Война', 'Петр Война')` → True ✓
+
+  **Часть 2 - Ранний check на запятые в `_extract_series_from_brackets()`**
+  - Добавлена проверка в самом начале метода
+  - Если содержимое скобок содержит запятую → немедленный возврат пусто
+  - "(Харников, Дынин)" → "" (это список авторов) ✓
+  - "(Солдат удачи. Тетралогия)" → обработка как обычно ✓
+  ```python
+  # IMMEDIATE CHECK: Если содержимое скобок содержит запятую
+  if ',' in content:
+      # Это список (авторов, соавторов и т.д.), не серия
+      return ""
+  ```
+
+  **Часть 3 - Дополнительные проверки в execute() (pass2_series_filename.py)**
+  - Fallback блок 1 (извлечение из скобок): проверка на запятую + `_is_author_surname()`
+  - Fallback блок 2 (извлечение по config patterns): проверка на запятую + `_is_author_surname()`
+  - Правило 2 (скобки в конце): явно проверяет запятую перед инициализацией
+  ```python
+  # Проверяем ЧТО это не список авторов
+  if ',' in series_candidate:
+      looks_like_author = True  # Пропускаем
+  # И что это не фамилия автора
+  elif not self._is_author_surname(series_candidate, record.proposed_author or ""):
+      # Используем как series
+      record.proposed_series = series_candidate
+  ```
+
+- **Результаты тестирования:**
+  - ✅ `"Спасти адмирала Макарова (А.Михайловский).fb2"` → `proposed_series="Спасти адмирала Макарова"` (metadata)
+  - ✅ `"Спят курганы тёмные (Харников, Дынин).fb2"` → `proposed_series=""` (пусто)
+  - ✅ Остальные серии (Солдат, Стрелок, Возвращение и т.д.) работают корректно
+  - ✅ Нет регрессии в извлечении авторов
+
+- **Реализация:**
+  - `passes/pass2_series_filename.py`: Обновлен `_is_author_surname()`, `_extract_series_from_brackets()`, fallback блоки в `execute()`
+  - Добавлены проверки на запятую в трёх местах для надёжности
+
+- **Коммит:** `ac32fc3` - Fix: Series extraction - detect author surnames and author lists in brackets
 
 ## 🆕 Март 16, 2026 (Вечер) - УЛУЧШЕНИЕ: Применение паттернов к имёнам папок (Series Extraction from Folder Paths)
 
