@@ -23,6 +23,7 @@ PASS 2 для СЕРИЙ: Извлечение серий из имён файл
 """
 
 import re
+import sys
 from pathlib import Path
 from typing import List
 
@@ -323,7 +324,8 @@ class Pass2SeriesFilename:
                             continue  # Переходим к следующему файлу
                         
                         # ПРОВЕРКА 2: Не используем фамилию автора как серию
-                        if self._is_author_surname(series_from_patterns, record.proposed_author):
+                        is_author = self._is_author_surname(series_from_patterns, record.proposed_author)
+                        if is_author:
                             # Это фамилия, не серия - пропускаем и используем только metadata
                             if record.metadata_series:
                                 series = record.metadata_series.strip()
@@ -446,9 +448,11 @@ class Pass2SeriesFilename:
                                 # Передаём контекст автора при валидации чтобы не отвергать series
                                 # если она выглядит как имя человека
                                 extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                                if self._is_valid_series(series_candidate, extracted_author=extracted_author_for_validation):
-                                    record.proposed_series = series_candidate
-                                    record.series_source = "filename"
+                                # ТАКЖЕ ПРОВЕРЯЕМ: это не должна быть фамилия автора или список авторов!
+                                if ',' not in series_candidate and not self._is_author_surname(series_candidate, record.proposed_author or ""):
+                                    if self._is_valid_series(series_candidate, extracted_author=extracted_author_for_validation):
+                                        record.proposed_series = series_candidate
+                                        record.series_source = "filename"
                     
                     # ШАГ 1.5: Если скобок нет, попробуем config patterns из filename
                     # Это поддерживает "Author - Series.Title" формат
@@ -459,9 +463,11 @@ class Pass2SeriesFilename:
                             record.extracted_series_candidate = series_candidate
                             clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
                             extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                            if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
-                                record.proposed_series = clean_candidate
-                                record.series_source = "filename"
+                            # ТАКЖЕ ПРОВЕРЯЕМ: это не должна быть фамилия автора или список авторов!
+                            if ',' not in clean_candidate and not self._is_author_surname(clean_candidate, record.proposed_author or ""):
+                                if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
+                                    record.proposed_series = clean_candidate
+                                    record.series_source = "filename"
                     
                     # Если из filename ничего не нашли, но есть metadata - используем её
                     if not record.proposed_series and record.metadata_series:
@@ -1106,6 +1112,9 @@ class Pass2SeriesFilename:
         # Эти метатеги не должны влиять на извлечение series
         name_for_parsing = re.sub(r'\s*\([СЛ]И\)\s*$', '', name_without_ext).strip()
         
+        # 🔑 Флаг: найден паттерн БЕЗ Series информации
+        pattern_found_without_series = False
+        
         # ══════════════════════════════════════════════════════════════════
         # ШАГ 1 (NEW): Попробовать BlockLevelPatternMatcher 🎯
         # ══════════════════════════════════════════════════════════════════
@@ -1117,6 +1126,16 @@ class Pass2SeriesFilename:
                 best_score, best_pattern, _, series_from_block = self.block_matcher.find_best_pattern_match(
                     name_for_parsing, file_patterns
                 )
+                
+                # 🔑 КРИТИЧНО: Проверить что паттерн содержит информацию о серии!
+                # Если паттерн не содержит слова "Series", то это не формат с серией
+                # Примеры БЕЗ серии: "Title (Author)", "Author - Title", "Author. Title"
+                # Примеры С серией: "Title (Author. Series)", "Author - Title (Series)", "Author - Series. Title"
+                pattern_str = best_pattern.get('pattern', '') if isinstance(best_pattern, dict) else str(best_pattern or '')
+                if 'Series' not in pattern_str:
+                    # Паттерн не содержит Series - игнорируем результат BlockLevelPatternMatcher
+                    pattern_found_without_series = True  # ← ЗАПОМНИТЬ что паттерн БЕЗ Series!
+                    series_from_block = None
                 
                 # Проверяем что это валидная серия
                 if series_from_block and (not validate or self._is_valid_series(series_from_block, skip_author_check=True)):
@@ -1278,6 +1297,15 @@ class Pass2SeriesFilename:
                 else:
                     return best_series
         
+        # 🔑 ВАЖНО: Если паттерн явно БЕЗ Series - не применяем fallback правила!
+        # Если паттерн "Title (Author)", то в нём НЕТ информации о серии
+        # Fallback правила (скобки, точка, и т.д.) не должны использоваться
+        if pattern_found_without_series:
+            # Паттерн явно БЕЗ серии - возвращаем пусто или metadata (если есть)
+            if metadata_series:
+                return metadata_series if validate else ""
+            return ""
+        
         # Правило 1: [Серия] в квадратных скобках в начале
         # Из паттернов конфига ищем примеры с [...]
         match = re.search(r'^\[([^\[\]]+)\]', name_for_parsing)
@@ -1296,7 +1324,23 @@ class Pass2SeriesFilename:
                 content_in_brackets = match.group(1).strip()
                 # Используем логику из _extract_series_from_brackets для cleanup
                 potential_series = self._extract_series_from_brackets(content_in_brackets)
-                if not validate or self._is_valid_series(potential_series):
+                
+                # 🔑 ПРОВЕРКА: это не должна быть фамилия автора или список авторов!
+                # Используем _is_author_surname() для проверки
+                # NOTE: В этом контексте record.proposed_author может не быть доступна
+                # поэтому мы не можем вызвать _is_author_surname() здесь напрямую
+                # ВРЕМЕННОЕ РЕШЕНИЕ: проверяем на точку (инициал), запятую (список авторов) или небольшую длину
+                looks_like_author = False
+                if ',' in potential_series:
+                    # Содержит запятую - это список авторов, не серия
+                    looks_like_author = True
+                elif '.' in potential_series or (len(potential_series) < 15 and ' ' not in potential_series):
+                    # Содержит точку - для русских имён это часто инициал+фамилия
+                    # "А.Михайловский" → это явно инициал в скобках
+                    # Или просто одно слово менее 15 символов - вероятно фамилия
+                    looks_like_author = True
+                
+                if not looks_like_author and (not validate or self._is_valid_series(potential_series)):
                     return potential_series
         
         # Правило 3: Серия. Название (точка как разделитель в начале)
@@ -1613,6 +1657,11 @@ class Pass2SeriesFilename:
         """
         # Сбрасываем флаг иерархической серии
         self._last_was_hierarchical = False
+        
+        # IMMEDIATE CHECK: Если содержимое скобок содержит запятую - это вероятно список авторов, не серия
+        if ',' in content:
+            # Это список (авторов, соавторов и т.д.), не серия
+            return ""
         
         # Сначала попробуем паттерн "из цикла" или "из серии"
         # "Романы из цикла «Отрок»" → "Отрок"
@@ -1983,12 +2032,13 @@ class Pass2SeriesFilename:
         
         Примеры:
             ("Белоус", "Белоус Олег") → True (это фамилия)
+            ("А.Белоус", "Алексей Белоус") → True (сокращенное - инициал + фамилия)
             ("Белоус", "Иванов Сергей") → False (не фамилия)
             ("Солдат удачи", "Авраменко Александр") → False (это серия)
         
         Args:
             series_candidate: Извлеченная серия
-            author: Автор в формате "Фамилия Имя"
+            author: Автор в формате "Фамилия Имя" или "Имя Фамилия"
             
         Returns:
             True если series - это фамилия автора
@@ -1996,20 +2046,37 @@ class Pass2SeriesFilename:
         if not series_candidate or not author:
             return False
         
-        # Парсим автора: обычно "Фамилия Имя"
         author_parts = author.strip().split()
         if not author_parts:
             return False
         
-        # Первая часть - фамилия
-        author_surname = author_parts[0].lower()
         series_lower = series_candidate.lower()
-        
-        # Проверяем точное совпадение (нормализованное)
         series_normalized = re.sub(r'[^\w]', '', series_lower)
-        surname_normalized = re.sub(r'[^\w]', '', author_surname)
         
-        return series_normalized == surname_normalized
+        # Проверяем КАЖДУЮ часть автора (может быть "Фамилия Имя" или "Имя Фамилия")
+        for part in author_parts:
+            part_lower = part.lower()
+            part_normalized = re.sub(r'[^\w]', '', part_lower)
+            
+            # Точное совпадение целой части (например: "Белоус" = "Белоус")
+            if part_normalized == series_normalized:
+                return True
+            
+            # Для сокращенного формата (А.Фамилия), проверяем совпадение в конце
+            # Например: "А.Белоус" содержит "Белоус" (последняя часть после последней точки)
+            if '.' in series_lower:
+                # Извлекаем последний слог после крайней точки  (А. → А, В.К. → К, Белоус → Белоус)
+                # Разбиваем по точке и берем последнюю часть, которая содержит кириллицу
+                match = re.search(r'([А-Яа-яЁё]+)\.?$', series_lower)
+                if match:
+                    surname_part = match.group(1).lower()
+                    surname_part_normalized = re.sub(r'[^\w]', '', surname_part)
+                    
+                    # Проверяем, совпадает ли эта часть с частью автора
+                    if part_normalized == surname_part_normalized:
+                        return True
+        
+        return False
     
     def _score_pattern_match(self, pattern: str, filename: str, extracted_series: str) -> int:
         """
