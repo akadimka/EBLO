@@ -109,6 +109,11 @@ class Pass4Consensus:
             if len(records_with_series) == 1:
                 record = records_with_series[0]
                 
+                # PROTECTION: If series came from folder structure (folder_dataset),
+                # DO NOT remove it! Folders are trusted sources
+                if record.series_source == "folder_dataset":
+                    continue  # Trust folder-based series, don't remove
+                
                 # Check if series contains service markers that indicate it's a real series
                 series_lower = series.lower()
                 has_service_marker = any(marker in series_lower for marker in service_markers)

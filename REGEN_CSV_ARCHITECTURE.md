@@ -2,9 +2,9 @@
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
 
-## 🚀 Март 19, 2026 - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Независимость логики Pass 2 Series от глубины файла + Cleanup паттерны издателей
+## 🚀 Март 19, 2026 - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Независимость логики Pass 2 Series от глубины файла + Cleanup паттерны издателей + Depth==4 Override
 
-### ⚡ Pass 2 Series Execute() - Depth-Independent Logic Refactoring
+### ⚡ Pass 2 Series Execute() - Depth-Independent Logic Refactoring + Depth==4 Override
 
 #### Проблема №1: Логика зависит от file_depth вместо наличия series_source
 - **Описание:** Метод `execute()` в `pass2_series_filename.py` использовал `file_depth` для решения какую обработку применить:
@@ -65,12 +65,58 @@
   - `passes/pass2_series_filename.py` (lines 259-317): Полный рефакторинг метода `execute()`
   - Вспомогательный скрипт `fix_pass2_execute.py` (Python) использован для безопасной замены
   - Отключены (закомментированы) старые методы consensus (требуют переработки)
+  - **ДОПОЛНЕНИЕ:** Lines 263-272 добавлена логика для depth==4 override (см. проблему №3)
 
 - **Коммит:** `c5b9a4d` - Fix: Pass 2 Series - process filenames regardless of depth (depth-independent logic)
 
 ---
 
-#### Проблема №2: Издатели в metadata не удаляются при очистке серий
+#### Проблема №3: Pass 1 неправильно устанавливает series_source="folder_dataset" для depth==4 без series папки
+- **Описание:** Для depth==4 структур (Coll/FB2/Author/File) без series подпапки Pass 1 устанавливал `series_source="folder_dataset"`, но реально папка-автор НЕ содержала series.
+  - Файл: `Серия - «Попаданец»\FB2\Глебов Виктор (Ежов Михаил)\Глебов Виктор. Эргоном 1. Последний ассасин.fb2`
+  - Pass 1 установил: `series_source="folder_dataset"` ❌
+  - Pass 2 вид это и пропустил (skip по условию line 270)
+  - Результат: `proposed_series` остался неправильным, filename паттерны не обработали!
+
+- **Корневая причина:** 
+  1. Pass 1 (regen_csv.py lines 240-260) пробует извлечь series для depth>=4 из parts[-3] и parts[-2]
+  2. Для file структур типа (Coll/FB2/Author/File) это берет FB2 и Author папки (не series!)
+  3. Pass 1 установил `series_source="folder_dataset"` 
+  4. Pass 2 проверяет `if series_source=="folder_dataset": continue` и пропускает файл
+  5. **Результат:** Filename паттерны никогда не пробуются для depth==4 файлов
+
+- **Решение:** Pass 2 должен ПЕРЕПИСЫВАТЬ series для depth==4 файлов
+  - Добавлена специальная логика на lines 263-272:
+  ```python
+  # Для depth==4 позволяем Pass 2 переписать неправильный folder_dataset
+  is_depth4_without_real_series = (
+      file_depth == 4 and 
+      record.series_source == "folder_dataset"
+  )
+  
+  if record.series_source == "folder_dataset" and not is_depth4_without_real_series:
+      continue  # Нормальная папка series → пропускаем
+  
+  # Для depth==4: НЕ пропускаем, даём Pass 2 переписать результат
+  ```
+  - Когда Pass 2 видит depth==4 с folder_dataset, он **НЕ пропускает**, а пробует filename паттерны
+  - Если паттерны дали результат → перезаписываем `series_source="filename"`
+  - Если паттерны не дали → fallback на metadata
+
+- **Результаты тестирования:**
+  - ✅ Файл Эргоном: Было `series_source="folder_dataset"`, стало `series_source="filename"` ✓
+  - ✅ `proposed_series="Эргоном"` извлечена из filename паттерна "Глебов. Эргоном"
+  - ✅ Depth==3 с реальной series папкой продолжают работать нормально
+  - ✅ Metadata fallback по-прежнему работает когда filename паттерны не дали результат
+
+- **Реализация:** 
+  - `passes/pass2_series_filename.py` (lines 263-272): Добавлена логика для depth==4 override
+  - Минимальное изменение - только 10 строк кода для обработки исключения
+  - Остальная логика execute() не затронута
+
+- **Коммит:** `5e3bec4` - Fix: Pass 2 Series - override wrong folder_dataset for depth==4 (no series subfolder)
+
+---
 - **Описание:** В metadata серий остаются имена издателей в скобках, которые не удаляются паттернами очистки
   - Файл: `Серия - «Попаданец»/FB2/Олег Чебышев/Олег Чебышев. Раб.fb2`
   - Metadata_series: `"Попаданец (АСТ)"` ← издатель АСТ в скобках!

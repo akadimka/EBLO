@@ -69,7 +69,10 @@ class RegenCSVService:
         self.output_csv = self.project_dir / "regen.csv"
     
     def _normalize_name_for_comparison(self, name: str) -> str:
-        """Нормализировать имя для сравнения (lowercase, убрать лишние пробелы).
+        """Нормализировать имя для сравнения (lowercase, убрать лишние пробелы и пунктуацию).
+        
+        Заменяет запятые, точки, скобки на пробелы и нормализует пробелы.
+        Это позволяет сравнивать "Иван, Петр" с "Иван; Петр" как одинаковые.
         
         Args:
             name: Имя для нормализации
@@ -79,7 +82,11 @@ class RegenCSVService:
         """
         if not name:
             return ""
-        return re.sub(r'\s+', ' ', name.strip().lower())
+        # Заменяем пунктуацию на пробелы
+        normalized = re.sub(r'[;,()[\].]', ' ', name)
+        # Удаляем лишние пробелы
+        normalized = re.sub(r'\s+', ' ', normalized.strip().lower())
+        return normalized
     
     def _is_author_folder(self, folder_name: str, proposed_author: str) -> bool:
         """Проверить, является ли папка папкой автора.
@@ -197,6 +204,7 @@ class RegenCSVService:
                 # Extract series from file path structure
                 file_path_parts = Path(record.file_path).parts
                 
+
                 # Key Strategy: Find author folder in path and skip it
                 # Everything below author folder = series/subseries
                 author_folder_index = -1  # Not found by default
@@ -215,6 +223,7 @@ class RegenCSVService:
                     # We found author folder, extract series folders after it
                     series_folders = file_path_parts[author_folder_index + 1 : -1]  # Exclude author folder and filename
                     
+
                     if len(series_folders) == 0:
                         # No series folder (file directly in author folder)
                         # ВАЖНО: Оставляем proposed_series пустым чтобы дать возможность:
@@ -229,6 +238,7 @@ class RegenCSVService:
                         if series_name:  # Only set source if we actually got a series name
                             record.proposed_series = series_name
                             record.series_source = "folder_dataset"
+
                     else:
                         # Hierarchical series: Author / MainSeries / SubSeries / ... / File
                         series_names = [self._extract_series_from_folder_name(folder) for folder in series_folders]
@@ -236,9 +246,11 @@ class RegenCSVService:
                         if series_combined:  # Only set source if we actually got a series
                             record.proposed_series = series_combined
                             record.series_source = "folder_dataset"
+
                 elif len(file_path_parts) >= 4:
                     # No author folder found, but depth >= 4 (Old behavior: Coll / FB2 / Author / Series / File)
                     # Try old logic as fallback
+
                     main_series = self._extract_series_from_folder_name(file_path_parts[-3])
                     sub_series = self._extract_series_from_folder_name(file_path_parts[-2])
                     
@@ -256,6 +268,7 @@ class RegenCSVService:
                         if series_combined:  # Only set source if we got something
                             record.proposed_series = series_combined
                             record.series_source = "folder_dataset"
+
                     # else: skip when looks suspicious, will use metadata fallback via Pass 2
                 
                 elif len(file_path_parts) == 3:
