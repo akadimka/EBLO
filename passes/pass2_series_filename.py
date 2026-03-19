@@ -267,11 +267,19 @@ class Pass2SeriesFilename:
         4. Fallback на metadata только если паттерны не дали
         """
         for record in records:
-            if record.series_source == "folder_dataset":
-                continue  # Папка уже дала series
+            # Special case: depth==4 without series subfolder
+            # Pass 1 wrongly sets folder_dataset for depth==4, allowing Pass 2 to override it
+            file_depth = len(Path(record.file_path).parts)
+            is_depth4_without_real_series = (
+                file_depth == 4 and 
+                record.series_source == "folder_dataset"
+            )
             
-            if record.proposed_series:
-                continue  # Серия уже установлена
+            if record.series_source == "folder_dataset" and not is_depth4_without_real_series:
+                continue  # Папка дала series (кроме depth==4 ошибки)
+            
+            if record.proposed_series and not is_depth4_without_real_series:
+                continue  # Серия уже установлена (кроме depth==4 ошибки)
             
             # ОБЯЗАТЕЛЬНО пробуем паттерны (глубина НЕ влияет!)
             series_candidate = self._extract_series_from_filename(

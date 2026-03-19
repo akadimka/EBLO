@@ -1,6 +1,114 @@
-# Архитектура системы регенерации CSV (Версия 3.3)
+# Архитектура системы регенерации CSV (Версия 3.4)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
+
+## 🚀 Март 19, 2026 - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Независимость логики Pass 2 Series от глубины файла + Cleanup паттерны издателей
+
+### ⚡ Pass 2 Series Execute() - Depth-Independent Logic Refactoring
+
+#### Проблема №1: Логика зависит от file_depth вместо наличия series_source
+- **Описание:** Метод `execute()` в `pass2_series_filename.py` использовал `file_depth` для решения какую обработку применить:
+  - Если `file_depth == 2` → используется ТОЛЬКО metadata (без попытки паттернов!)
+  - Если `file_depth >= 3` → пробуются паттерны + metadata fallback
+  - **ОШИБКА:** Файлы на глубине 4+ без папки series (типа `Seria/FB2/Author/File`) вообще не обрабатывались паттернами!
+
+- **Пример падения:** 
+  - Файл: `Серия - «Попаданец»/FB2/Вальтер Макс/Вальтер М. Сумрак 1. Становление охотника.fb2` (depth==4)
+  - Структура: Нет папки series → `series_source=""` 
+  - Ожидалось: Паттерн "Author - Series" должен извлечь "Сумрак"
+  - Получалось: Используется ТОЛЬКО metadata (обход паттернов!) ❌
+
+- **Решение:** Полный рефакторинг логики execute()
+  - ✅ Удалены ВСЕ проверки на `file_depth`
+  - ✅ Логика теперь опирается на наличие `series_source` ("folder_dataset" уже дал series → пропустить)
+  - ✅ **ОБЯЗАТЕЛЬНО пробуются паттерны first** независимо от глубины файла
+  - ✅ Metadata используется ТОЛЬКО как fallback если паттерны не дали результат
+
+- **Новая логика (50 строк вместо 380+):**
+  ```python
+  def execute(self, records):
+      for record in records:
+          # 1. Пропускаем если папка уже дала series
+          if record.series_source == "folder_dataset":
+              continue
+          
+          # 2. Пропускаем если series уже установлена
+          if record.proposed_series:
+              continue
+          
+          # 3. ВСЕГДА пробуем паттерны (неважно глубина!)
+          series_candidate = self._extract_series_from_filename(...)
+          
+          # 4. Базовые фильтры (запятые = авторы, фамилия = не серия)
+          if ',' in series_candidate or self._is_author_surname(...):
+              series_candidate = None
+          
+          # 5. Валидация паттерна
+          if series_candidate and self._is_valid_series(clean):
+              record.proposed_series = clean
+              record.series_source = "filename"
+              continue
+          
+          # 6. ТОЛЬКО если паттерны не сработали → fallback на metadata
+          if record.metadata_series and self._is_valid_series(metadata):
+              record.proposed_series = metadata
+              record.series_source = "metadata"
+  ```
+
+- **Результаты тестирования:**
+  - ✅ Вальтер М. Сумрак 1-3 файлы: Все получают `series="Сумрак"` от filename ✓
+  - ✅ Файлы на depth==4 и depth==5 обрабатываются корректно
+  - ✅ Metadata fallback работает когда паттерны не дали результат
+  - ✅ Приоритет cascade сохранён: folder > filename > metadata
+
+- **Реализация:** 
+  - `passes/pass2_series_filename.py` (lines 259-317): Полный рефакторинг метода `execute()`
+  - Вспомогательный скрипт `fix_pass2_execute.py` (Python) использован для безопасной замены
+  - Отключены (закомментированы) старые методы consensus (требуют переработки)
+
+- **Коммит:** `c5b9a4d` - Fix: Pass 2 Series - process filenames regardless of depth (depth-independent logic)
+
+---
+
+#### Проблема №2: Издатели в metadata не удаляются при очистке серий
+- **Описание:** В metadata серий остаются имена издателей в скобках, которые не удаляются паттернами очистки
+  - Файл: `Серия - «Попаданец»/FB2/Олег Чебышев/Олег Чебышев. Раб.fb2`
+  - Metadata_series: `"Попаданец (АСТ)"` ← издатель АСТ в скобках!
+  - Ожидалось: `proposed_series="Попаданец"` (издатель удален)
+  - Получалось: `proposed_series="Попаданец (АСТ)"` ❌
+
+- **Решение:** Добавлены паттерны очистки издателей в config.json
+  - Паттерны добавлены в `series_cleanup_patterns`:
+    ```json
+    "\\s*\\(АСТ\\)\\s*",
+    "\\s*\\(Издательство АСТ\\)\\s*",
+    "\\s*\\(Эксмо\\)\\s*",
+    "\\s*\\(Эксмо-АСТ\\)\\s*"
+    ```
+  - Применяются в Pass 3 при нормализации серий через метод `_normalize_series_name()`
+  - Используют `re.sub()` с флагом `re.IGNORECASE` для flexibility
+
+- **Результаты:**
+  - ✅ `"Попаданец (АСТ)"` → `"Попаданец"` ✓
+  - ✅ `"Волшебники (Эксмо)"` → `"Волшебники"` ✓  
+  - ✅ Все остальные series_cleanup_patterns продолжают работать
+  - ✅ Нет регрессии в других сериях
+
+- **Реализация:** 
+  - `config.json` (lines 68-70): Добавлены 4 паттерна для издателей
+  - `passes/pass3_normalize.py` (метод `_normalize_series_name()`): Уже использует эти паттерны
+  - No code changes needed - только добавлены паттерны в конфиг
+
+- **Коммит:** `103d3ae` (предыдущий) + `c5b9a4d` включает обновленный config.json
+
+---
+
+#### Fix для metadata fallback guard (уже был в Pass 2)
+- **Напоминание:** Line 631 в `pass2_series_filename.py` имеет guard `and not record.proposed_series`
+  - Это предотвращает metadata от перезаписи folder_dataset или filename series
+  - Используется в старой логике, но сохранится для backward compatibility
+
+---
 
 ## 🐛 Март 18, 2026 - ИСПРАВЛЕНИЕ: Детекция фамилий авторов в сериях (Author Surname Detection Bug Fix)
 
