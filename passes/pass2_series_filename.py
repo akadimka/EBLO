@@ -304,6 +304,8 @@ class Pass2SeriesFilename:
                 author_for_validation = record.proposed_author or None
                 
                 if self._is_valid_series(clean, extracted_author=author_for_validation):
+                    # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                    clean = self._fix_russian_grammar(clean)
                     record.proposed_series = clean
                     record.series_source = "filename"
                     continue
@@ -313,6 +315,8 @@ class Pass2SeriesFilename:
                 series = self._extract_series_from_metadata(record.metadata_series.strip())
                 author_for_validation = record.proposed_author or None
                 if self._is_valid_series(series, extracted_author=author_for_validation):
+                    # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                    series = self._fix_russian_grammar(series)
                     record.proposed_series = series
                     record.series_source = "metadata"
         
@@ -427,6 +431,7 @@ class Pass2SeriesFilename:
                         for rec in pattern_info['records']:
                             if not rec.proposed_series:
                                 # Файл без series - применяем consensus
+                                best_candidate = self._fix_russian_grammar(best_candidate)
                                 rec.proposed_series = best_candidate
                                 rec.series_source = "consensus"
     
@@ -505,10 +510,12 @@ class Pass2SeriesFilename:
                     
                     # Если найденные слова совпадают с metadata - применяем
                     if candidate['metadata'] and self._matches_with_tolerance(common_words, candidate['metadata'], tolerance=0.80):
-                        record.proposed_series = candidate['metadata']
+                        candidate_metadata = self._fix_russian_grammar(candidate['metadata'])
+                        record.proposed_series = candidate_metadata
                         record.series_source = "metadata"
                     # Иначе применяем найденные слова
                     elif common_words:
+                        common_words = self._fix_russian_grammar(common_words)
                         record.proposed_series = common_words
                         record.series_source = "consensus"
             
@@ -1762,6 +1769,49 @@ class Pass2SeriesFilename:
         
         return False
     
+    def _fix_russian_grammar(self, series: str) -> str:
+        """
+        Исправляет грамматические ошибки в названии серии по правилам русского языка.
+        
+        Правило: перед союзом 'что' в придаточном предложении нужна запятая.
+        
+        Примеры:
+        - "Сделай что сможешь" → "Сделай, что сможешь"
+        - "Расчеты что нужны" → "Расчеты, что нужны"
+        - "что-то" → не изменяется (это не союз, а местоимение)
+        
+        Args:
+            series: Название серии
+            
+        Returns:
+            Исправленное название серии
+        """
+        if not series:
+            return series
+        
+        # Ищем слово "что" как отдельное слово (не часть другого слова)
+        # Используем word boundaries \b для точного совпадения
+        # Проверяем что запятая еще не стоит перед "что"
+        
+        # Паттерн: что-то вроде "...слово что..." где перед "что" НЕТ запятой
+        # Заменяем на "...слово, что..."
+        pattern = r'(\S)\s+что\b'  # Пробел + "что" как отдельное слово, перед ним не запятая
+        
+        # Проверяем что "что" это отдельное слово (не часть "что-то" или "кто-то")
+        def replacer(match):
+            prefix = match.group(1)
+            # Если перед словом уже есть запятая, не добавляем еще одну
+            if prefix == ',':
+                return match.group(0)
+            # Если это дефис (как в "что-то"), не трогаем
+            if prefix == '-':
+                return match.group(0)
+            # Иначе добавляем запятую
+            return f"{prefix}, что"
+        
+        result = re.sub(pattern, replacer, series)
+        return result
+
     def _score_pattern_match(self, pattern: str, filename: str, extracted_series: str) -> int:
         """
         Оценить степень соответствия паттерна структуре файла.
