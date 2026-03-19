@@ -281,7 +281,7 @@ class Pass2SeriesFilename:
             if record.proposed_series and not is_depth4_without_real_series:
                 continue  # Серия уже установлена (кроме depth==4 ошибки)
             
-            # ОБЯЗАТЕЛЬНО пробуем паттерны (глубина НЕ влияет!)
+            # ОБЯЗАТЕЛЬНО пробуемы паттерны (глубина НЕ влияет!)
             series_candidate = self._extract_series_from_filename(
                 record.file_path, validate=False, metadata_series=record.metadata_series
             )
@@ -301,22 +301,33 @@ class Pass2SeriesFilename:
                     series_candidate, 
                     keep_trailing_number=self._last_was_hierarchical
                 )
-                author_for_validation = record.proposed_author or None
                 
-                if self._is_valid_series(clean, extracted_author=author_for_validation):
-                    # Исправляем грамматику русского языка (добавляем запятую перед "что")
-                    clean = self._fix_russian_grammar(clean)
-                    record.proposed_series = clean
-                    record.series_source = "filename"
-                    continue
+                # ✅ НОВОЕ: Удалить слова из blacklist вместо полного отвергания
+                # Пример: "Господин следователь (СИ)" → удаляем "(СИ)" → "Господин следователь"
+                clean = self._remove_blacklist_words(clean)
+                
+                if clean:  # Проверяем что что-то осталось после очистки
+                    author_for_validation = record.proposed_author or None
+                    
+                    if self._is_valid_series(clean, extracted_author=author_for_validation):
+                        # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                        clean = self._fix_russian_grammar(clean)
+                        record.proposed_series = clean
+                        record.series_source = "filename"
+                        continue
             
             # Fallback: metadata ТОЛЬКО если паттерны не дали
             if not series_candidate:
+                file_name = Path(record.file_path).stem  # Имя без расширения
+                # ✅ ВАЖНО: Удалить метатеги из конца чтобы fallback правила работали!
+                # "(СИ)" - Самиздат/Интернет
+                # "(ЛП)" - Лицензионное произведение
+                file_name_for_fallback = re.sub(r'\s*\([СЛ]И\)\s*$', '', file_name).strip()
+                
                 # Перед fallback к metadata попробуем простое правило: Author. Series RomanNumeral
                 # "Яманов Александр. Бесноватый Цесаревич I.fb2" → "Бесноватый Цесаревич"
-                file_name = Path(record.file_path).stem  # Имя без расширения
-                if '. ' in file_name:
-                    parts = file_name.split('. ', 1)
+                if '. ' in file_name_for_fallback:
+                    parts = file_name_for_fallback.split('. ', 1)
                     if len(parts) == 2:
                         first_part = parts[0].strip()
                         second_part = parts[1].strip()
@@ -334,6 +345,24 @@ class Pass2SeriesFilename:
                                 simple_series = match.group(1).strip()
                                 if self._is_valid_series(simple_series, extracted_author=record.proposed_author):
                                     series_candidate = simple_series
+                
+                # ✅ НОВОЕ: Попробуем "Author - Series NUM" паттерн
+                # "Шалашов Евгений - Господин следователь 2" → "Господин следователь"
+                if not series_candidate and ' - ' in file_name_for_fallback:
+                    match = re.match(r'^(.+?)\s*-\s*(.+?)\s+(\d+|[IVX]+)\s*$', file_name_for_fallback)
+                    if match:
+                        first_part = match.group(1).strip()
+                        series_part = match.group(2).strip()
+                        
+                        # Проверяем что первая часть это автор/авторы
+                        looks_like_author = (
+                            len(first_part) < 50 and
+                            not any(digit in first_part for digit in '0123456789')
+                        )
+                        
+                        if looks_like_author:
+                            if self._is_valid_series(series_part, extracted_author=record.proposed_author):
+                                series_candidate = series_part
             
             if series_candidate:
                 # Из filename extraction найдена серия
@@ -342,18 +371,25 @@ class Pass2SeriesFilename:
                     series_candidate, 
                     keep_trailing_number=self._last_was_hierarchical
                 )
-                author_for_validation = record.proposed_author or None
+                # ✅ НОВОЕ: Удалить слова из blacklist вместо полного отвергания
+                clean = self._remove_blacklist_words(clean)
                 
-                if self._is_valid_series(clean, extracted_author=author_for_validation):
-                    # Исправляем грамматику русского языка (добавляем запятую перед "что")
-                    clean = self._fix_russian_grammar(clean)
-                    record.proposed_series = clean
-                    record.series_source = "filename"
+                if clean:  # Проверяем что что-то осталось после очистки
+                    author_for_validation = record.proposed_author or None
+                    
+                    if self._is_valid_series(clean, extracted_author=author_for_validation):
+                        # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                        clean = self._fix_russian_grammar(clean)
+                        record.proposed_series = clean
+                        record.series_source = "filename"
             elif record.metadata_series:
                 # Fallback к metadata - только если из filename ничего не нашли
                 series = self._extract_series_from_metadata(record.metadata_series.strip())
+                # ✅ НОВОЕ: Удалить слова из blacklist также из metadata серии
+                series = self._remove_blacklist_words(series)
+                
                 author_for_validation = record.proposed_author or None
-                if self._is_valid_series(series, extracted_author=author_for_validation):
+                if series and self._is_valid_series(series, extracted_author=author_for_validation):
                     # Исправляем грамматику русского языка (добавляем запятую перед "что")
                     series = self._fix_russian_grammar(series)
                     record.proposed_series = series
@@ -1495,6 +1531,50 @@ class Pass2SeriesFilename:
         series_candidate = re.sub(r'\s*[\d\-]+\s*$', '', content).strip()
         
         return series_candidate if series_candidate else ""
+    
+    def _remove_blacklist_words(self, text: str) -> str:
+        """
+        Удалить только слова из blacklist из текста, оставить остальное.
+        
+        Логика:
+        - "Господин следователь (СИ)" → "(СИ)" в blacklist → "Господин следователь"
+        - "Последний солдат СССР" → "СССР" в конце + есть слова перед ним → оставить как есть
+        - Но если ТОЛЬКО blacklist-word → вернуть пусто
+        
+        Args:
+            text: Исходный текст
+            
+        Returns:
+            Текст с удаленными blacklist-словами, или пусто если ничего не осталось
+        """
+        if not text or not self.filename_blacklist:
+            return text
+        
+        text_lower = text.lower()
+        original_text = text
+        
+        # Проходим по каждому слову в blacklist
+        for bl_word in self.filename_blacklist:
+            bl_word_lower = bl_word.lower().strip()
+            
+            # Ищем это слово как целое слово (не substring)
+            # Паттерн: слово с границами (пробелы, скобки, пунктуация)
+            pattern = r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$|[,\.\-\!?])'
+            
+            # Заменяем найденные вхождения на пробел (или пусто)
+            original_text = re.sub(
+                r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$|[,\.\-\!?])',
+                ' ',
+                original_text,
+                flags=re.IGNORECASE
+            )
+        
+        # Очищаем множественные пробелы и скобки
+        cleaned = re.sub(r'\s+', ' ', original_text).strip()
+        cleaned = re.sub(r'\(\s*\)', '', cleaned).strip()
+        cleaned = re.sub(r'\s*[\(\)]\s*$', '', cleaned).strip()
+        
+        return cleaned if cleaned else ""
     
     def _is_valid_series(self, text: str, extracted_author: str = None, skip_author_check: bool = False) -> bool:
         """
