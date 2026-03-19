@@ -217,12 +217,12 @@ class RegenCSVService:
                     
                     if len(series_folders) == 0:
                         # No series folder (file directly in author folder)
-                        # Use metadata as fallback for series
-                        if record.metadata_series:
-                            record.proposed_series = record.metadata_series
-                            record.series_source = "metadata"
-                        # IMPORTANT: If no metadata either, leave series_source UNSET
-                        # so Pass 2 can attempt filename extraction per priority cascade
+                        # ВАЖНО: Оставляем proposed_series пустым чтобы дать возможность:
+                        # 1. Pass 2 попытаться извлечь из filename (приоритет 2)
+                        # 2. Потом применить metadata как fallback (приоритет 1)
+                        # Это соблюдает cascade priority: FOLDER(3) > FILENAME(2) > METADATA(1)
+                        # Do NOT set series_source here - let following passes handle it
+                        pass
                     elif len(series_folders) == 1:
                         # Simple series: Author / Series / File
                         series_name = self._extract_series_from_folder_name(series_folders[0])

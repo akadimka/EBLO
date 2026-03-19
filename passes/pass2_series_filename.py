@@ -258,377 +258,53 @@ class Pass2SeriesFilename:
     
     def execute(self, records: List[BookRecord]) -> None:
         """
-        Попытаться извлечь серию из имена файла.
-        
-        ОГРАНИЧЕНИЕ: Парсит series только для файлов в подпапках автора (Author/Series/File).
-        Для файлов прямо в папке автора (Author/File) используется ТОЛЬКО metadata_series.
-        
-        Логика приоритета:
-        1. Если глубина < 3 (Author/File) → использовать ТОЛЬКО metadata_series 
-        2. Если глубина >= 3 (Author/Series/File) → парсить файл + сравнивать с metadata
-        3. Если в файле найдено совпадает с началом metadata → берем metadata целиком
-        4. Fallback на metadata_series если в имени не найдено
+        ПРОСТАЯ И ПРАВИЛЬНАЯ ЛОГИКА - независима от папок!
+        ===================================================
+        Логика:
+        1. Если series_source == "folder_dataset" → skip (папка дала series)
+        2. Если proposed_series не пусто → skip (уже выбрана)  
+        3. ВСЕГДА пробовать паттерны (неважно file_depth!)
+        4. Fallback на metadata только если паттерны не дали
         """
         for record in records:
-            # Пропускаем если серия уже установлена из папок
             if record.series_source == "folder_dataset":
-                continue
+                continue  # Папка уже дала series
             
-            # Пропускаем если уже есть валидная серия
             if record.proposed_series:
-                continue
+                continue  # Серия уже установлена
             
-            # Проверяем глубину файла в структуре папок
-            file_path_parts = Path(record.file_path).parts
-            file_depth = len(file_path_parts)
+            # ОБЯЗАТЕЛЬНО пробуем паттерны (глубина НЕ влияет!)
+            series_candidate = self._extract_series_from_filename(
+                record.file_path, validate=False, metadata_series=record.metadata_series
+            )
             
-            # Если файл находится на глубине 2: может быть либо Автор/file.fb2, либо SeriesFolder/file.fb2
-            # Нужно отличить их по имени папки
-            if file_depth == 2:
-                parent_folder = file_path_parts[0]  # Первая папка в пути
-                
-                # Проверить - это папка серии коллекции (т.е. напрямую Series folder без Author subfolder)
-                # Такие папки обычно начинаются со слов: "Серия", "Series", "Collection", "Сборник"
-                # Или содержат слово в скобках, как "Серия - «Name»"
-                is_series_folder = (
-                    parent_folder.startswith('Серия') or
-                    parent_folder.startswith('Series') or
-                    parent_folder.startswith('Collection') or
-                    parent_folder.startswith('Сборник') or
-                    'Серия' in parent_folder or
-                    'Collection' in parent_folder
-                )
-                
-                if is_series_folder:
-                    # Это файл в папке-коллекции серий, обрабатываем как depth 1 файл
-                    # ПРИОРИТЕТ: папка > файл > метаданные
-                    
-                    filename = Path(record.file_path).name
-                    
-                    # ШАГ 1: Попробуем использовать паттерны из конфига
-                    series_from_patterns = self._extract_series_from_filename(record.file_path, validate=False, metadata_series=record.metadata_series)
-                    
-                    if series_from_patterns:
-                        record.extracted_series_candidate = series_from_patterns
-                        
-                        # ПРОВЕРКА 1: Не используем запятую - это признак списка авторов
-                        # "Демидова, Конторович" → это авторы, не серия!
-                        if ',' in series_from_patterns:
-                            # Это список авторов, не серия - пропускаем и используем только metadata
-                            if record.metadata_series:
-                                series = record.metadata_series.strip()
-                                extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                                if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
-                                    record.proposed_series = series
-                                    record.series_source = "metadata"
-                            continue  # Переходим к следующему файлу
-                        
-                        # ПРОВЕРКА 2: Не используем фамилию автора как серию
-                        is_author = self._is_author_surname(series_from_patterns, record.proposed_author)
-                        if is_author:
-                            # Это фамилия, не серия - пропускаем и используем только metadata
-                            if record.metadata_series:
-                                series = record.metadata_series.strip()
-                                extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                                if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
-                                    record.proposed_series = series
-                                    record.series_source = "metadata"
-                            continue  # Переходим к следующему файлу
-                        
-                        # Применяем очистку (сохраняем trailing number если иерархическая серия)
-                        clean_candidate = self._clean_series_name(series_from_patterns, keep_trailing_number=self._last_was_hierarchical)
-                        
-                        # ПРОВЕРКА 3: Валидизируем clean_candidate
-                        # Передаём информацию об извлечённом авторе чтобы не отвергать series
-                        # если она выглядит как фамилия (но это другое слово чем автор)
-                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                        if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
-                            # ВСЕГДА используем clean candidate из filename как proposed_series
-                            # Это наиболее надёжный источник информации о серии
-                            # Валидизация только фильтрует очевидно неправильные значения
-                            record.proposed_series = clean_candidate
-                            record.series_source = "filename"
-                            continue  # Обработка завершена, переходим к следующему файлу
-                    
-                    # ШАГ 2: Fallback - extractжем из скобок если паттерны не сработали
-                    name_without_ext = filename.rsplit('.', 1)[0]
-                    
-                    # ПРИ ОРИТЕТ: сначала пытаемся извлечь серию перед скобками
-                    # "Бродяга (СИ)" → пытаемся извлечь "Бродяга"
-                    # "Бродяга 2. Звёздные закоулки (СИ)" → пытаемся извлечь "Бродяга"
-                    name_before_brackets = re.sub(r'\s*\([^)]*\)\s*$', '', name_without_ext).strip()
-                    
-                    # Пытаемся применить паттерны к имени ДО скобок
-                    # (это может помочь extract "Бродяга" из "Аскеров - Бродяга (СИ)")
-                    series_candidate = None
-                    series_from_before = self._extract_series_from_filename(name_before_brackets, validate=False, metadata_series=record.metadata_series)
-                    if series_from_before:
-                        record.extracted_series_candidate = series_from_before
-                        series_candidate = series_from_before
-                    else:
-                        # Ищем скобки - сначала попробуем найти в конце (основной случай)
-                        # "Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия)"
-                        # Но также поддерживаем структуру с информацией после скобок
-                        # "Проект «Оборотень» (Странник. Пенталогия) - 2010"
-                        series_match = re.search(r'\(([^)]+)\)', name_without_ext)
-                        if series_match:
-                            content_in_brackets = series_match.group(1).strip()
-                            
-                            # Если в скобках есть слово в конце (типов/дилогия/коллекция)
-                            # "Сборник" и подобное - нужно пропустить
-                            content_lower = content_in_brackets.lower()
-                            if any(kw.lower() in content_lower for kw in self.collection_keywords):
-                                # Это сборник, не серия - пропускаем
-                                pass
-                            else:
-                                # Извлекаем series из скобок
-                                # "Солдат удачи. Тетралогия" → "Солдат удачи"
-                                # "Странник. Пенталогия" → "Странник"
-                                # "Страна Арманьяк 1-3" → "Страна Арманьяк"
-                                # "Романы + из цикла «Отрок»" → "Отрок"
-                                # "Отрок 2. Сотник 1-3" → "Отрок"
-                                
-                                series_candidate = content_in_brackets.strip()
-                                
-                                # Сначала проверяем паттерн "из цикла" или "из серии"
-                                # "Романы + из цикла «Отрок»" → "Отрок"
-                                # "Романы из цикла «Ведьма с Летающей ведьмы»" → "Ведьма с Летающей ведьмы"
-                                cycle_match = re.search(r'из\s+(?:цикла|серии)\s+(.+)', content_in_brackets, re.IGNORECASE)
-                                if cycle_match:
-                                    series_candidate = cycle_match.group(1).strip()
-                                    # Удаляем внешние кавычки в зависимости от структуры
-                                    # "«Отрок»" → "Отрок" (1 « и 1 »)
-                                    # "«Ведьма с «Летающей ведьмы»»" → "Ведьма с «Летающей ведьмы»" (2 « и 2 »)  
-                                    # "«Ведьма с «Летающей ведьмы»" → "Ведьма с «Летающей ведьмы»" (2 « и 1 », первая « это внешняя)
-                                    open_count = series_candidate.count('«')
-                                    close_count = series_candidate.count('»')
-                                    
-                                    # Если количество кавычек совпадает - удаляем первую и последнюю как парн
-                                    if (open_count > 0 and open_count == close_count and 
-                                        series_candidate.startswith('«') and series_candidate.endswith('»')):
-                                        series_candidate = series_candidate[1:-1]
-                                    # Если открывающих больше чем закрывающих, но первый символ - открывающая
-                                    # это значит первая « это внешняя, остальные внутренние
-                                    elif open_count > close_count and series_candidate.startswith('«'):
-                                        series_candidate = series_candidate[1:]
-                                        
-                                    series_candidate = series_candidate.strip()
-                                # Иначе пытаемся извлечь по точке - но ТОЛЬКО если после точки идет служебное слово
-                                # "Солдат удачи. Тетралогия" → "Солдат удачи"
-                                # "Отрок 2. Сотник 1-3" → сохраняем как есть (это иерархия серий)
-                                elif '. ' in content_in_brackets:
-                                    parts = content_in_brackets.split('. ')
-                                    after_dot = parts[1].lower() if len(parts) > 1 else ''
-                                    # Проверяем, является ли часть после точки служебным словом
-                                    is_service_word_after_dot = any(
-                                        after_dot.startswith(sw.lower()) 
-                                        for sw in self.service_words
-                                    )
-                                    if is_service_word_after_dot:
-                                        # Это служебное слово - берем только первую часть
-                                        series_candidate = parts[0].strip()
-                                    # иначе оставляем всю строку (иерархия: "Отрок 2. Сотник")
-                                
-                                # Удаляем номер тома в начале: "Отрок 2." или "2. "
-                                # Паттерн: "Серия NN." или "Серия NN " в начале
-                                series_candidate = re.sub(r'^\s*\d+\s*[.,]?\s*', '', series_candidate).strip()
-                                
-                                # Удаляем числовые суффиксы (номера томов в конце)
-                                # Паттерны: "1-3", "1-6", "01, 02", "№1" и т.д.
-                                # ВАЖНО: не удаляем точки, т.к. они разделяют серии ("Отрок 2. Сотник 1-3" → "Отрок 2. Сотник")
-                                series_candidate = re.sub(r'\s*[\d\-,•]+\s*$', '', series_candidate).strip()
-                                # Удаляем оставшиеся служебные слова в конце (т, т., том и т.д.)
-                                for service_word in self.service_words:
-                                    pattern = r'\s*' + re.escape(service_word.lower()) + r'\s*$'
-                                series_candidate = re.sub(pattern, '', series_candidate, flags=re.IGNORECASE).strip()
-                            
-                            if series_candidate:
-                                record.extracted_series_candidate = series_candidate
-                                # Для файлов в series коллекции - используем extracted candidate как proposed series
-                                # Передаём контекст автора при валидации чтобы не отвергать series
-                                # если она выглядит как имя человека
-                                extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                                # ТАКЖЕ ПРОВЕРЯЕМ: это не должна быть фамилия автора или список авторов!
-                                if ',' not in series_candidate and not self._is_author_surname(series_candidate, record.proposed_author or ""):
-                                    if self._is_valid_series(series_candidate, extracted_author=extracted_author_for_validation):
-                                        record.proposed_series = series_candidate
-                                        record.series_source = "filename"
-                    
-                    # ШАГ 1.5: Если скобок нет, попробуем config patterns из filename
-                    # Это поддерживает "Author - Series.Title" формат
-                    if not record.proposed_series:
-                        filename = Path(record.file_path).name
-                        series_candidate = self._extract_series_from_filename(record.file_path, validate=False, metadata_series=record.metadata_series)
-                        if series_candidate:
-                            record.extracted_series_candidate = series_candidate
-                            clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
-                            extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                            # ТАКЖЕ ПРОВЕРЯЕМ: это не должна быть фамилия автора или список авторов!
-                            if ',' not in clean_candidate and not self._is_author_surname(clean_candidate, record.proposed_author or ""):
-                                if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
-                                    record.proposed_series = clean_candidate
-                                    record.series_source = "filename"
-                    
-                    # Если из filename ничего не нашли, но есть metadata - используем её
-                    if not record.proposed_series and record.metadata_series:
-                        series = self._extract_series_from_metadata(record.metadata_series.strip())
-                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                        if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
-                            record.proposed_series = series
-                            record.series_source = "metadata"
-                    continue
-            
-            # Если файл находится на глубине 2 и это папка автора (не папка серии коллекции) - используем ТОЛЬКО metadata
-            # Или на остальные случаи depth==2
-            if file_depth == 2:
-                filename = Path(record.file_path).name
-                name_without_ext = filename.rsplit('.', 1)[0]
-                
-                # ШАГ 1: Попробуем извлечь серию используя новые правила
-                series_candidate = self._extract_series_from_filename(record.file_path, validate=False, metadata_series=record.metadata_series)
-                if series_candidate:
-                    record.extracted_series_candidate = series_candidate
-                    
-                    # ПРОВЕРКА: Не используем фамилию автора как серию
-                    # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
-                    if not self._is_author_surname(series_candidate, record.proposed_author):
-                        clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
-                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                        if self._is_valid_series(clean_candidate, extracted_author=extracted_author_for_validation):
-                            record.proposed_series = clean_candidate
-                            record.series_source = "filename"
-                            continue  # Нашли из filename - не переписываем с metadata
-                
-                # ШАГ 2: Fallback - для depth 2 файлов типа "Author. Series/Title" (формат с точками)
-                # Извлекаемый паттерн: вторая часть после первой точки может быть серией
-                # Примеры:
-                # "Сойер. Неандертальский параллакс (сборник)" -> "Неандертальский параллакс (сборник)"
-                # "Сойер. Неандертальский параллакс 01. Гоминиды" -> "Неандертальский параллакс"
-                # "Сойер. Ката Бинду" -> "Ката Бинду"
-                
-                if '. ' in name_without_ext:
-                    parts = name_without_ext.split('. ')
-                    # parts[0] = Author, rest = title/series parts
-                    remaining = '. '.join(parts[1:])  # "Неандертальский параллакс (сборник)" или "Неандертальский параллакс 01. Гоминиды"
-                    
-                    # Если есть число и точка, это обычно начало номера в серии
-                    # Тогда берём всё до первого номера как имя серии
-                    match_num = re.search(r'^([^0-9]+?)\s*\d+\s*\.', remaining)
-                    if match_num:
-                        # Найдена нумерация: "Неандертальский параллакс 01. Гоминиды" -> "Неандертальский параллакс"
-                        series_candidate = match_num.group(1).strip()
-                    else:
-                        # Нет нумерации, но есть скобки в конце - берём всё до скобок
-                        # "Неандертальский параллакс (сборник)" -> "Неандертальский параллакс"
-                        series_match = re.match(r'^([^\(]+?)\s*\(', remaining)
-                        if series_match:
-                            series_candidate = series_match.group(1).strip()
-                        else:
-                            # Просто заголовок без нумерации и скобок
-                            # Не очень надёжно, поэтому не берём
-                            series_candidate = None
-                    
-                    if series_candidate:
-                        record.extracted_series_candidate = series_candidate
-                        
-                        # ПРОВЕРКА 1: Не используем запятую - это признак списка авторов
-                        # "Демидова, Конторович" → это авторы, не серия!
-                        if ',' in series_candidate:
-                            # Это список авторов, не серия - не берем
-                            series_candidate = None
-                        # ПРОВЕРКА 2: Не используем фамилию автора как серию
-                        # Пример: "Белоус. Последний шанс" → "Белоус" это фамилия, не серия
-                        elif not self._is_author_surname(series_candidate, record.proposed_author):
-                            extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                            if self._is_valid_series(series_candidate, extracted_author=extracted_author_for_validation):
-                                record.proposed_series = series_candidate
-                                record.series_source = "filename"
-                
-                # ШАГ 3: Финальный fallback - используем metadata если есть
-                if record.metadata_series:
-                    series = self._extract_series_from_metadata(record.metadata_series.strip())
-                    extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                    if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
-                        record.proposed_series = series
-                        record.series_source = "metadata"
-                continue
-            
-            # Если файл в подпапке (глубина >= 3) - парсим имя файла
-            # ШАГ 1: Попытаться извлечь из имени файла
-            series_candidate = self._extract_series_from_filename(record.file_path, validate=False, metadata_series=record.metadata_series)
-            
-            # ВСЕГДА сохранять candidate (даже если он не валиден) для PASS 4 consensus
             if series_candidate:
                 record.extracted_series_candidate = series_candidate
-            
-            # ШАГ 2: Проверить валидность и применить
-            if series_candidate:
-                # СРАЗУ очистим от паразитных символов (томы, названия)
-                clean_candidate = self._clean_series_name(series_candidate, keep_trailing_number=self._last_was_hierarchical)
                 
-                # Проверим валидность (очищенной версии)
-                if not self._is_valid_series(clean_candidate):
-                    # Candidate заблочен по BL, но оставляем его для consensus
-                    # Используем только metadata если есть
-                    if record.metadata_series:
-                        series = record.metadata_series.strip()
-                        extracted_author_for_validation = record.proposed_author if record.proposed_author else None
-                        if self._is_valid_series(series, extracted_author=extracted_author_for_validation):
-                            record.proposed_series = series
-                            record.series_source = "metadata"  # Метаданные как основной источник
-                else:
-                    # Candidate (очищенный) валиден, применяем его
-                    # ШАГ 3: Проверить совпадает ли с metadata
-                    if record.metadata_series and record.metadata_series.strip():
-                        metadata_series = self._extract_series_from_metadata(record.metadata_series.strip())
-                        
-                        # СРАВНИВАЕМ ОЧИЩЕННУЮ версию кандидата с очищенной metadata
-                        if clean_candidate.lower() == metadata_series.lower():
-                            # Точное совпадение - используем metadata значение, но source = filename
-                            record.proposed_series = metadata_series
-                            record.series_source = "filename"  # Источник - filename (мета только уточнила)
-                        
-                        elif metadata_series.lower().startswith(clean_candidate.lower()):
-                            # Metadata это расширение cleaned_candidate
-                            # "Туман" в файле, а в metadata "Туман (Борисов)" - это НЕ расширение, это диспамбiguация
-                            # "Солдат удачи" в файле, а в metadata "Солдат удачи. Цикл" - это расширение
-                            
-                            # Проверяем: если metadata = "clean_candidate (something)" это просто диспамбiguация
-                            metadata_after_clean = metadata_series[len(clean_candidate):].strip()
-                            if metadata_after_clean.startswith('(') and metadata_after_clean.endswith(')'):
-                                # Это просто скобки с диспамбiguацией, используем clean_candidate
-                                record.proposed_series = clean_candidate
-                                record.series_source = "filename"
-                            else:
-                                # Это реальное расширение (точка, дополнительные слова)
-                                record.proposed_series = metadata_series
-                                record.series_source = "filename"  # Источник filename (мета расширила)
-                        
-                        elif clean_candidate.lower().startswith(metadata_series.lower()):
-                            # Clean_candidate это расширение metadata
-                            # Используем metadata как более чистый источник
-                            record.proposed_series = metadata_series
-                            record.series_source = "filename"  # Все равно из filename берем основу
-                        
-                        elif self._matches_with_tolerance(clean_candidate, metadata_series, tolerance=0.80):
-                            # Существенное совпадение с tolerance
-                            # Используем metadata как более надежный источник
-                            record.proposed_series = metadata_series
-                            record.series_source = "filename"  # Источник filename (мета подтвердила)
-                        
-                        else:
-                            # Они не совпадают даже после очистки и tolerance-check
-                            # Используем очищенную версию extracted
-                            record.proposed_series = clean_candidate
-                            record.series_source = "filename"
-                    else:
-                        # Нет metadata, берем очищенную версию
-                        record.proposed_series = clean_candidate
-                        record.series_source = "filename"
-            elif record.metadata_series:
-                # FALLBACK: Используем metadata_series если в имени файла не найдено
-                series = record.metadata_series.strip()
-                if self._is_valid_series(series):
+                # Базовые фильтры (НЕ валидация)
+                if ',' in series_candidate:
+                    series_candidate = None  # Список авторов
+                elif self._is_author_surname(series_candidate, record.proposed_author):
+                    series_candidate = None  # Фамилия
+            
+            # Если прошел базовые фильтры → валидация
+            if series_candidate:
+                clean = self._clean_series_name(
+                    series_candidate, 
+                    keep_trailing_number=self._last_was_hierarchical
+                )
+                author_for_validation = record.proposed_author or None
+                
+                if self._is_valid_series(clean, extracted_author=author_for_validation):
+                    record.proposed_series = clean
+                    record.series_source = "filename"
+                    continue
+            
+            # Fallback: metadata ТОЛЬКО если паттерны не дали
+            if record.metadata_series:
+                series = self._extract_series_from_metadata(record.metadata_series.strip())
+                author_for_validation = record.proposed_author or None
+                if self._is_valid_series(series, extracted_author=author_for_validation):
                     record.proposed_series = series
                     record.series_source = "metadata"
         
@@ -638,7 +314,7 @@ class Pass2SeriesFilename:
         # Commented out: consensus logic was overwriting properly extracted series
         # TODO: Review and fix consensus logic before re-enabling
         # self._apply_cross_file_consensus(records)
-    
+
     def _apply_series_folder_pattern_consensus(self, records: List[BookRecord]) -> None:
         """
         Для файлов в series folder: найти common name patterns и применить consensus.
