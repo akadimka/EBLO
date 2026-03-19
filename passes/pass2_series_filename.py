@@ -311,7 +311,46 @@ class Pass2SeriesFilename:
                     continue
             
             # Fallback: metadata ТОЛЬКО если паттерны не дали
-            if record.metadata_series:
+            if not series_candidate:
+                # Перед fallback к metadata попробуем простое правило: Author. Series RomanNumeral
+                # "Яманов Александр. Бесноватый Цесаревич I.fb2" → "Бесноватый Цесаревич"
+                file_name = Path(record.file_path).stem  # Имя без расширения
+                if '. ' in file_name:
+                    parts = file_name.split('. ', 1)
+                    if len(parts) == 2:
+                        first_part = parts[0].strip()
+                        second_part = parts[1].strip()
+                        
+                        # Проверяем что первая часть это автор (< 50 символов, без цифр)
+                        looks_like_author = (
+                            len(first_part) < 50 and
+                            not any(digit in first_part for digit in '0123456789')
+                        )
+                        
+                        if looks_like_author:
+                            # Ищем римские цифры в конце: "Бесноватый Цесаревич I"
+                            match = re.search(r'^(.+?)\s+[IVX]+\s*$', second_part)
+                            if match:
+                                simple_series = match.group(1).strip()
+                                if self._is_valid_series(simple_series, extracted_author=record.proposed_author):
+                                    series_candidate = simple_series
+            
+            if series_candidate:
+                # Из filename extraction найдена серия
+                record.extracted_series_candidate = series_candidate
+                clean = self._clean_series_name(
+                    series_candidate, 
+                    keep_trailing_number=self._last_was_hierarchical
+                )
+                author_for_validation = record.proposed_author or None
+                
+                if self._is_valid_series(clean, extracted_author=author_for_validation):
+                    # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                    clean = self._fix_russian_grammar(clean)
+                    record.proposed_series = clean
+                    record.series_source = "filename"
+            elif record.metadata_series:
+                # Fallback к metadata - только если из filename ничего не нашли
                 series = self._extract_series_from_metadata(record.metadata_series.strip())
                 author_for_validation = record.proposed_author or None
                 if self._is_valid_series(series, extracted_author=author_for_validation):
@@ -1062,19 +1101,32 @@ class Pass2SeriesFilename:
         
         # Правило 3B: Author. Series N (без второго элемента после точки)
         # "Курилкин. Охотник 1" → "Охотник"
-        # Структура: OneWord. MultipleWords N где N это одна или две цифры
-        if '. ' in name_for_parsing and ' ' not in name_for_parsing.split('. ')[0]:
-            # Первая часть это одно слово (вероятно Author)
+        # "Яманов. Бесноватый Цесаревич I" → "Бесноватый Цесаревич"
+        # Структура: OneWord. MultipleWords NUM где NUM это арабские или римские цифры
+        if '. ' in name_for_parsing:
             parts = name_for_parsing.split('. ', 1)
             if len(parts) == 2:
+                first_part = parts[0].strip()
                 second_part = parts[1].strip()
-                # Проверяем, содержит ли вторая часть номер в конце
-                # "Охотник 1" → True, "Охотник" → False (но это обработано другими рулами)
-                series_match = re.match(r'^(.+?)\s+\d+\s*$', second_part)
-                if series_match:
-                    potential_series = series_match.group(1).strip()
-                    if not validate or self._is_valid_series(potential_series):
-                        return potential_series
+                
+                # Проверяем что первая часть это вероятный автор
+                # (может быть одно слово OR полное имя, но БЕЗ цифр)
+                looks_like_author = (
+                    len(first_part) < 50 and  # Обычно имена авторов менее 50 символов
+                    not any(digit in first_part for digit in '0123456789')  # Нет цифр
+                )
+                
+                if looks_like_author:
+                    # Проверяем арабские цифры: "Охотник 1" → True
+                    series_match = re.match(r'^(.+?)\s+\d+\s*$', second_part)
+                    # Если нет арабских, проверяем римские цифры: "Бесноватый Цесаревич I" → True
+                    if not series_match:
+                        series_match = re.match(r'^(.+?)\s+[IVX]+\s*$', second_part)
+                    
+                    if series_match:
+                        potential_series = series_match.group(1).strip()
+                        if not validate or self._is_valid_series(potential_series):
+                            return potential_series
         
         # Правило 4: Author - Series N (без точки после номера)
         # "Атаманов Михаил - Задача выжить 1" → "Задача выжить"
@@ -1490,13 +1542,38 @@ class Pass2SeriesFilename:
         # ПРОВЕРКА 1: filename_blacklist - запрещенные слова
         # ВАЖНО: проверяем целые слова, не substring!
         # "СИ" в blacklist относится к метатегам "(СИ)" в конце, а не к "Сид"
+        # ЭКСПЦИЯ: если blacklist-word это последнее слово И перед ним есть другие слова,
+        # это вероятно часть series name, а не сама папка. Пример: "Последний солдат СССР"
+        # где "СССР" в blacklist, но это реальная series потому что есть реальные слова перед ней
         for bl_word in self.filename_blacklist:
             bl_word_lower = bl_word.lower()
-            # Проверяем как целое слово, отделённое границами
-            # Паттерны: "СИ" или "СИ)" или "(СИ)" или в начале/конце
+            # Match bl_word as a whole word or at word boundary
             pattern = r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$)'
             if re.search(pattern, text_lower):
-                return False
+                # Если это ТОЛЬКО blacklist word (например "СССР" или "СССР по категориям"),
+                # отвергаем. Но если есть реальные слова ПЕРЕД ним, это series.
+                # Пример: "Последний солдат СССР" ← реальная series даже если СССР в blacklist
+                words = text_lower.split()
+                bl_word_index = None
+                
+                # Найдем позицию blacklist-word в списке слов
+                for i, word in enumerate(words):
+                    if word.lower() == bl_word_lower or bl_word_lower in word:
+                        bl_word_index = i
+                        break
+                
+                # Если blacklist-word в КОНЦЕ и есть другие слова перед ним
+                if bl_word_index is not None and bl_word_index > 0 and bl_word_index == len(words) - 1:
+                    # Это вероятно series (реальные слова + blacklist-word в конце)
+                    # Пример: "Последний солдат" + "СССР" = "Последний солдат СССР"
+                    continue  # Не отвергаем
+                elif bl_word_index == 0 and len(words) == 1:
+                    # Это вероятно папка (ТОЛЬКО blacklist-word)
+                    # Пример: "СССР"
+                    return False
+                else:
+                    # В других случаях (blacklist-word в середине или начале) отвергаем
+                    return False
         
         # ПРОВЕРКА 2: Исключить очевидные сборники/антологии
         # Эти фразы обычно многословные (сборник, антология, коллекция)
