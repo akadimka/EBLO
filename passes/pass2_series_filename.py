@@ -319,6 +319,7 @@ class Pass2SeriesFilename:
             # Fallback: metadata ТОЛЬКО если паттерны не дали
             if not series_candidate:
                 file_name = Path(record.file_path).stem  # Имя без расширения
+                
                 # ✅ ВАЖНО: Удалить метатеги из конца чтобы fallback правила работали!
                 # "(СИ)" - Самиздат/Интернет
                 # "(ЛП)" - Лицензионное произведение
@@ -393,7 +394,23 @@ class Pass2SeriesFilename:
                     # Исправляем грамматику русского языка (добавляем запятую перед "что")
                     series = self._fix_russian_grammar(series)
                     record.proposed_series = series
-                    record.series_source = "metadata"
+                    
+                    # 🔑 ВАЖНО: Определить откуда пришла metadata_series
+                    # Если она совпадает с названием папки серии - это folder_dataset, не metadata!
+                    # Пример: файл в папке "Солдат удачи" с metadata_series="Солдат удачи" → folder_dataset
+                    folder_name = Path(record.file_path).parent.name
+                    
+                    if folder_name and series.lower().replace('ё', 'е') == folder_name.lower().replace('ё', 'е'):
+                        # Серия из metadata совпадает с названием папки → это folder_dataset!
+                        record.series_source = "folder_dataset"
+                    else:
+                        # Серия из файловой метапданных → metadata
+                        record.series_source = "metadata"
+        
+        # 🔑 НОВОЕ: Папочный консенсус
+        # Если папка содержит файлы с series_source = "folder_dataset",
+        # то ВСЕ файлы в этой папке должны получить одинаковую серию из папки
+        self._apply_folder_consensus(records)
         
         # Commented out: folder pattern consensus was also causing issues  
         # self._apply_series_folder_pattern_consensus(records)
@@ -401,6 +418,59 @@ class Pass2SeriesFilename:
         # Commented out: consensus logic was overwriting properly extracted series
         # TODO: Review and fix consensus logic before re-enabling
         # self._apply_cross_file_consensus(records)
+
+    def _apply_folder_consensus(self, records: List[BookRecord]) -> None:
+        """
+        Папочный консенсус: если папка содержит файлы с series_source = "folder_dataset",
+        то ВСЕ файлы в этой папке должны получить одинаковую серию.
+        
+        Логика:
+        1. Группируем файлы по папке (parent directory)
+        2. Для каждой папки ищем файлы с series_source = "folder_dataset"
+        3. Берем серию из первого такого файла (обычно это название папки)
+        4. Применяем эту серию ко ВСЕМ остальным файлам в папке
+        
+        例:
+        Папка: "Солдат удачи"
+        - File 1: series="Солдат удачи", source="folder_dataset" ✅
+        - File 2: series="Солдат Удачи", source="folder_dataset" ✅
+        - File 3: series="Наследник", source="filename" ❌
+        - File 4: series="Солдат удачи", source="folder_dataset" ✅
+        
+        РЕЗУЛЬТАТ:
+        - File 1: series="Солдат удачи", source="folder_dataset" ✅
+        - File 2: series="Солдат удачи", source="folder_dataset" (унифицирована) ✅
+        - File 3: series="Солдат удачи", source="folder_dataset" (консенсус) ✅
+        - File 4: series="Солдат удачи", source="folder_dataset" ✅
+        """
+        from collections import defaultdict
+        
+        # Группируем файлы по папке
+        folder_files = defaultdict(list)
+        for record in records:
+            folder_path = str(Path(record.file_path).parent)
+            folder_files[folder_path].append(record)
+        
+        # Для каждой папки применяем консенсус
+        for folder_path, files_in_folder in folder_files.items():
+            # Ищем файлы с series_source = "folder_dataset"
+            folder_dataset_files = [
+                f for f in files_in_folder 
+                if f.series_source == "folder_dataset" and f.proposed_series
+            ]
+            
+            if not folder_dataset_files:
+                continue  # В этой папке нет файлов с folder_dataset
+            
+            # Берем серию из первого файла (они должны быть одинаковые)
+            canonical_series = folder_dataset_files[0].proposed_series
+            
+            # Применяем эту серию ко ВСЕМ файлам в папке
+            for record in files_in_folder:
+                if record.series_source != "folder_dataset":
+                    # Переопределяем серию на основе папочного консенсуса
+                    record.proposed_series = canonical_series
+                    record.series_source = "folder_dataset"
 
     def _apply_series_folder_pattern_consensus(self, records: List[BookRecord]) -> None:
         """
@@ -878,6 +948,10 @@ class Pass2SeriesFilename:
         # Эти метатеги не должны влиять на извлечение series
         name_for_parsing = re.sub(r'\s*\([СЛ]И\)\s*$', '', name_without_ext).strip()
         
+        # DEBUG: логирование для файла с (Наследник)
+        if "Наследник" in name_for_parsing:
+            print(f"DEBUG series extract: {file_path} → name_for_parsing={name_for_parsing}")
+        
         # 🔑 Флаг: найден паттерн БЕЗ Series информации
         pattern_found_without_series = False
         
@@ -1088,26 +1162,33 @@ class Pass2SeriesFilename:
             match = re.search(r'\(([^)]+)\)\s*$', name_for_parsing)
             if match:
                 content_in_brackets = match.group(1).strip()
-                # Используем логику из _extract_series_from_brackets для cleanup
-                potential_series = self._extract_series_from_brackets(content_in_brackets)
                 
-                # 🔑 ПРОВЕРКА: это не должна быть фамилия автора или список авторов!
-                # Используем _is_author_surname() для проверки
-                # NOTE: В этом контексте record.proposed_author может не быть доступна
-                # поэтому мы не можем вызвать _is_author_surname() здесь напрямую
-                # ВРЕМЕННОЕ РЕШЕНИЕ: проверяем на точку (инициал), запятую (список авторов) или небольшую длину
-                looks_like_author = False
-                if ',' in potential_series:
-                    # Содержит запятую - это список авторов, не серия
-                    looks_like_author = True
-                elif '.' in potential_series or (len(potential_series) < 15 and ' ' not in potential_series):
-                    # Содержит точку - для русских имён это часто инициал+фамилия
-                    # "А.Михайловский" → это явно инициал в скобках
-                    # Или просто одно слово менее 15 символов - вероятно фамилия
-                    looks_like_author = True
+                # 🔑 КРИТИЧНО: Проверить если это ТОЛЬКО одно слово
+                # Скобки с одним словом это обычно подтитулы или метаинформация: (Наследник), (Король), (СИ)
+                # Это НЕ основные названия серий - серии это обычно многословные: "Солдат Удачи", "Боевая Фантастика"
+                # Исключение: если одно слово явно часть паттерна с точками/запятыми - обработать
+                is_single_word_brackets = ' ' not in content_in_brackets.strip() and '.' not in content_in_brackets.strip()
                 
-                if not looks_like_author and (not validate or self._is_valid_series(potential_series)):
-                    return potential_series
+                if is_single_word_brackets:
+                    # Это одно слово в скобках - вероятно подтитул, не серия
+                    # Пропускаем это правило
+                    pass  # ← Не извлекаем "Наследник", переходим к следующему правилу
+                else:
+                    # Это многословная комбинация в скобках - может быть серия
+                    potential_series = self._extract_series_from_brackets(content_in_brackets)
+                    
+                    # 🔑 ПРОВЕРКА: это не должна быть фамилия автора или список авторов!
+                    looks_like_author = False
+                    if ',' in potential_series:
+                        # Содержит запятую - это список авторов, не серия
+                        looks_like_author = True
+                    elif '.' in potential_series:
+                        # Содержит точку - для русских имён это часто инициал+фамилия
+                        # "А.Михайловский" → это явно инициал в скобках
+                        looks_like_author = True
+                    
+                    if not looks_like_author and (not validate or self._is_valid_series(potential_series)):
+                        return potential_series
         
         # Правило 3: Серия. Название (точка как разделитель в начале)
         # Из паттернов конфига: "Series. Title" и "Author - Series.Title"
@@ -1182,18 +1263,18 @@ class Pass2SeriesFilename:
             match = re.match(r'^(.+?)\s*-\s*([^.]+)\.\s+(.+)$', name_without_ext)
             if match:
                 title_before_dot = match.group(2).strip()
-                if "охотник" in name_without_ext.lower():
+                if "охотник" in name_without_ext.lower() or "Наследник" in name_without_ext:
                     print(f"  [Rule 5 match] title_before_dot='{title_before_dot}'")
                 # Это Title (потенциальная Series) если он:
                 # 1. Имеет несколько слов ИЛИ 
                 # 2. Это нечто более подходящее серии чем фамилия  
                 if len(title_before_dot.split()) > 1 or (title_before_dot and len(title_before_dot) > 3):
                     if not validate or self._is_valid_series(title_before_dot):
-                        if "охотник" in name_without_ext.lower():
+                        if "охотник" in name_without_ext.lower() or "Наследник" in name_without_ext:
                             print(f"  [RETURNING from Rule 5] '{title_before_dot}'")
                         return title_before_dot
         
-        if "охотник" in name_without_ext.lower():
+        if "охотник" in name_without_ext.lower() or "Наследник" in name_without_ext:
             print(f"  [NO MATCH - returning empty]")
         return ""
     
