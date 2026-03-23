@@ -240,6 +240,14 @@
       "example": "Злотников. Вечный (Мир Вечного 2. Вечный. Тетралогия).fb2"
     },
     {
+      "pattern": "Author. service_words «Series»",
+      "example": "Авраменко. Цикл «Солдат удачи».fb2"
+    },
+    {
+      "pattern": "Author. service_words «Series». service_words",
+      "example": "Бредвик. Цикл «Войд». Том 1.fb2"
+    },
+    {
       "pattern": "Author, Author. Title (Series)",
       "example": "Живой, Прозоров. Легион (Легион 1-3).fb2"
     },

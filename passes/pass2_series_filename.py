@@ -386,6 +386,7 @@ class Pass2SeriesFilename:
             elif record.metadata_series:
                 # Fallback к metadata - только если из filename ничего не нашли
                 series = self._extract_series_from_metadata(record.metadata_series.strip())
+                
                 # ✅ НОВОЕ: Удалить слова из blacklist также из metadata серии
                 series = self._remove_blacklist_words(series)
                 
@@ -401,8 +402,19 @@ class Pass2SeriesFilename:
                     folder_name = Path(record.file_path).parent.name
                     
                     if folder_name and series.lower().replace('ё', 'е') == folder_name.lower().replace('ё', 'е'):
-                        # Серия из metadata совпадает с названием папки → это folder_dataset!
-                        record.series_source = "folder_dataset"
+                        # Серия из metadata совпадает с названием папки → это потенциально folder_dataset!
+                        # НО: СНАЧАЛА проверить blacklist - папка не может быть series если она содержит blacklist слова
+                        has_blacklist = self._contains_blacklist_word(series)
+                        
+                        if has_blacklist:
+                            # Папка содержит слово из blacklist → это коллекция/жанр, не series!
+                            # Примеры: "Боевая фантастика. Циклы", "Антология" и т.д.
+                            # Очищаем series и не присвоиваем folder_dataset
+                            record.proposed_series = ""
+                            record.series_source = ""
+                        else:
+                            # Папка ЧИСТАЯ (без blacklist слов) → это folder_dataset!
+                            record.series_source = "folder_dataset"
                     else:
                         # Серия из файловой метапданных → metadata
                         record.series_source = "metadata"
@@ -411,6 +423,13 @@ class Pass2SeriesFilename:
         # Если папка содержит файлы с series_source = "folder_dataset",
         # то ВСЕ файлы в этой папке должны получить одинаковую серию из папки
         self._apply_folder_consensus(records)
+        
+        # ✅ ФИНАЛЬНОЕ: Восстановить парные кавычки во всех series
+        # Если в series_кандидате есть открывающиеся кавычки без закрывающихся,
+        # автоматически добавляем закрывающиеся
+        for record in records:
+            if record.proposed_series:
+                record.proposed_series = self._balance_quotes(record.proposed_series)
         
         # Commented out: folder pattern consensus was also causing issues  
         # self._apply_series_folder_pattern_consensus(records)
@@ -424,24 +443,28 @@ class Pass2SeriesFilename:
         Папочный консенсус: если папка содержит файлы с series_source = "folder_dataset",
         то ВСЕ файлы в этой папке должны получить одинаковую серию.
         
+        ВАЖНО: Применяется ТОЛЬКО к папкам ОДНОГО автора!
+        Если папка содержит файлы РАЗНЫХ авторов → это коллекция, consensusне применяется.
+        
         Логика:
         1. Группируем файлы по папке (parent directory)
-        2. Для каждой папки ищем файлы с series_source = "folder_dataset"
-        3. Берем серию из первого такого файла (обычно это название папки)
-        4. Применяем эту серию ко ВСЕМ остальным файлам в папке
+        2. Проверяем: все ли файлы от ОДНОГО автора? Если нет → skip (это коллекция)
+        3. Ищем файлы с series_source = "folder_dataset"
+        4. Берем серию из первого такого файла (обычно это название папки)
+        5. Применяем эту серию ко ВСЕМ остальным файлам в папке
         
-        例:
-        Папка: "Солдат удачи"
-        - File 1: series="Солдат удачи", source="folder_dataset" ✅
-        - File 2: series="Солдат Удачи", source="folder_dataset" ✅
-        - File 3: series="Наследник", source="filename" ❌
-        - File 4: series="Солдат удачи", source="folder_dataset" ✅
+        Пример коллекции (skip consensus):
+        Папка: "Боевая фантастика. Циклы"
+        - Авраменко. Цикл «Солдат удачи» (АВТОР: Авраменко) 
+        - Анисимов. Цикл «Вариант «Бис» (АВТОР: Анисимов) ← РАЗНЫЕ АВТОРЫ!
+        → Consensus NOT applied (это коллекция)
         
-        РЕЗУЛЬТАТ:
-        - File 1: series="Солдат удачи", source="folder_dataset" ✅
-        - File 2: series="Солдат удачи", source="folder_dataset" (унифицирована) ✅
-        - File 3: series="Солдат удачи", source="folder_dataset" (консенсус) ✅
-        - File 4: series="Солдат удачи", source="folder_dataset" ✅
+        Пример папки-серии (apply consensus):
+        Папка: "Авраменко Александр/Солдат удачи"
+        - 1. Солдат удачи (АВТОР: Авраменко)
+        - 2. Князь Терранский (АВТОР: Авраменко) ← ОДИН АВТОР!
+        - 3. Взор Тьмы (АВТОР: Авраменко)
+        → Consensus applied
         """
         from collections import defaultdict
         
@@ -453,6 +476,20 @@ class Pass2SeriesFilename:
         
         # Для каждой папки применяем консенсус
         for folder_path, files_in_folder in folder_files.items():
+            # ПРОВЕРКА 1: все ли файлы в папке от ОДНОГО автора?
+            # Извлекаем уникальные авторов в этой папке
+            authors_in_folder = set()
+            for f in files_in_folder:
+                if f.proposed_author:
+                    # Нормализуем для сравнения (без разрывов строк и пробелов)
+                    author = f.proposed_author.strip()
+                    if author:
+                        authors_in_folder.add(author)
+            
+            # Если авторов больше одного → это коллекция, skip consensus
+            if len(authors_in_folder) > 1:
+                continue
+            
             # Ищем файлы с series_source = "folder_dataset"
             folder_dataset_files = [
                 f for f in files_in_folder 
@@ -1637,14 +1674,17 @@ class Pass2SeriesFilename:
         # Проходим по каждому слову в blacklist
         for bl_word in self.filename_blacklist:
             bl_word_lower = bl_word.lower().strip()
+            if not bl_word_lower:
+                continue
             
             # Ищем это слово как целое слово (не substring)
             # Паттерн: слово с границами (пробелы, скобки, пунктуация)
+            import re
             pattern = r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$|[,\.\-\!?])'
             
             # Заменяем найденные вхождения на пробел (или пусто)
             original_text = re.sub(
-                r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$|[,\.\-\!?])',
+                pattern,
                 ' ',
                 original_text,
                 flags=re.IGNORECASE
@@ -1656,6 +1696,40 @@ class Pass2SeriesFilename:
         cleaned = re.sub(r'\s*[\(\)]\s*$', '', cleaned).strip()
         
         return cleaned if cleaned else ""
+
+    def _contains_blacklist_word(self, text: str) -> bool:
+        """
+        Проверить, содержит ли text слово(а) из blacklist.
+        
+        Args:
+            text: Проверяемый текст (например, название папки для series)
+            
+        Returns:
+            True если найдено хотя бы одно blacklist слово, False иначе
+        """
+        if not text or not self.filename_blacklist:
+            return False
+        
+        text_lower = text.lower()
+        
+        # Проходим по каждому слову в blacklist
+        for bl_word in self.filename_blacklist:
+            bl_word_lower = bl_word.lower().strip()
+            if not bl_word_lower:
+                continue
+            
+            # Проверяем наличие как целого слова (word boundary check)
+            # Ищем в виде отдельного слова, не как substring
+            # Например: "боевая фантастика" в "Боевая фантастика. Циклы" → FOUND
+            #           но не "боевая" как часть слова
+            
+            # Используем word boundaries: \b работает для ASCII, но для кириллицы нужен свой paттерн
+            import re
+            pattern = r'(?:^|\W)' + re.escape(bl_word_lower) + r'(?:\W|$)'
+            if re.search(pattern, text_lower):
+                return True
+        
+        return False
     
     def _is_valid_series(self, text: str, extracted_author: str = None, skip_author_check: bool = False) -> bool:
         """
@@ -2026,6 +2100,54 @@ class Pass2SeriesFilename:
                         return True
         
         return False
+    
+    def _balance_quotes(self, text: str) -> str:
+        """
+        Восстановить парные кавычки в тексте.
+        
+        Если в тексте есть открывающиеся кавычки но не хватает закрывающихся,
+        автоматически добавляет закрывающиеся сдачи.
+        
+        Обрабатывает три типа кавычек:
+        - Русские guillemets: « и »
+        - Двойные кавычки: " и "
+        - Одиночные кавычки: ' и '
+        
+        Примеры:
+            "Вариант «Бис" → "Вариант «Бис»"
+            "Цикл «Война «Ночи" → "Цикл «Война «Ночи»»"
+            "Название "серия" → "Название "серия""
+            "Текст 'цикл" → "Текст 'цикл'"
+        
+        Args:
+            text: Исходный текст
+        
+        Returns:
+            Текст с уравновешенными кавычками
+        """
+        if not text:
+            return text
+        
+        # Определить типы кавычек и их пары
+        quote_pairs = [
+            ('«', '»'),  # Russian guillemets
+            ('"', '"'),  # Double quotes
+            ("'", "'"),  # Single quotes
+        ]
+        
+        result = text
+        
+        for open_quote, close_quote in quote_pairs:
+            open_count = result.count(open_quote)
+            close_count = result.count(close_quote)
+            
+            # Если открывающихся больше, чем закрывающихся
+            if open_count > close_count:
+                missing = open_count - close_count
+                # Добавляем недостающие закрывающиеся кавычки в конец
+                result = result + close_quote * missing
+        
+        return result
     
     def _fix_russian_grammar(self, series: str) -> str:
         """

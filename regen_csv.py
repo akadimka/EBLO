@@ -150,6 +150,39 @@ class RegenCSVService:
         # ШАГ 3: Если ничего не помогло, берём всё имя
         return folder_name.strip()
     
+    def _contains_blacklist_word_regen(self, text: str) -> bool:
+        """
+        Проверить, содержит ли text слово(а) из blacklist (заимствовано от Pass2).
+        
+        Используется для фильтрации folder names - папка "Боевая фантастика. Циклы"
+        содержит слово "боевая фантастика" (жанр), поэтому НЕ может быть series.
+        
+        Args:
+            text: Проверяемый текст (название папки)
+            
+        Returns:
+            True если найдено хотя бы одно blacklist слово, False иначе
+        """
+        blacklist = self.settings.get_list('filename_blacklist')
+        if not text or not blacklist:
+            return False
+        
+        text_lower = text.lower()
+        
+        # Проходим по каждому слову в blacklist
+        for bl_word in blacklist:
+            bl_word_lower = bl_word.lower().strip()
+            if not bl_word_lower:
+                continue
+            
+            # Проверяем наличие как целого слова (word boundary check)
+            import re
+            pattern = r'(?:^|\W)' + re.escape(bl_word_lower) + r'(?:\W|$)'
+            if re.search(pattern, text_lower):
+                return True
+        
+        return False
+    
     def regenerate(self) -> bool:
         """Execute full CSV regeneration pipeline.
         
@@ -278,8 +311,12 @@ class RegenCSVService:
                         series_folder_name = file_path_parts[-2]
                         series_name = self._extract_series_from_folder_name(series_folder_name)
                         if series_name:  # Only set source if we got a series
-                            record.proposed_series = series_name
-                            record.series_source = "folder_dataset"
+                            # ✅ НОВОЕ: Проверить что папка не содержит blacklist слова!
+                            # Папка типа "Боевая фантастика. Циклы" НЕ может быть series
+                            # потому что "боевая фантастика" это ЖАНР, не series
+                            if not self._contains_blacklist_word_regen(series_name):
+                                record.proposed_series = series_name
+                                record.series_source = "folder_dataset"
             
             self.logger.log("[OK] Series extracted from folder structure (Variant B)")
             

@@ -61,8 +61,8 @@ def convert_simple_pattern_to_regex(pattern_str: str) -> str:
     pattern_str = pattern_str.strip()
     
     # Регулярное выражение для поиска всех групп (с/без скобок)
-    # Ищет: (Name), [Name] или просто Name (между разделителями)
-    token_pattern = r'\(([^)]+)\)|\[([^\]]+)\]|(\w+)'
+    # Ищет: (Name), [Name], "Name", «Name» или просто Name (между разделителями)
+    token_pattern = r'\(([^)]+)\)|\[([^\]]+)\]|"([^"]+)"|«([^»]+)»|(\w+)'
     
     # Найти все токены и их позиции
     tokens = []
@@ -76,7 +76,9 @@ def convert_simple_pattern_to_regex(pattern_str: str) -> str:
         # Тип и содержимое токена
         bracket_group = match.group(1)  # (Name)
         square_group = match.group(2)   # [Name]
-        plain_group = match.group(3)    # Name
+        quote_group = match.group(3)    # "Name"
+        guillemet_group = match.group(4)  # «Name»
+        plain_group = match.group(5)    # Name
         
         if bracket_group:
             base_group_name = _normalize_group_name(bracket_group)
@@ -84,6 +86,12 @@ def convert_simple_pattern_to_regex(pattern_str: str) -> str:
         elif square_group:
             base_group_name = _normalize_group_name(square_group)
             bracket_type = '[]'
+        elif quote_group:
+            base_group_name = _normalize_group_name(quote_group)
+            bracket_type = 'quotes'
+        elif guillemet_group:
+            base_group_name = _normalize_group_name(guillemet_group)
+            bracket_type = 'guillemets'
         elif plain_group:
             base_group_name = _normalize_group_name(plain_group)
             bracket_type = 'plain'
@@ -141,6 +149,12 @@ def convert_simple_pattern_to_regex(pattern_str: str) -> str:
         elif bracket_type == '[]':
             # [Name] - match content in []
             regex_parts.append(r'\[(?P<' + group_name + r'>[^\]]+)\]')
+        elif bracket_type == 'quotes':
+            # "Name" - match content in double quotes
+            regex_parts.append(r'"(?P<' + group_name + r'>[^"]+)"')
+        elif bracket_type == 'guillemets':
+            # «Name» - match content in Russian guillemets
+            regex_parts.append(r'«(?P<' + group_name + r'>[^»]+)»')
         else:  # plain
             # Name - match any content
             regex_parts.append(r'(?P<' + group_name + r'>.+?)')

@@ -154,7 +154,7 @@ class BlockLevelPatternMatcher:
         text_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, text)  # Replace "..", "...", etc.
         
         blocks = []
-        delimiter_pattern = r'\s+-\s+|\.\s*|[()]'
+        delimiter_pattern = r'\s+-\s+|\.\s*|[()«»]'
         
         paren_depth = 0
         block_text_pos = 0
@@ -180,9 +180,9 @@ class BlockLevelPatternMatcher:
                 ))
             
             # Update parenthesis depth based on current delimiter
-            if delimiter == '(':
+            if delimiter == '(' or delimiter == '«':
                 paren_depth += 1
-            elif delimiter == ')':
+            elif delimiter == ')' or delimiter == '»':
                 paren_depth = max(0, paren_depth - 1)
             
             prev_delimiter = delimiter  # Next block will have this as its prefix delimiter
@@ -240,7 +240,7 @@ class BlockLevelPatternMatcher:
         pattern_blocks = []
         
         # Split using same delimiter pattern as tokenize_filename
-        delimiter_pattern = r'\s+-\s+|\.\s*|[()]'
+        delimiter_pattern = r'\s+-\s+|\.\s*|[()«»]'
         
         paren_depth = 0
         block_text_pos = 0
@@ -267,9 +267,9 @@ class BlockLevelPatternMatcher:
                 })
             
             # Update parenthesis depth
-            if delimiter == '(':
+            if delimiter == '(' or delimiter == '«':
                 paren_depth += 1
-            elif delimiter == ')':
+            elif delimiter == ')' or delimiter == '»':
                 paren_depth = max(0, paren_depth - 1)
             
             prev_delimiter = delimiter
@@ -397,6 +397,13 @@ class BlockLevelPatternMatcher:
             else:
                 fname_type = self._guess_block_type(fname_block.text)
             
+            # Context-aware type adjustment
+            # If previous block in pattern was "service_words" and this block would be "Title",
+            # but pattern expects "Series", prefer "Series" classification
+            if (position > 0 and expected_type == "Series" and fname_type == "Title" and 
+                pattern_blocks[position - 1]['type'] == "service_words"):
+                fname_type = "Series"  # Override: after service_words, expect Series
+            
             # Check delimiter match
             delimiter_match = fname_block.delimiter == pblock['delimiter']
             
@@ -441,10 +448,19 @@ class BlockLevelPatternMatcher:
         """
         text_lower = block_text.lower()
         
-        # Check for service words (series markers)
+        # Check for service words (series markers) - if SINGLE word is service word, mark it as such
+        # This is important for patterns like "Author. service_words «Series»"
         for word in self.service_words:
             if word in text_lower:
-                return "Series"
+                # If the block is JUST a service word (or mostly service word), mark as service_words type
+                # This helps match patterns like "Author. Цикл «Series»" where Цикл is the service word
+                block_words = set(text_lower.split())
+                if len(block_words) == 1 and word in block_words:
+                    # Single word that's a service word
+                    return "service_words"
+                else:
+                    # Contains service word among other text
+                    return "Series"
         
         # Check for number patterns (1-3, 1, vol. 2, etc.)
         if re.search(r'\d+[-–—]\d+|\b\d+$|\bvol\.\s+\d+', block_text):
@@ -458,8 +474,18 @@ class BlockLevelPatternMatcher:
         # Check if looks like author (simple heuristic: has 2+ words, Cyrillic)
         words = block_text.split()
         if len(words) >= 2:
-            # Likely "Surname Name" format
-            if all(self._is_cyrillic_word(w) for w in words[:2]):
+            # Likely "Surname Name" format - BUT only if it looks like actual names
+            # Series titles often have multiple words too, so be more strict
+            # Real author names typically: 
+            # - Have capitalized first letters (Иван Петров)
+            # - Don't have complex verb patterns (солдат удачи - soldier of luck)
+            # Check if all words start with capital or are very short (particles)
+            looks_like_names = all(
+                (w[0].isupper() or len(w) <= 2) 
+                for w in words[:2] 
+                if self._is_cyrillic_word(w)
+            )
+            if looks_like_names and all(self._is_cyrillic_word(w) for w in words[:2]):
                 return "Author"
         
         # Single Russian word of 3+ chars (relaxed) → likely surname
