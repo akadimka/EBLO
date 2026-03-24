@@ -498,6 +498,11 @@ class Pass2SeriesFilename:
         for record in records:
             if record.proposed_series:
                 record.proposed_series = self._balance_quotes(record.proposed_series)
+                
+                # ✅ ФИНАЛЬНОЕ: Удалить завершающий backslash
+                # Некоторые значения могут заканчиваться на "\", это ошибка обработки иерархий
+                # Пример: "Мир Алекса Королева\" должно быть "Мир Алекса Королева"
+                record.proposed_series = record.proposed_series.rstrip('\\')
         
         # Commented out: folder pattern consensus was also causing issues  
         # self._apply_series_folder_pattern_consensus(records)
