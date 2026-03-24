@@ -289,13 +289,6 @@ class Pass2SeriesFilename:
                                 record.proposed_series = series_folder
                                 record.series_source = "folder_hierarchy"
                                 
-                                # Проверяем: есть ли подсерия (i+2)?
-                                if i + 2 < len(path_parts) - 1:
-                                    subseries_folder = path_parts[i + 2]
-                                    if not subseries_folder.endswith('.fb2'):
-                                        # Это подсерия
-                                        record.proposed_subseries = subseries_folder
-                                
                                 break  # Нашли серию - выходим из поиска папки автора
             
             # Special case: depth==4 without series subfolder
