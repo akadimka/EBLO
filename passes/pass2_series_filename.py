@@ -1183,6 +1183,13 @@ class Pass2SeriesFilename:
                 if not series_candidate and '(' in pattern_str and ')' in pattern_str:
                     series_candidate = self._apply_config_pattern(pattern_str, name_for_parsing)
                 
+                # 🔑 НОВОЕ: Отвергнуть если series это только цифры (скорее всего год, не серия)
+                # "2021", "2020", "1999" → отвергаем, это годы
+                # "Год 2021" → оставляем, это может быть название серии
+                if series_candidate and series_candidate.strip().isdigit():
+                    # Это только цифры - скорее всего год, не название серии!
+                    series_candidate = None
+                
                 if not series_candidate:
                     continue
                 
@@ -1216,6 +1223,8 @@ class Pass2SeriesFilename:
                 # Это serve_word, игнорируем этот результат
                 best_series = None
             else:
+
+                
                 # Проверка 2: КРИТИЧНО - проверить blacklist даже если validate=False
                 # Blacklist всегда должна проверяться, это не результат валидации
                 # а фильтр для явно запрещенных слов
@@ -1266,8 +1275,9 @@ class Pass2SeriesFilename:
         # Из паттернов конфига: "Author - Title (Series. service_words)"
         # Ищем скобку в конце, может быть с сервис-словами перед ней
         if '(' in name_for_parsing and ')' in name_for_parsing:
-            # Ищем закрытую скобку в конце, которой предшествует открытая скобка
-            match = re.search(r'\(([^)]+)\)\s*$', name_for_parsing)
+            # Ищем ПЕРВУЮ пару скобок (не последнюю!) - используем lookahead
+            # При двойных скобках (Series) (Year) нужно взять (Series), не (Year)
+            match = re.search(r'\(([^)]+)\)(?:\s*\(|\s*$)', name_for_parsing)
             if match:
                 content_in_brackets = match.group(1).strip()
                 
@@ -2343,8 +2353,8 @@ class Pass2SeriesFilename:
         #
         has_brackets = '(' in filename and ')' in filename
         if pattern == 'Author - Series (service_words)' and has_brackets:
-            # Проверяем что находится в скобках
-            bracket_match = re.search(r'\(([^)]+)\)\s*$', filename)
+            # Проверяем что находится в скобках - берем ПЕРВУЮ пару скобок, не последнюю
+            bracket_match = re.search(r'\(([^)]+)\)(?:\s*\(|\s*$)', filename)
             if bracket_match:
                 bracket_content = bracket_match.group(1).strip().lower()
                 
