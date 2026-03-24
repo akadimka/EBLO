@@ -448,33 +448,44 @@ class Pass2SeriesFilename:
                         record.proposed_series = clean
                         record.series_source = "filename"
             elif record.metadata_series:
-                # ✅ ПРИОРИТЕТ: Перед использованием metadata - проверяем целиком ли она в blacklist
-                # Пример: "Современный фантастический боевик (АСТ)" → без "(АСТ)" = "Современный фантастический боевик"
-                # Если это совпадает с BL целиком → отклоняем, НЕ используем как series
-                metadata_base = record.metadata_series.replace(' (АСТ)', '').replace('(АСТ)', '').strip()
-                is_pure_blacklist = any(
-                    metadata_base.lower() == bl.lower() 
+                # ✅ ЗАЩИТА: Перед использованием metadata - проверяем наличие слов из blacklist
+                # ТРЕБОВАНИЕ: "если мета содержит слово или слова из BL, полностью ее игнорируем в качестве значения"
+                # Пример: "Шедевры фантастики (продолжатели)" содержит "фантастики" → отклоняем целиком
+                has_blacklist_word = any(
+                    bl.lower() in record.metadata_series.lower()
                     for bl in self.filename_blacklist
                 )
                 
-                if is_pure_blacklist:
-                    # Весь metadata это blacklist → пропускаем (series остаётся пустой)
+                if has_blacklist_word:
+                    # metadata содержит слова из blacklist → игнорируем целиком, не используем как series
                     pass
                 else:
-                    # Fallback к metadata - только если из filename ничего не нашли
-                    series = self._extract_series_from_metadata(record.metadata_series.strip())
+                    # ✅ ДОПОЛНИТЕЛЬНО: Проверяем целиком ли она в blacklist
+                    # Пример: "Современный фантастический боевик (АСТ)" → без "(АСТ)" = "Современный фантастический боевик"
+                    metadata_base = record.metadata_series.replace(' (АСТ)', '').replace('(АСТ)', '').strip()
+                    is_pure_blacklist = any(
+                        metadata_base.lower() == bl.lower() 
+                        for bl in self.filename_blacklist
+                    )
                     
-                    # ✅ НОВОЕ: Удалить слова из blacklist также из metadata серии
-                    series = self._remove_blacklist_words(series)
-                    
-                    author_for_validation = record.proposed_author or None
-                    if series and self._is_valid_series(series, extracted_author=author_for_validation):
-                        # Исправляем грамматику русского языка (добавляем запятую перед "что")
-                        series = self._fix_russian_grammar(series)
-                        record.proposed_series = series
+                    if is_pure_blacklist:
+                        # Весь metadata это blacklist → пропускаем (series остаётся пустой)
+                        pass
+                    else:
+                        # Fallback к metadata - только если из filename ничего не нашли
+                        series = self._extract_series_from_metadata(record.metadata_series.strip())
                         
-                        # 🔑 Папка уже была проверена выше. Если мы здесь → это просто metadata series (не совпадает с папкой)
-                        record.series_source = "metadata"
+                        # ✅ Удалить слова из blacklist также из metadata серии
+                        series = self._remove_blacklist_words(series)
+                        
+                        author_for_validation = record.proposed_author or None
+                        if series and self._is_valid_series(series, extracted_author=author_for_validation):
+                            # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                            series = self._fix_russian_grammar(series)
+                            record.proposed_series = series
+                            
+                            # 🔑 Папка уже была проверена выше. Если мы здесь → это просто metadata series (не совпадает с папкой)
+                            record.series_source = "metadata"
         
         # 🔑 НОВОЕ: Папочный консенсус
         # Если папка содержит файлы с series_source = "folder_dataset",
