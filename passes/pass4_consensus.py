@@ -329,6 +329,12 @@ class Pass4Consensus:
                     series_base_normalized = series_base.lower().strip()
                     filename_normalized = filename.lower()
                     
+                    # PROTECTION: Skip if series_base is too short (would match any single char)
+                    # Example: "П" matches any word starting with "п" like "первый", "пятьдесят"
+                    # Require at least 2 characters for a valid series name
+                    if len(series_base_normalized) < 2:
+                        continue
+                    
                     # Check if filename contains series_base in the expected position
                     # Must be after author name (after " - " or after ". ") or at start
                     if series_base_normalized in filename_normalized:
