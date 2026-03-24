@@ -265,16 +265,15 @@ class RegenCSVService:
                         # Это соблюдает cascade priority: FOLDER(3) > FILENAME(2) > METADATA(1)
                         # Do NOT set series_source here - let following passes handle it
                         pass
-                    elif len(series_folders) == 1:
-                        # Simple series: Author / Series / File
-                        series_name = self._extract_series_from_folder_name(series_folders[0])
-                        if series_name:  # Only set source if we actually got a series name
-                            record.proposed_series = series_name
-                            record.series_source = "folder_dataset"
-
                     else:
-                        # Hierarchical series: Author / MainSeries / SubSeries / ... / File
-                        series_names = [self._extract_series_from_folder_name(folder) for folder in series_folders]
+                        # Hierarchical OR simple series: Author / Series [/ SubSeries ...] / File
+                        # ВАЖНО: Включаем НАЗВАНИE ПАПКИ АВТОРА как первый уровень иерархии!
+                        # Это обеспечивает правильную иерархию типа:
+                        # "Суворовы\1. Истребители" вместо просто "1. Истребители"
+                        
+                        author_folder_name = file_path_parts[author_folder_index]
+                        all_folders = [author_folder_name] + list(series_folders)
+                        series_names = [self._extract_series_from_folder_name(folder) for folder in all_folders]
                         series_combined = "\\".join(series_names)
                         if series_combined:  # Only set source if we actually got a series
                             record.proposed_series = series_combined
@@ -311,7 +310,7 @@ class RegenCSVService:
                         series_folder_name = file_path_parts[-2]
                         series_name = self._extract_series_from_folder_name(series_folder_name)
                         if series_name:  # Only set source if we got a series
-                            # ✅ НОВОЕ: Проверить что папка не содержит blacklist слова!
+                            # [NEW] Проверить что папка не содержит blacklist слова!
                             # Папка типа "Боевая фантастика. Циклы" НЕ может быть series
                             # потому что "боевая фантастика" это ЖАНР, не series
                             if not self._contains_blacklist_word_regen(series_name):
@@ -362,7 +361,7 @@ class RegenCSVService:
             self._save_csv()
             self.logger.log(f"[OK] CSV saved to {self.output_csv}")
             
-            print(f"\n✅ CSV regeneration completed successfully!")
+            print(f"\n[OK] CSV regeneration completed successfully!")
             print(f"   Output: {self.output_csv}")
             print(f"   Records: {len(self.records)}")
             print("="*80 + "\n")

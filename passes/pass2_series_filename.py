@@ -275,6 +275,30 @@ class Pass2SeriesFilename:
         # (MainSeries N из "MainSeries N. SubSeries M-K") — не убирать trailing number
         self._last_was_hierarchical = False
     
+    def _extract_series_from_folder_name(self, folder_name: str) -> str:
+        """
+        Извлечь название серии из имени папки.
+        Убирает ведущие номера ("1. ", "2) " и т.д.)
+        и всё перед скобками ("1941 (Иван Байбаков)" → "1941")
+        
+        Args:
+            folder_name: Имя папки
+            
+        Returns:
+            Очищенное название серии
+        """
+        # Убрать ведущие номера ("1. ", "2) " и т.д.)
+        cleaned = re.sub(r'^\d+[\.\)\-]\s+', '', folder_name).strip()
+        if cleaned and cleaned != folder_name:
+            folder_name = cleaned
+        
+        # Fallback - всё перед скобками это серия
+        match = re.match(r'^(.+?)\s*\([^)]+\)\s*$', folder_name)
+        if match:
+            return match.group(1).strip()
+        
+        return folder_name.strip()
+    
     def execute(self, records: List[BookRecord]) -> None:
         """
         ПРОСТАЯ И ПРАВИЛЬНАЯ ЛОГИКА - независима от папок!
@@ -304,8 +328,20 @@ class Pass2SeriesFilename:
                         if i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
                             series_folder = path_parts[i + 1]
                             if not series_folder.endswith('.fb2'):
-                                # Это серия - берём БЕЗ ПРОВЕРОК
-                                record.proposed_series = series_folder
+                                # Это серия - ВКЛЮЧАЕМ И ПАПКУ АВТОРА И ПАПКУ СЕРИИ в иерархию
+                                # "Суворовы (...)" + "1. Истребители" → "Суворовы\Истребители"
+                                author_folder = path_parts[i]
+                                
+                                # Очищаем оба названия и комбинируем
+                                author_series_name = self._extract_series_from_folder_name(author_folder)
+                                subseries_name = self._extract_series_from_folder_name(series_folder)
+                                
+                                if author_series_name and subseries_name:
+                                    record.proposed_series = f"{author_series_name}\\{subseries_name}"
+                                else:
+                                    # Fallback на исходное поведение если extraction не сработал
+                                    record.proposed_series = series_folder
+                                
                                 record.series_source = "folder_hierarchy"
                                 
                                 break  # Нашли серию - выходим из поиска папки автора
@@ -328,22 +364,9 @@ class Pass2SeriesFilename:
                 continue  # Серия уже установлена (кроме depth==4 ошибки)
             
             # ОБЯЗАТЕЛЬНО пробуемы паттерны (глубина НЕ влияет!)
-            # 🔑 НОВО: Первоначально проверить - может папка уже содержит series?
-            # Если metadata_series совпадает с названием папки → это folder_dataset!
-            # Это имеет ПРИОРИТЕТ над extraction из filename
-            folder_name = Path(record.file_path).parent.name
-            
-            if (record.metadata_series and folder_name and 
-                record.metadata_series.lower().replace('ё', 'е') == folder_name.lower().replace('ё', 'е')):
-                # Папка совпадает с metadata_series → это folder_dataset!
-                has_blacklist = self._contains_blacklist_word(record.metadata_series)
-                
-                if not has_blacklist:
-                    # Папка чистая → применяем как series
-                    record.proposed_series = record.metadata_series
-                    record.series_source = "folder_dataset"
-                    # Skip дальнейший processing
-                    continue
+            # Если series уже установлена из папок → пропускаем extraction
+            if record.series_source == "folder_dataset":
+                continue  # Folder extraction already set hierarchical series
             
             # Если папка НЕ дала series → пробуем extraction из filename
             series_candidate = self._extract_series_from_filename(
