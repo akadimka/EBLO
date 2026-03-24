@@ -985,9 +985,7 @@ class Pass2SeriesFilename:
         # Эти метатеги не должны влиять на извлечение series
         name_for_parsing = re.sub(r'\s*\([СЛ]И\)\s*$', '', name_without_ext).strip()
         
-        # DEBUG: логирование для файла с (Наследник)
-        if "Наследник" in name_for_parsing:
-            print(f"DEBUG series extract: {file_path} → name_for_parsing={name_for_parsing}")
+
         
         # 🔑 Флаг: найден паттерн БЕЗ Series информации
         pattern_found_without_series = False
@@ -1300,19 +1298,15 @@ class Pass2SeriesFilename:
             match = re.match(r'^(.+?)\s*-\s*([^.]+)\.\s+(.+)$', name_without_ext)
             if match:
                 title_before_dot = match.group(2).strip()
-                if "охотник" in name_without_ext.lower() or "Наследник" in name_without_ext:
-                    print(f"  [Rule 5 match] title_before_dot='{title_before_dot}'")
                 # Это Title (потенциальная Series) если он:
                 # 1. Имеет несколько слов ИЛИ 
                 # 2. Это нечто более подходящее серии чем фамилия  
                 if len(title_before_dot.split()) > 1 or (title_before_dot and len(title_before_dot) > 3):
                     if not validate or self._is_valid_series(title_before_dot):
-                        if "охотник" in name_without_ext.lower() or "Наследник" in name_without_ext:
-                            print(f"  [RETURNING from Rule 5] '{title_before_dot}'")
                         return title_before_dot
         
         if "охотник" in name_without_ext.lower() or "Наследник" in name_without_ext:
-            print(f"  [NO MATCH - returning empty]")
+            pass
         return ""
     
     def _apply_config_pattern(self, pattern: str, filename: str) -> str:

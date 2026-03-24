@@ -162,6 +162,15 @@ class BlockLevelPatternMatcher:
         
         for match in re.finditer(delimiter_pattern, text_processed):
             delimiter = match.group()
+            
+            # IMPORTANT: Skip " - " and "." delimiters when inside parentheses/guillemets
+            # These are only valid delimiters at top level (paren_depth == 0)
+            is_paren_delimiter = delimiter in ('(', ')', '«', '»')
+            if paren_depth > 0 and not is_paren_delimiter:
+                # This is a " - " or "." inside parens, so DON'T treat it as a delimiter
+                # Skip this match and continue looking for the next one
+                continue
+            
             block_text = text_processed[block_text_pos:match.start()]
             block_text = block_text.strip()
             
@@ -248,6 +257,15 @@ class BlockLevelPatternMatcher:
         
         for match in re.finditer(delimiter_pattern, pattern_processed):
             delimiter = match.group()
+            
+            # IMPORTANT: Skip " - " and "." delimiters when inside parentheses/guillemets
+            # These are only valid delimiters at top level (paren_depth == 0)
+            is_paren_delimiter = delimiter in ('(', ')', '«', '»')
+            if paren_depth > 0 and not is_paren_delimiter:
+                # This is a " - " or "." inside parens, so DON'T treat it as a delimiter
+                # Skip this match and continue looking for the next one
+                continue
+            
             block_text = pattern_processed[block_text_pos:match.start()]
             block_text = block_text.strip()
             
@@ -398,10 +416,11 @@ class BlockLevelPatternMatcher:
                 fname_type = self._guess_block_type(fname_block.text)
             
             # Context-aware type adjustment
-            # If previous block in pattern was "service_words" and this block would be "Title",
+            # If previous block in pattern was "service_words" and this block would be  some wrong type,
             # but pattern expects "Series", prefer "Series" classification
-            if (position > 0 and expected_type == "Series" and fname_type == "Title" and 
-                pattern_blocks[position - 1]['type'] == "service_words"):
+            if (position > 0 and expected_type == "Series" and 
+                pattern_blocks[position - 1]['type'] == "service_words" and
+                fname_type in ("Title", "Author")):  # Override both Title and Author guesses
                 fname_type = "Series"  # Override: after service_words, expect Series
             
             # Check delimiter match
@@ -421,6 +440,7 @@ class BlockLevelPatternMatcher:
                     author_block = fname_block.text
                 elif expected_type == "Series":
                     series_blocks.append(fname_block.text)  # Collect all series blocks
+
         
         # Reconstruct full series hierarchy from all blocks (e.g., "Сид 1. Принцип талиона 1. Геката 1")
         series_block = '. '.join(series_blocks) if series_blocks else None

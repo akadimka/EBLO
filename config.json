@@ -244,8 +244,12 @@
       "example": "Авраменко. Цикл «Солдат удачи».fb2"
     },
     {
-      "pattern": "Author. service_words «Series». service_words",
+      "pattern": "Author. service_words «Series». Text",
       "example": "Бредвик. Цикл «Войд». Том 1.fb2"
+    },
+    {
+      "pattern": "Author. service_words «Series» text. Title",
+      "example": "Сергеев. Цикл «Достойны ли мы отцов и дедов» 1. Всегда война.fb2"
     },
     {
       "pattern": "Author, Author. Title (Series)",
