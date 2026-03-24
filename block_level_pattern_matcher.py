@@ -154,7 +154,9 @@ class BlockLevelPatternMatcher:
         text_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, text)  # Replace "..", "...", etc.
         
         blocks = []
-        delimiter_pattern = r'\s+-\s+|\.\s*|[()«»]'
+        # FIXED: Guillemets « » are NOT structural delimiters, they're formatting marks within text
+        # Only treat actual parentheses () as structural delimiters, not guillemets
+        delimiter_pattern = r'\s+-\s+|\.\s*|[()]'  # Removed « and »
         
         paren_depth = 0
         block_text_pos = 0
@@ -163,9 +165,9 @@ class BlockLevelPatternMatcher:
         for match in re.finditer(delimiter_pattern, text_processed):
             delimiter = match.group()
             
-            # IMPORTANT: Skip " - " and "." delimiters when inside parentheses/guillemets
+            # IMPORTANT: Skip " - " and "." delimiters when inside parentheses
             # These are only valid delimiters at top level (paren_depth == 0)
-            is_paren_delimiter = delimiter in ('(', ')', '«', '»')
+            is_paren_delimiter = delimiter in ('(', ')')
             if paren_depth > 0 and not is_paren_delimiter:
                 # This is a " - " or "." inside parens, so DON'T treat it as a delimiter
                 # Skip this match and continue looking for the next one
@@ -189,9 +191,10 @@ class BlockLevelPatternMatcher:
                 ))
             
             # Update parenthesis depth based on current delimiter
-            if delimiter == '(' or delimiter == '«':
+            # Note: guillemets « » are NOT counted towards paren_depth (they're formatting, not structure)
+            if delimiter == '(':
                 paren_depth += 1
-            elif delimiter == ')' or delimiter == '»':
+            elif delimiter == ')':
                 paren_depth = max(0, paren_depth - 1)
             
             prev_delimiter = delimiter  # Next block will have this as its prefix delimiter
@@ -249,7 +252,8 @@ class BlockLevelPatternMatcher:
         pattern_blocks = []
         
         # Split using same delimiter pattern as tokenize_filename
-        delimiter_pattern = r'\s+-\s+|\.\s*|[()«»]'
+        # FIXED: Guillemets « » are NOT structural delimiters, they're formatting marks
+        delimiter_pattern = r'\s+-\s+|\.\s*|[()]'  # Removed « and »
         
         paren_depth = 0
         block_text_pos = 0
@@ -258,9 +262,9 @@ class BlockLevelPatternMatcher:
         for match in re.finditer(delimiter_pattern, pattern_processed):
             delimiter = match.group()
             
-            # IMPORTANT: Skip " - " and "." delimiters when inside parentheses/guillemets
+            # IMPORTANT: Skip " - " and "." delimiters when inside parentheses
             # These are only valid delimiters at top level (paren_depth == 0)
-            is_paren_delimiter = delimiter in ('(', ')', '«', '»')
+            is_paren_delimiter = delimiter in ('(', ')')
             if paren_depth > 0 and not is_paren_delimiter:
                 # This is a " - " or "." inside parens, so DON'T treat it as a delimiter
                 # Skip this match and continue looking for the next one
@@ -285,9 +289,10 @@ class BlockLevelPatternMatcher:
                 })
             
             # Update parenthesis depth
-            if delimiter == '(' or delimiter == '«':
+            # Note: guillemets « » are NOT counted towards paren_depth (they're formatting, not structure)
+            if delimiter == '(':
                 paren_depth += 1
-            elif delimiter == ')' or delimiter == '»':
+            elif delimiter == ')':
                 paren_depth = max(0, paren_depth - 1)
             
             prev_delimiter = delimiter
