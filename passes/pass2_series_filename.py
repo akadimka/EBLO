@@ -43,11 +43,30 @@ except ImportError:
         series_source: str = ""
         file_title: str = ""
 
-from logger import Logger
-from settings_manager import SettingsManager
-from name_normalizer import AuthorName
-from pattern_converter import compile_patterns
-from block_level_pattern_matcher import BlockLevelPatternMatcher
+try:
+    from logger import Logger
+except ImportError:
+    from ..logger import Logger
+
+try:
+    from settings_manager import SettingsManager
+except ImportError:
+    from ..settings_manager import SettingsManager
+
+try:
+    from name_normalizer import AuthorName
+except ImportError:
+    from ..name_normalizer import AuthorName
+
+try:
+    from pattern_converter import compile_patterns
+except ImportError:
+    from ..pattern_converter import compile_patterns
+
+try:
+    from block_level_pattern_matcher import BlockLevelPatternMatcher
+except ImportError:
+    from ..block_level_pattern_matcher import BlockLevelPatternMatcher
 
 
 class BlockLevelPatternSelector:
@@ -429,20 +448,33 @@ class Pass2SeriesFilename:
                         record.proposed_series = clean
                         record.series_source = "filename"
             elif record.metadata_series:
-                # Fallback к metadata - только если из filename ничего не нашли
-                series = self._extract_series_from_metadata(record.metadata_series.strip())
+                # ✅ ПРИОРИТЕТ: Перед использованием metadata - проверяем целиком ли она в blacklist
+                # Пример: "Современный фантастический боевик (АСТ)" → без "(АСТ)" = "Современный фантастический боевик"
+                # Если это совпадает с BL целиком → отклоняем, НЕ используем как series
+                metadata_base = record.metadata_series.replace(' (АСТ)', '').replace('(АСТ)', '').strip()
+                is_pure_blacklist = any(
+                    metadata_base.lower() == bl.lower() 
+                    for bl in self.filename_blacklist
+                )
                 
-                # ✅ НОВОЕ: Удалить слова из blacklist также из metadata серии
-                series = self._remove_blacklist_words(series)
-                
-                author_for_validation = record.proposed_author or None
-                if series and self._is_valid_series(series, extracted_author=author_for_validation):
-                    # Исправляем грамматику русского языка (добавляем запятую перед "что")
-                    series = self._fix_russian_grammar(series)
-                    record.proposed_series = series
+                if is_pure_blacklist:
+                    # Весь metadata это blacklist → пропускаем (series остаётся пустой)
+                    pass
+                else:
+                    # Fallback к metadata - только если из filename ничего не нашли
+                    series = self._extract_series_from_metadata(record.metadata_series.strip())
                     
-                    # 🔑 Папка уже была проверена выше. Если мы здесь → это просто metadata series (не совпадает с папкой)
-                    record.series_source = "metadata"
+                    # ✅ НОВОЕ: Удалить слова из blacklist также из metadata серии
+                    series = self._remove_blacklist_words(series)
+                    
+                    author_for_validation = record.proposed_author or None
+                    if series and self._is_valid_series(series, extracted_author=author_for_validation):
+                        # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                        series = self._fix_russian_grammar(series)
+                        record.proposed_series = series
+                        
+                        # 🔑 Папка уже была проверена выше. Если мы здесь → это просто metadata series (не совпадает с папкой)
+                        record.series_source = "metadata"
         
         # 🔑 НОВОЕ: Папочный консенсус
         # Если папка содержит файлы с series_source = "folder_dataset",

@@ -821,7 +821,10 @@ class Pass2Filename:
         
         try:
             # Import block-level matcher
-            from block_level_pattern_matcher import BlockLevelPatternMatcher
+            try:
+                from block_level_pattern_matcher import BlockLevelPatternMatcher
+            except ImportError:
+                from ..block_level_pattern_matcher import BlockLevelPatternMatcher
             
             # CRITICAL: Remove blacklist markers from filename BEFORE pattern matching
             # "(СИ)" at the end creates an extra block that breaks pattern matching!
