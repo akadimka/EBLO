@@ -282,6 +282,24 @@ class Pass2SeriesFilename:
                 continue  # Серия уже установлена (кроме depth==4 ошибки)
             
             # ОБЯЗАТЕЛЬНО пробуемы паттерны (глубина НЕ влияет!)
+            # 🔑 НОВО: Первоначально проверить - может папка уже содержит series?
+            # Если metadata_series совпадает с названием папки → это folder_dataset!
+            # Это имеет ПРИОРИТЕТ над extraction из filename
+            folder_name = Path(record.file_path).parent.name
+            
+            if (record.metadata_series and folder_name and 
+                record.metadata_series.lower().replace('ё', 'е') == folder_name.lower().replace('ё', 'е')):
+                # Папка совпадает с metadata_series → это folder_dataset!
+                has_blacklist = self._contains_blacklist_word(record.metadata_series)
+                
+                if not has_blacklist:
+                    # Папка чистая → применяем как series
+                    record.proposed_series = record.metadata_series
+                    record.series_source = "folder_dataset"
+                    # Skip дальнейший processing
+                    continue
+            
+            # Если папка НЕ дала series → пробуем extraction из filename
             series_candidate = self._extract_series_from_filename(
                 record.file_path, validate=False, metadata_series=record.metadata_series
             )
@@ -396,28 +414,8 @@ class Pass2SeriesFilename:
                     series = self._fix_russian_grammar(series)
                     record.proposed_series = series
                     
-                    # 🔑 ВАЖНО: Определить откуда пришла metadata_series
-                    # Если она совпадает с названием папки серии - это folder_dataset, не metadata!
-                    # Пример: файл в папке "Солдат удачи" с metadata_series="Солдат удачи" → folder_dataset
-                    folder_name = Path(record.file_path).parent.name
-                    
-                    if folder_name and series.lower().replace('ё', 'е') == folder_name.lower().replace('ё', 'е'):
-                        # Серия из metadata совпадает с названием папки → это потенциально folder_dataset!
-                        # НО: СНАЧАЛА проверить blacklist - папка не может быть series если она содержит blacklist слова
-                        has_blacklist = self._contains_blacklist_word(series)
-                        
-                        if has_blacklist:
-                            # Папка содержит слово из blacklist → это коллекция/жанр, не series!
-                            # Примеры: "Боевая фантастика. Циклы", "Антология" и т.д.
-                            # Очищаем series и не присвоиваем folder_dataset
-                            record.proposed_series = ""
-                            record.series_source = ""
-                        else:
-                            # Папка ЧИСТАЯ (без blacklist слов) → это folder_dataset!
-                            record.series_source = "folder_dataset"
-                    else:
-                        # Серия из файловой метапданных → metadata
-                        record.series_source = "metadata"
+                    # 🔑 Папка уже была проверена выше. Если мы здесь → это просто metadata series (не совпадает с папкой)
+                    record.series_source = "metadata"
         
         # 🔑 НОВОЕ: Папочный консенсус
         # Если папка содержит файлы с series_source = "folder_dataset",
