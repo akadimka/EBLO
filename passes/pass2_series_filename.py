@@ -267,6 +267,37 @@ class Pass2SeriesFilename:
         4. Fallback на metadata только если паттерны не дали
         """
         for record in records:
+            # 🔑 НОВОЕ: Железное правило иерархии папок (без проверок)
+            # Папка прямо под автором = серия
+            # Папка прямо под серией = подсерия
+            author_name = record.proposed_author or record.metadata_authors
+            if author_name:
+                author_normalized = author_name.lower().replace('ё', 'е')
+                path_parts = Path(record.file_path).parts  # e.g., (TopFolder, Author, Series, File.fb2)
+                
+                for i, part in enumerate(path_parts):
+                    part_normalized = part.lower().replace('ё', 'е')
+                    
+                    # Ищем папку автора (простое совпадение)
+                    if author_normalized in part_normalized or part_normalized in author_normalized:
+                        # Найдена папка автора на позиции i
+                        # Следующая папка (i+1) это серия (если это не файл)
+                        if i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
+                            series_folder = path_parts[i + 1]
+                            if not series_folder.endswith('.fb2'):
+                                # Это серия - берём БЕЗ ПРОВЕРОК
+                                record.proposed_series = series_folder
+                                record.series_source = "folder_hierarchy"
+                                
+                                # Проверяем: есть ли подсерия (i+2)?
+                                if i + 2 < len(path_parts) - 1:
+                                    subseries_folder = path_parts[i + 2]
+                                    if not subseries_folder.endswith('.fb2'):
+                                        # Это подсерия
+                                        record.proposed_subseries = subseries_folder
+                                
+                                break  # Нашли серию - выходим из поиска папки автора
+            
             # Special case: depth==4 without series subfolder
             # Pass 1 wrongly sets folder_dataset for depth==4, allowing Pass 2 to override it
             file_depth = len(Path(record.file_path).parts)
@@ -277,6 +308,9 @@ class Pass2SeriesFilename:
             
             if record.series_source == "folder_dataset" and not is_depth4_without_real_series:
                 continue  # Папка дала series (кроме depth==4 ошибки)
+            
+            if record.series_source == "folder_hierarchy":
+                continue  # Иерархия папок определила серию - готово!
             
             if record.proposed_series and not is_depth4_without_real_series:
                 continue  # Серия уже установлена (кроме depth==4 ошибки)
