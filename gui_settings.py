@@ -10,15 +10,18 @@ try:
     importlib.reload(settings_manager)
     from settings_manager import SettingsManager
     from window_manager import get_window_manager
+    from window_persistence import setup_window_persistence
 except Exception:
     try:
         # Fallback: Относительный импорт
         from .settings_manager import SettingsManager
         from .window_manager import get_window_manager
+        from .window_persistence import setup_window_persistence
     except Exception:
         # Last resort: Абсолютный импорт
         from fb2parser.settings_manager import SettingsManager
         from fb2parser.window_manager import get_window_manager
+        from fb2parser.window_persistence import setup_window_persistence
 
 
 class SettingsWindow(tk.Toplevel):
@@ -27,14 +30,10 @@ class SettingsWindow(tk.Toplevel):
         self.title('Настройки')
         self.settings_manager = settings_manager
         self.master_window = master
-
-        # Восстановление размеров окна из настроек
-        geometry = self.settings_manager.get_window_geometry('settings')
-        if geometry:
-            self.geometry(geometry)
-        else:
-            self.geometry('600x400')
         self.result = None
+
+        # Настройка сохранения размера и позиции окна
+        setup_window_persistence(self, 'settings', self.settings_manager, '600x400+250+200')
 
         # Управление окном через менеджер
         window_manager = get_window_manager()
@@ -416,9 +415,11 @@ class SettingsWindow(tk.Toplevel):
     def _on_window_closing(self):
         """Callback when window is being closed by manager."""
         try:
-            self.settings_manager.set_window_geometry('settings', self.geometry())
-        except tk.TclError:
-            pass
+            from window_persistence import save_window_geometry
+        except ImportError:
+            from .window_persistence import save_window_geometry
+        
+        save_window_geometry(self, 'settings', self.settings_manager)
 
     def destroy(self):
         # Save window geometry

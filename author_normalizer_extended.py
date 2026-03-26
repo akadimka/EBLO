@@ -46,7 +46,22 @@ class BookRecord:
     metadata_series: str = ""   # Оригинальная серия из FB2 XML (неизменяемое!)
     proposed_series: str = ""   # Предложенная серия (эволюционирует через PASS)
     series_source: str = ""     # Источник серии: "folder_dataset", "filename", "metadata", "consensus"
+    metadata_genre: str = ""    # Жанры из <genre> тегов (через запятую)
     file_path_normalized: str = ""  # Опционально: нормализованный путь
+    
+    def to_tuple(self):
+        """Convert record to tuple for GUI table display."""
+        return (
+            self.file_path,
+            self.metadata_authors,
+            self.proposed_author,
+            self.author_source,
+            self.metadata_series,
+            self.proposed_series,
+            self.series_source,
+            self.file_title,
+            self.metadata_genre
+        )
 
 
 class AuthorNormalizer:

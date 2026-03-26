@@ -1,11 +1,22 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+try:
+    from .window_persistence import setup_window_persistence
+except ImportError:
+    from window_persistence import setup_window_persistence
+
 class BrokenFilesWindow:
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings_manager=None):
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
         self.window.title("Битые файлы")
-        self.window.geometry("1000x600")
+        self.settings_manager = settings_manager
+        
+        # Настройка сохранения размера и позиции окна
+        if settings_manager:
+            setup_window_persistence(self.window, 'broken_files', settings_manager, '1000x600+300+250')
+        else:
+            self.window.geometry("1000x600")
         
         # Переменная для счетчика
         self.scan_status = tk.StringVar()

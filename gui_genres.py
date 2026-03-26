@@ -6,9 +6,11 @@ from tkinter import ttk, messagebox
 try:
     from .genres_manager import GenresManager
     from .window_manager import get_window_manager
+    from .window_persistence import setup_window_persistence
 except ImportError:
     from genres_manager import GenresManager
     from window_manager import get_window_manager
+    from window_persistence import setup_window_persistence
 
 class GenresManagerWindow(tk.Toplevel):
     def __init__(self, master, genres_manager, update_callback=None):
@@ -17,17 +19,15 @@ class GenresManagerWindow(tk.Toplevel):
         self.genres_manager = genres_manager
         self.master_window = master
         
-        # Восстановление размеров окна из настроек
-        if hasattr(master, 'settings'):
-            geometry = master.settings.get_window_geometry('genres_manager')
-            if geometry:
-                self.geometry(geometry)
-            else:
-                self.geometry('700x500')
-        else:
-            self.geometry('700x500')
         self.update_callback = update_callback
         self.logger = getattr(master, 'logger', None)
+        
+        # Настройка сохранения размера и позиции окна
+        settings = getattr(master, 'settings', None)
+        if settings:
+            setup_window_persistence(self, 'genres_manager', settings, '700x500+200+150')
+        else:
+            self.geometry('700x500')
         
         # Управление окном через менеджер
         window_manager = get_window_manager()
@@ -311,12 +311,21 @@ class GenresManagerWindow(tk.Toplevel):
 
     def _prompt(self, text, initial=''):
         # Простое окно ввода (используется для добавления и переименования жанра)
+        try:
+            from window_persistence import setup_window_persistence
+        except ImportError:
+            from .window_persistence import setup_window_persistence
+        
         win = tk.Toplevel(self)
         win.title(text)
         win.grab_set()
         win.transient(self)  # Сделать окно_transient
         win.focus_set()  # Установить фокус на окно
         win.resizable(False, False)  # Запретить изменение размера
+        
+        # Настройка сохранения позиции окна
+        if hasattr(self.master_window, 'settings'):
+            setup_window_persistence(win, 'genre_prompt', self.master_window.settings, '300x100+300+300')
         tk.Label(win, text=text).pack(padx=10, pady=5)
         entry = tk.Entry(win)
         entry.insert(0, initial)
@@ -460,6 +469,15 @@ class GenresManagerWindow(tk.Toplevel):
     def _on_window_closing(self):
         """Callback when window is being closed by manager."""
         self._save_state()
+        # Also save window geometry when closing
+        try:
+            from window_persistence import save_window_geometry
+        except ImportError:
+            from .window_persistence import save_window_geometry
+        
+        settings = getattr(self.master_window, 'settings', None)
+        if settings:
+            save_window_geometry(self, 'genres_manager', settings)
 
     def _save_state(self):
         """Save window state."""

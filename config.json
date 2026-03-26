@@ -1,14 +1,12 @@
 {
   "library_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/EBook Library",
   "last_scan_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
-  "test_window_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
-  "folder_parse_limit": 3,
   "genre_association_method": "context_menu",
   "window_sizes": {
     "settings": "792x511+-2164+-2",
     "main": {
-      "geometry": "1066x631+174+134",
+      "geometry": "1066x631-2327+154",
       "state": "normal"
     },
     "genres_manager": "944x406+221+220",
@@ -23,9 +21,23 @@
     "test_window": {
       "geometry": "2279x889+-2949+-104",
       "state": "normal"
+    },
+    "test_main": {
+      "geometry": "797x598+0+48",
+      "state": "normal"
+    },
+    "test_main_root": {
+      "geometry": "600x400-2288+169",
+      "state": "normal"
+    },
+    "normalizer": {
+      "geometry": "1400x700-2704+39",
+      "state": "normal"
     }
   },
   "generate_csv": true,
+  "test_window_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
+  "folder_parse_limit": 3,
   "genre_tree_state": {
     "expanded_nodes": [
       "Фантастика"
@@ -74,7 +86,8 @@
     "СИ",
     "Эксмо",
     "Короли французского триллера",
-    "1918 год"
+    "1918 год",
+    "Acting president"
   ],
   "collection_keywords": [
     "сборник",
@@ -296,7 +309,6 @@
       "pattern": "Author - Series. Series (service_words)",
       "example": "Садов Сергей - Цена победы. Горе победителям (Дилогии).fb2"
     }
-    
   ],
   "series_patterns_in_metadata": [
     {

@@ -1,11 +1,22 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
+try:
+    from .window_persistence import setup_window_persistence
+except ImportError:
+    from window_persistence import setup_window_persistence
+
 class DuplicateFinderWindow:
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings_manager=None):
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
         self.window.title("Поиск дубликатов")
-        self.window.geometry("1400x900")
+        self.settings_manager = settings_manager
+        
+        # Настройка сохранения размера и позиции окна
+        if settings_manager:
+            setup_window_persistence(self.window, 'duplicate_finder', settings_manager, '1400x900+350+300')
+        else:
+            self.window.geometry("1400x900")
         
         # Переменные
         self.library_path = tk.StringVar()

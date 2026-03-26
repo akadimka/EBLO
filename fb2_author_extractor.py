@@ -1375,6 +1375,44 @@ class FB2AuthorExtractor:
         except Exception:
             return None
     
+    def _extract_genres_from_fb2(self, fb2_path: Path) -> str:
+        """Извлечь жанры из FB2 файла.
+        
+        Ищет теги <genre> в <title-info> и объединяет их через запятую.
+        
+        Args:
+            fb2_path: Path к FB2 файлу
+            
+        Returns:
+            Жанры через запятую или пустая строка
+        """
+        try:
+            # Использовать функцию автоматического определения кодировки
+            content = self._detect_correct_encoding(fb2_path)
+            
+            if not content:
+                return ""
+            
+            # Найти <title-info> блок
+            title_info_match = re.search(r'<(?:fb:)?title-info>.*?</(?:fb:)?title-info>', content, re.DOTALL)
+            if not title_info_match:
+                return ""
+            
+            title_info_content = title_info_match.group(0)
+            
+            # Найти все <genre> теги
+            genres = re.findall(r'<genre[^>]*>(.*?)</genre>', title_info_content, re.DOTALL)
+            
+            if genres:
+                # Очистить и объединить жанры
+                genres = [g.strip() for g in genres if g.strip()]
+                return ", ".join(genres)
+            
+            return ""
+            
+        except Exception:
+            return ""
+    
     def _expand_surnames_from_metadata(self, surname_string: str, metadata_author: str) -> str:
         """
         Расширить фамилии (например "Харников, Дынин") полными именами из метаданных.

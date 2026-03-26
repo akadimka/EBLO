@@ -18,8 +18,23 @@ class BookRecord:
     metadata_series: str        # Original series from FB2 XML (immutable)
     proposed_series: str        # Final series after all PASS
     series_source: str          # Source of series
+    metadata_genre: str = ""    # Genres from <genre> tags (comma-separated)
     extracted_series_candidate: str = ""  # Series found in filename (even if blocked by BL)
     needs_filename_fallback: bool = False  # True if folder parse found nothing, need filename PASS 2
+    
+    def to_tuple(self):
+        """Convert record to tuple for GUI table display."""
+        return (
+            self.file_path,
+            self.metadata_authors,
+            self.proposed_author,
+            self.author_source,
+            self.metadata_series,
+            self.proposed_series,
+            self.series_source,
+            self.file_title,
+            self.metadata_genre
+        )
 
 
 class Pass1ReadFiles:
@@ -66,6 +81,7 @@ class Pass1ReadFiles:
                 title = self.extractor._extract_title_from_fb2(fb2_file)
                 metadata_authors = self.extractor._extract_all_authors_from_metadata(fb2_file)
                 metadata_series = self.extractor._extract_series_from_metadata(fb2_file)
+                metadata_genre = self.extractor._extract_genres_from_fb2(fb2_file)
                 
                 # Determine author from folder hierarchy cache
                 author, author_source = self._get_author_for_file(fb2_file)
@@ -83,6 +99,7 @@ class Pass1ReadFiles:
                     metadata_series=metadata_series or "",
                     proposed_series="",
                     series_source="",
+                    metadata_genre=metadata_genre or "",
                     needs_filename_fallback=(author == "")  # If no folder author found, need filename PASS 2
                 )
                 

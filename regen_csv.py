@@ -68,6 +68,40 @@ class RegenCSVService:
         self.project_dir = Path(__file__).parent
         self.output_csv = self.project_dir / "regen.csv"
     
+    def generate_csv(self, folder_path: str, output_csv_path=None, progress_callback=None):
+        """
+        Generate CSV from FB2 files in folder.
+        Wrapper for regenerate() that returns records for GUI compatibility.
+        
+        Args:
+            folder_path: Path to folder with FB2 files
+            output_csv_path: Optional path to save CSV file
+            progress_callback: Optional callback for progress updates (not used here)
+            
+        Returns:
+            List of BookRecord objects
+        """
+        # Override work directory with the provided folder path
+        self.work_dir = Path(folder_path)
+        
+        # Override output CSV path if provided
+        if output_csv_path:
+            self.output_csv = Path(output_csv_path)
+        
+        try:
+            # Run regeneration
+            success = self.regenerate()
+            
+            if success:
+                return self.records
+            else:
+                return []
+        except Exception as e:
+            self.logger.log(f"[ERROR] generate_csv failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+    
     def _normalize_name_for_comparison(self, name: str) -> str:
         """Нормализировать имя для сравнения (lowercase, убрать лишние пробелы и пунктуацию).
         
@@ -395,7 +429,8 @@ class RegenCSVService:
                 'metadata_series',
                 'proposed_series',
                 'series_source',
-                'file_title'
+                'file_title',
+                'metadata_genre'
             ])
             
             # Write data
@@ -408,7 +443,8 @@ class RegenCSVService:
                     record.metadata_series,
                     record.proposed_series,
                     record.series_source,
-                    record.file_title
+                    record.file_title,
+                    record.metadata_genre
                 ])
 
 

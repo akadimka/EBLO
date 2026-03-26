@@ -116,6 +116,10 @@ class MainWindow(tk.Tk):
         
         # Загружаем структуру папок после создания UI
         self.after(100, self._populate_folder_tree)
+        
+        # Восстановление геометрии окна ПОСЛЕ отображения (более надежный способ)
+        self.after(50, lambda: restore_window_geometry(self, 'main', self.settings, 
+                                                       default_geometry='1000x700+100+50'))
 
     def _create_menu(self):
         """Создание главного меню."""
@@ -318,46 +322,17 @@ class MainWindow(tk.Tk):
 
     def _show_log_window(self):
         """Показать окно логов."""
+        from window_persistence import setup_window_persistence
+        
         win = tk.Toplevel(self)
         win.title('Лог')
         win.withdraw()  # Скрыть окно изначально
         
-        # Установить дефолтный размер
-        win.geometry('700x400')
-        
-        # Загрузить сохраненную геометрию и состояние
-        geometry = self.settings.get_window_geometry('log')
-        
-        # Проверить сохраненное состояние (может быть dict с geometry и state)
-        window_state = 'normal'
-        if geometry and isinstance(geometry, dict):
-            # Если это словарь (новый формат)
-            geometry_str = geometry.get('geometry', '700x400')
-            window_state = geometry.get('state', 'normal')
-        elif geometry and isinstance(geometry, str):
-            # Если это строка (старый формат)
-            geometry_str = geometry
-        else:
-            geometry_str = None
-        
-        # Применить геометрию
-        if geometry_str and 'x' in geometry_str.lower() and '+' in geometry_str:
-            try:
-                win.geometry(geometry_str)
-            except Exception:
-                pass
+        # Настройка сохранения размера и позиции окна
+        setup_window_persistence(win, 'log', self.settings, '700x400+100+100')
         
         # Показать окно
         win.deiconify()
-        
-        # Применить состояние (normal/zoomed/maximized)
-        try:
-            if window_state in ['zoomed', 'maximized']:
-                win.state('zoomed')
-            else:
-                win.state('normal')
-        except Exception:
-            pass
             
         frame = ttk.Frame(win)
         frame.pack(fill='both', expand=True, padx=10, pady=10)
@@ -375,21 +350,6 @@ class MainWindow(tk.Tk):
         ttk.Button(btns, text='Очистить', command=lambda: self._clear_log_and_update(log_list)).pack(side='left', padx=10)
         ttk.Button(btns, text='Копировать выделенное', command=lambda: self._copy_selected_logs(log_list)).pack(side='left', padx=10)
         ttk.Button(btns, text='Закрыть', command=win.destroy).pack(side='left')
-        
-        def on_closing():
-            try:
-                geometry = win.geometry()
-                state = win.state()
-                window_data = {
-                    'geometry': geometry,
-                    'state': state
-                }
-                self.settings.set_window_geometry('log', window_data)
-            except Exception:
-                pass
-            win.destroy()
-            
-        win.protocol("WM_DELETE_WINDOW", on_closing)
 
     def _clear_log_and_update(self, log_list):
         """Очистить лог."""
@@ -501,15 +461,28 @@ class MainWindow(tk.Tk):
             except ImportError:
                 from fb2parser.gui_normalizer import CSVNormalizerApp
         
+        from window_persistence import setup_window_persistence, save_window_geometry
+        
         # Получаем текущий путь из главного окна
         current_folder = self.selected_folder.get()
         
         # Создаем новое окно для нормализации
         normalizer_root = tk.Toplevel(self)
+        
+        # Инициализируем app (геометрия будет восстановлена автоматически)
         app = CSVNormalizerApp(normalizer_root, current_folder, self.logger, self.settings)
+        
+        # Настройка сохранения размера и позиции окна
+        setup_window_persistence(normalizer_root, 'normalizer', self.settings, '1400x700+150+100')
+        
         self.logger.log('Окно нормализации открыто')
         window_manager = get_window_manager()
-        window_manager.open_child_window(self, normalizer_root)
+        
+        # Передаем callback для сохранения позиции при закрытии
+        def on_normalizer_close():
+            save_window_geometry(normalizer_root, 'normalizer', self.settings)
+        
+        window_manager.open_child_window(self, normalizer_root, on_normalizer_close)
 
     def _on_synchronization_action(self):
         """Обработчик действия 'Синхронизация'."""
@@ -571,11 +544,15 @@ class MainWindow(tk.Tk):
             return
         
         # Создать окно выбора
+        from window_persistence import setup_window_persistence
+        
         dialog = tk.Toplevel(self)
         dialog.title('Выбор жанра')
-        dialog.geometry('400x300')
         dialog.transient(self)
         dialog.grab_set()
+        
+        # Настройка сохранения размера и позиции окна
+        setup_window_persistence(dialog, 'genre_select', self.settings, '400x300+200+200')
         
         ttk.Label(dialog, text=f'Выберите жанр для:\n{path_text}').pack(padx=10, pady=10)
         
@@ -638,12 +615,16 @@ class MainWindow(tk.Tk):
             # Создать окно прогресса
             # ВАЖНО: Создаем как child от main window (self), НЕ от dialog!
             # Так оно останется видимым когда мы скроем dialog
+            from window_persistence import setup_window_persistence
+            
             progress_window = tk.Toplevel(self)
             progress_window.title('Присвоение жанра')
-            progress_window.geometry('450x120')
             # transient от main window, чтобы было окно на переднем плане
             progress_window.transient(self)
             progress_window.resizable(False, False)
+            
+            # Настройка сохранения размера и позиции окна
+            setup_window_persistence(progress_window, 'assign_genre_progress', self.settings, '450x120+250+250')
             
             # Отключить закрытие окна во время обработки
             def on_closing():
@@ -674,14 +655,6 @@ class MainWindow(tk.Tk):
                 font=('Arial', 8)
             )
             counter_label.pack(padx=10, pady=(2, 8))
-            
-            # Центрировать окно на экране
-            progress_window.update_idletasks()
-            width = progress_window.winfo_width()
-            height = progress_window.winfo_height()
-            x = (progress_window.winfo_screenwidth() // 2) - (width // 2)
-            y = (progress_window.winfo_screenheight() // 2) - (height // 2)
-            progress_window.geometry(f'{width}x{height}+{x}+{y}')
             
             # Показать окно прогресса
             progress_window.deiconify()

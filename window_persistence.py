@@ -21,6 +21,11 @@ def save_window_geometry(window: tk.Tk, window_name: str, settings_manager):
         # Get geometry: "WxH+X+Y"
         geometry = window.geometry()
         
+        # Clean up geometry string - fix malformed coordinates like "+-1953" -> "-1953"
+        import re
+        # Replace "+-" with "-" to fix malformed negative coordinates
+        geometry = re.sub(r'\+-', '-', geometry)
+        
         # Get state (normal, maximized, iconified, etc.)
         state = window.state()
         
@@ -64,17 +69,51 @@ def restore_window_geometry(window: tk.Tk, window_name: str, settings_manager,
     try:
         window_data = settings_manager.get_window_geometry(window_name)
         
+        # Helper function to validate and fix geometry
+        def validate_geometry(geom_str):
+            """Validate geometry string format and basic sanity checks."""
+            try:
+                import re
+                # Clean up malformed coordinates (+-1953 -> -1953)
+                geom_str = re.sub(r'\+-', '-', geom_str)
+                
+                match = re.match(r'(\d+)x(\d+)([\+\-])(\d+)([\+\-])(\d+)', geom_str)
+                if not match:
+                    return None
+                
+                width = int(match.group(1))
+                height = int(match.group(2))
+                
+                # Only validate minimum size, don't touch coordinates
+                # (negative coords are valid for multi-monitor systems)
+                if width < 200 or height < 100:
+                    return None
+                
+                # Return geometry as-is (after cleanup)
+                return geom_str
+            except Exception as e:
+                return None
+        
         if window_data is None:
             # No saved geometry, use defaults
             if default_geometry:
-                window.geometry(default_geometry)
+                valid_geom = validate_geometry(default_geometry)
+                if valid_geom:
+                    window.geometry(valid_geom)
             window.state(default_state)
             return False
         
         # Handle both old format (just string) and new format (dict)
         if isinstance(window_data, str):
             # Old format: just geometry string
-            window.geometry(window_data)
+            valid_geom = validate_geometry(window_data)
+            if valid_geom:
+                window.geometry(valid_geom)
+            else:
+                if default_geometry:
+                    valid_default = validate_geometry(default_geometry)
+                    if valid_default:
+                        window.geometry(valid_default)
             window.state(default_state)
             return True
         
@@ -94,10 +133,12 @@ def restore_window_geometry(window: tk.Tk, window_name: str, settings_manager,
             if state in ['zoomed', 'iconic']:
                 # For special states, set geometry first, then apply state
                 if geometry:
-                    try:
-                        window.geometry(geometry)
-                    except tk.TclError:
-                        pass
+                    valid_geom = validate_geometry(geometry)
+                    if valid_geom:
+                        try:
+                            window.geometry(valid_geom)
+                        except tk.TclError:
+                            pass
                 
                 # Then apply state - this will maximize/zoom the window
                 try:
@@ -112,14 +153,33 @@ def restore_window_geometry(window: tk.Tk, window_name: str, settings_manager,
             else:
                 # For normal state, set geometry
                 if geometry:
-                    try:
-                        window.geometry(geometry)
-                    except tk.TclError:
-                        if default_geometry:
+                    valid_geom = validate_geometry(geometry)
+                    if valid_geom:
+                        try:
+                            window.geometry(valid_geom)
+                        except tk.TclError as e:
+                            if default_geometry:
+                                valid_default = validate_geometry(default_geometry)
+                                if valid_default:
+                                    try:
+                                        window.geometry(valid_default)
+                                    except:
+                                        pass
+                    elif default_geometry:
+                        valid_default = validate_geometry(default_geometry)
+                        if valid_default:
                             try:
-                                window.geometry(default_geometry)
+                                window.geometry(valid_default)
                             except:
                                 pass
+                
+                try:
+                    window.state(state)
+                except tk.TclError:
+                    try:
+                        window.state(default_state)
+                    except:
+                        pass
             
             return True
         
@@ -165,16 +225,24 @@ def setup_window_persistence(window: tk.Tk, window_name: str, settings_manager,
         default_geometry: Optional default geometry
     """
     
-    # Restore geometry on first map
-    def on_first_map(event=None):
+    
+    # Restore geometry using deferred callback to ensure window is ready
+    # This is more reliable than relying on <Map> event timing
+    def restore_deferred():
         restore_window_geometry(window, window_name, settings_manager, default_geometry)
+    
+    # Schedule restoration for next event loop iteration (after window initialization)
+    window.after(1, restore_deferred)
+    
+    # Also bind to <Map> event as backup (in case window is shown before after() callback)
+    def on_first_map(event=None):
         window.unbind('<Map>')
+        # Restore again on map in case it was shown before our after() callback
+        restore_window_geometry(window, window_name, settings_manager, default_geometry)
     
     window.bind('<Map>', on_first_map)
     
     # Save geometry on close
-    original_protocol = window.protocol('WM_DELETE_WINDOW', lambda: None)
-    
     def on_close():
         save_window_geometry(window, window_name, settings_manager)
         window.destroy()

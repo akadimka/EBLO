@@ -15,7 +15,6 @@ class CSVNormalizerApp:
     def __init__(self, root, folder_path=None, logger=None, settings_manager=None):
         self.root = root
         self.root.title("Нормализация")
-        self.root.geometry("1400x700")
         
         # Logger из главного окна (если передан)
         self.logger = logger
@@ -253,13 +252,31 @@ class CSVNormalizerApp:
         messagebox.showinfo("Информация", "Применение изменений")
         
     def show_broken_files(self):
-        messagebox.showinfo("Информация", "Показать битые файлы")
+        try:
+            from gui_broken_files import BrokenFilesWindow
+        except ImportError:
+            try:
+                from .gui_broken_files import BrokenFilesWindow
+            except ImportError:
+                from fb2parser.gui_broken_files import BrokenFilesWindow
+        
+        BrokenFilesWindow(self.root, self.settings_manager)
+        self._log("Окно 'Битые файлы' открыто")
         
     def show_templates(self):
         messagebox.showinfo("Информация", "Показать шаблоны")
         
     def show_duplicates(self):
-        messagebox.showinfo("Информация", "Показать дубликаты")
+        try:
+            from gui_duplicate_finder import DuplicateFinderWindow
+        except ImportError:
+            try:
+                from .gui_duplicate_finder import DuplicateFinderWindow
+            except ImportError:
+                from fb2parser.gui_duplicate_finder import DuplicateFinderWindow
+        
+        DuplicateFinderWindow(self.root, self.settings_manager)
+        self._log("Окно 'Поиск дубликатов' открыто")
         
     def delete_empty_folders(self):
         if messagebox.askyesno("Подтверждение", "Удалить пустые папки?"):
