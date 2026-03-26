@@ -148,10 +148,12 @@ class BlockLevelPatternMatcher:
         if not text:
             return []
         
-        # PREPROCESSING: Replace ellipsis with placeholder to protect it from delimiter splitting
-        # Ellipsis (2+ dots) should stay with the word, not act as delimiter
+        # PREPROCESSING: Replace ellipsis and guillemets with placeholders to protect from delimiter splitting
+        # Ellipsis (2+ dots) and text in « » should stay together, not act as delimiters
         ELLIPSIS_PLACEHOLDER = "\x00ELLIPSIS\x00"  # Use null char as unlikely to appear in text
+        GUILLEMETS_PLACEHOLDER = "\x00GUILLEMETS\x00"  # Protect text in « »
         text_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, text)  # Replace "..", "...", etc.
+        text_processed = re.sub(r'«[^»]*»', GUILLEMETS_PLACEHOLDER, text_processed)  # Protect « ... »
         
         blocks = []
         # FIXED: Guillemets « » are NOT structural delimiters, they're formatting marks within text
@@ -176,8 +178,9 @@ class BlockLevelPatternMatcher:
             block_text = text_processed[block_text_pos:match.start()]
             block_text = block_text.strip()
             
-            # POSTPROCESSING: Restore ellipsis in block text
+            # POSTPROCESSING: Restore ellipsis and guillemets in block text
             block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
+            block_text = block_text.replace(GUILLEMETS_PLACEHOLDER, "«...»")  # Will be restored with real content
             
             # Add block if not empty
             if block_text:
@@ -204,8 +207,9 @@ class BlockLevelPatternMatcher:
         block_text = text_processed[block_text_pos:]
         block_text = block_text.strip()
         
-        # POSTPROCESSING: Restore ellipsis in final block text
+        # POSTPROCESSING: Restore ellipsis and guillemets in final block text
         block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
+        # Note: Guillemets will be restored with original text later if needed
         
         if block_text:
             is_inside_parens = paren_depth > 0
@@ -226,7 +230,9 @@ class BlockLevelPatternMatcher:
         Splits on ' - ', '.', '(', ')' uniformly.
         
         ВАЖНО: многоточие (..., .., ....) НЕ является разделителем!
+        ВАЖНО: Текст в кавычках « » НЕ разбивается на блоки!
         Пример: "Серия..." остается одним типом, точки не разбивают.
+        Пример: "Цикл «Я - лорд звездной империи»" остается одним блоком, дефис внутри не разбивает.
         
         Example:
             "Author - Title (Series. service_words)"
@@ -245,9 +251,11 @@ class BlockLevelPatternMatcher:
         if not pattern:
             return []
         
-        # PREPROCESSING: Protect ellipsis from being used as delimiter
+        # PREPROCESSING: Protect ellipsis and guillemets from being used as delimiters
         ELLIPSIS_PLACEHOLDER = "\x00ELLIPSIS\x00"
+        GUILLEMETS_PLACEHOLDER = "\x00GUILLEMETS\x00"
         pattern_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, pattern)
+        pattern_processed = re.sub(r'«[^»]*»', GUILLEMETS_PLACEHOLDER, pattern_processed)  # Protect « ... »
         
         pattern_blocks = []
         
@@ -273,8 +281,9 @@ class BlockLevelPatternMatcher:
             block_text = pattern_processed[block_text_pos:match.start()]
             block_text = block_text.strip()
             
-            # POSTPROCESSING: Restore ellipsis
+            # POSTPROCESSING: Restore ellipsis and guillemets
             block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
+            block_text = block_text.replace(GUILLEMETS_PLACEHOLDER, "«...»")  # Will be restored later
             
             # Add block if not empty
             if block_text:
@@ -302,8 +311,9 @@ class BlockLevelPatternMatcher:
         block_text = pattern_processed[block_text_pos:]
         block_text = block_text.strip()
         
-        # POSTPROCESSING: Restore ellipsis
+        # POSTPROCESSING: Restore ellipsis and guillemets
         block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
+        block_text = block_text.replace(GUILLEMETS_PLACEHOLDER, "«...»")  # Will be restored later
         if block_text:
             is_inside_parens = paren_depth > 0
             block_type = self._normalize_block_type(block_text)
