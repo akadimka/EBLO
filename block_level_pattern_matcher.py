@@ -151,9 +151,17 @@ class BlockLevelPatternMatcher:
         # PREPROCESSING: Replace ellipsis and guillemets with placeholders to protect from delimiter splitting
         # Ellipsis (2+ dots) and text in « » should stay together, not act as delimiters
         ELLIPSIS_PLACEHOLDER = "\x00ELLIPSIS\x00"  # Use null char as unlikely to appear in text
-        GUILLEMETS_PLACEHOLDER = "\x00GUILLEMETS\x00"  # Protect text in « »
+        
+        # Store actual guillemets content for restoration
+        guillemets_storage = {}
+        def store_guillemets(match):
+            """Store guillemets content and return placeholder."""
+            placeholder = f"\x00GUILLEMETS_{len(guillemets_storage)}\x00"
+            guillemets_storage[placeholder] = match.group(0)  # Store original with « »
+            return placeholder
+        
         text_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, text)  # Replace "..", "...", etc.
-        text_processed = re.sub(r'«[^»]*»', GUILLEMETS_PLACEHOLDER, text_processed)  # Protect « ... »
+        text_processed = re.sub(r'«[^»]*»', store_guillemets, text_processed)  # Protect « ... »
         
         blocks = []
         # FIXED: Guillemets « » are NOT structural delimiters, they're formatting marks within text
@@ -180,7 +188,9 @@ class BlockLevelPatternMatcher:
             
             # POSTPROCESSING: Restore ellipsis and guillemets in block text
             block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
-            block_text = block_text.replace(GUILLEMETS_PLACEHOLDER, "«...»")  # Will be restored with real content
+            # Restore guillemets with actual content from storage
+            for placeholder, original in guillemets_storage.items():
+                block_text = block_text.replace(placeholder, original)
             
             # Add block if not empty
             if block_text:
@@ -209,7 +219,9 @@ class BlockLevelPatternMatcher:
         
         # POSTPROCESSING: Restore ellipsis and guillemets in final block text
         block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
-        # Note: Guillemets will be restored with original text later if needed
+        # Restore guillemets with actual content from storage
+        for placeholder, original in guillemets_storage.items():
+            block_text = block_text.replace(placeholder, original)
         
         if block_text:
             is_inside_parens = paren_depth > 0
@@ -253,9 +265,17 @@ class BlockLevelPatternMatcher:
         
         # PREPROCESSING: Protect ellipsis and guillemets from being used as delimiters
         ELLIPSIS_PLACEHOLDER = "\x00ELLIPSIS\x00"
-        GUILLEMETS_PLACEHOLDER = "\x00GUILLEMETS\x00"
+        
+        # Store actual guillemets content for restoration
+        guillemets_storage = {}
+        def store_guillemets(match):
+            """Store guillemets content and return placeholder."""
+            placeholder = f"\x00GUILLEMETS_{len(guillemets_storage)}\x00"
+            guillemets_storage[placeholder] = match.group(0)  # Store original with « »
+            return placeholder
+        
         pattern_processed = re.sub(r'\.{2,}', ELLIPSIS_PLACEHOLDER, pattern)
-        pattern_processed = re.sub(r'«[^»]*»', GUILLEMETS_PLACEHOLDER, pattern_processed)  # Protect « ... »
+        pattern_processed = re.sub(r'«[^»]*»', store_guillemets, pattern_processed)  # Protect « ... »
         
         pattern_blocks = []
         
@@ -283,7 +303,9 @@ class BlockLevelPatternMatcher:
             
             # POSTPROCESSING: Restore ellipsis and guillemets
             block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
-            block_text = block_text.replace(GUILLEMETS_PLACEHOLDER, "«...»")  # Will be restored later
+            # Restore guillemets with actual content from storage
+            for placeholder, original in guillemets_storage.items():
+                block_text = block_text.replace(placeholder, original)
             
             # Add block if not empty
             if block_text:
@@ -313,7 +335,9 @@ class BlockLevelPatternMatcher:
         
         # POSTPROCESSING: Restore ellipsis and guillemets
         block_text = block_text.replace(ELLIPSIS_PLACEHOLDER, "...")
-        block_text = block_text.replace(GUILLEMETS_PLACEHOLDER, "«...»")  # Will be restored later
+        # Restore guillemets with actual content from storage
+        for placeholder, original in guillemets_storage.items():
+            block_text = block_text.replace(placeholder, original)
         if block_text:
             is_inside_parens = paren_depth > 0
             block_type = self._normalize_block_type(block_text)
