@@ -279,27 +279,13 @@ class RegenCSVService:
 
                 elif len(file_path_parts) >= 4:
                     # No author folder found, but depth >= 4 (Old behavior: Coll / FB2 / Author / Series / File)
-                    # Try old logic as fallback
-
-                    main_series = self._extract_series_from_folder_name(file_path_parts[-3])
-                    sub_series = self._extract_series_from_folder_name(file_path_parts[-2])
+                    # Only use fallback if we're confident this is actually a series folder structure
+                    # Skip if we can't reliably identify series vs author folders
                     
-                    # Check if parts look fishy (contain known authors from config)
-                    # If main_series or sub_series look like author names, skip
-                    looks_like_author = (
-                        self._normalize_name_for_comparison(main_series) in 
-                        [self._normalize_name_for_comparison(name) for name in 
-                         (self.settings.get_list('male_names') + self.settings.get_list('female_names'))]
-                    )
-                    
-                    if not looks_like_author:
-                        # Combine with backslash: "MainSeries\SubSeries"
-                        series_combined = f"{main_series}\\{sub_series}"
-                        if series_combined:  # Only set source if we got something
-                            record.proposed_series = series_combined
-                            record.series_source = "folder_dataset"
-
-                    # else: skip when looks suspicious, will use metadata fallback via Pass 2
+                    # Don't use this fallback at all - let Pass 2 (filename extraction) and metadata
+                    # handle series extraction. Fallback was too unreliable for depth >= 4 without
+                    # knowing author folder position upfront (proposed_author not yet available in Pass 1)
+                    pass
                 
                 elif len(file_path_parts) == 3:
                     # Depth 3: Coll / Series / File
