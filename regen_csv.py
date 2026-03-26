@@ -267,12 +267,10 @@ class RegenCSVService:
                         pass
                     else:
                         # Hierarchical OR simple series: Author / Series [/ SubSeries ...] / File
-                        # ВАЖНО: Включаем НАЗВАНИE ПАПКИ АВТОРА как первый уровень иерархии!
-                        # Это обеспечивает правильную иерархию типа:
-                        # "Суворовы\1. Истребители" вместо просто "1. Истребители"
+                        # NOTE: Папка автора НЕ включается в иерархию серии
+                        # Серия содержит только папки после папки автора
                         
-                        author_folder_name = file_path_parts[author_folder_index]
-                        all_folders = [author_folder_name] + list(series_folders)
+                        all_folders = list(series_folders)
                         series_names = [self._extract_series_from_folder_name(folder) for folder in all_folders]
                         series_combined = "\\".join(series_names)
                         if series_combined:  # Only set source if we actually got a series

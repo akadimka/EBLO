@@ -332,12 +332,11 @@ class Pass2SeriesFilename:
                                 # "Суворовы (...)" + "1. Истребители" → "Суворовы\Истребители"
                                 author_folder = path_parts[i]
                                 
-                                # Очищаем оба названия и комбинируем
-                                author_series_name = self._extract_series_from_folder_name(author_folder)
+                                # Очищаем названия серии только (папка автора НЕ включается)
                                 subseries_name = self._extract_series_from_folder_name(series_folder)
                                 
-                                if author_series_name and subseries_name:
-                                    record.proposed_series = f"{author_series_name}\\{subseries_name}"
+                                if subseries_name:
+                                    record.proposed_series = subseries_name
                                 else:
                                     # Fallback на исходное поведение если extraction не сработал
                                     record.proposed_series = series_folder
