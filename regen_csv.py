@@ -76,7 +76,7 @@ class RegenCSVService:
         Args:
             folder_path: Path to folder with FB2 files
             output_csv_path: Optional path to save CSV file
-            progress_callback: Optional callback for progress updates (not used here)
+            progress_callback: Optional callback for progress updates (current, total, status)
             
         Returns:
             List of BookRecord objects
@@ -89,8 +89,8 @@ class RegenCSVService:
             self.output_csv = Path(output_csv_path)
         
         try:
-            # Run regeneration
-            success = self.regenerate()
+            # Run regeneration with progress callback
+            success = self.regenerate(progress_callback=progress_callback)
             
             if success:
                 return self.records
@@ -217,9 +217,12 @@ class RegenCSVService:
         
         return False
     
-    def regenerate(self) -> bool:
+    def regenerate(self, progress_callback=None) -> bool:
         """Execute full CSV regeneration pipeline.
         
+        Args:
+            progress_callback: Optional callback function(current, total, status) for progress updates
+            
         Returns:
             True if successful, False otherwise
         """
@@ -230,14 +233,20 @@ class RegenCSVService:
             print("="*80 + "\n")
             
             self.logger.log("=== Starting CSV regeneration ===")
+            if progress_callback:
+                progress_callback(0, 100, "Инициализация")
             
             # ===== PRECACHE =====
+            if progress_callback:
+                progress_callback(5, 100, "Кеширование папок авторов")
             precache = Precache(self.work_dir, self.settings, self.logger, 
                                self.folder_parse_limit)
             self.author_folder_cache = precache.execute()
             self.logger.log("[OK] Author folder hierarchy cached")
             
             # ===== PASS 1 =====
+            if progress_callback:
+                progress_callback(10, 100, "Pass 1: Чтение FB2 файлов")
             pass1 = Pass1ReadFiles(self.work_dir, self.author_folder_cache,
                                   self.extractor, self.logger, 
                                   self.folder_parse_limit)
@@ -250,6 +259,8 @@ class RegenCSVService:
             self.logger.log(f"[OK] PASS 1: Read {len(self.records)} files")
             
             # ===== PASS 2 =====
+            if progress_callback:
+                progress_callback(20, 100, "Pass 2: Извлечение авторов")
             pass2 = Pass2Filename(self.settings, self.logger, self.work_dir,
                                 male_names=precache.male_names,
                                 female_names=precache.female_names)
@@ -258,11 +269,15 @@ class RegenCSVService:
             self.logger.log("[OK] PASS 2: Authors extracted from filenames")
             
             # ===== PASS 2 Fallback =====
+            if progress_callback:
+                progress_callback(25, 100, "Pass 2 Fallback: Применение метаданных")
             pass2_fallback = Pass2Fallback(self.logger)
             pass2_fallback.execute(self.records)
             self.logger.log("[OK] PASS 2 Fallback: Metadata applied")
             
             # ===== SERIES EXTRACTION: From Folders (VARIANT B) =====
+            if progress_callback:
+                progress_callback(30, 100, "Извлечение серий")
             print("\n[SERIES] Extracting series from folder structure...")
             for record in self.records:
                 if record.proposed_series:
@@ -338,6 +353,8 @@ class RegenCSVService:
             self.logger.log("[OK] Series extracted from folder structure (Variant B)")
             
             # ===== SERIES PASS 2 =====
+            if progress_callback:
+                progress_callback(40, 100, "Извлечение серий из имен файлов")
             print("[SERIES] Extracting series from filenames...")
             pass2_series = Pass2SeriesFilename(self.logger,
                                               male_names=precache.male_names,
@@ -346,36 +363,50 @@ class RegenCSVService:
             self.logger.log("[OK] Series PASS 2: Extracted from filenames")
             
             # ===== SERIES PASS 3 =====
+            if progress_callback:
+                progress_callback(45, 100, "Нормализация серий")
             print("[SERIES] Normalizing series names...")
             pass3_series = Pass3SeriesNormalize(self.logger)
             pass3_series.execute(self.records)
             self.logger.log("[OK] Series PASS 3: Normalized series names")
             
             # ===== PASS 3 =====
+            if progress_callback:
+                progress_callback(55, 100, "Pass 3: Нормализация авторов")
             pass3 = Pass3Normalize(self.logger)
             pass3.execute(self.records)
             self.logger.log("[OK] PASS 3: Authors normalized")
             
             # ===== PASS 4 =====
+            if progress_callback:
+                progress_callback(65, 100, "Pass 4: Консенсус")
             pass4 = Pass4Consensus(self.logger)
             pass4.execute(self.records)
             self.logger.log("[OK] PASS 4: Consensus applied")
             
             # ===== PASS 5 =====
+            if progress_callback:
+                progress_callback(75, 100, "Pass 5: Преобразования")
             pass5 = Pass5Conversions(self.logger)
             pass5.execute(self.records)
             self.logger.log("[OK] PASS 5: Conversions re-applied")
             
             # ===== PASS 6 =====
+            if progress_callback:
+                progress_callback(85, 100, "Pass 6: Раскрытие аббревиатур")
             pass6 = Pass6Abbreviations(self.logger)
             pass6.execute(self.records)
             self.logger.log("[OK] PASS 6: Abbreviations expanded")
             
             # ===== Clear series for collections/compilations =====
+            if progress_callback:
+                progress_callback(90, 100, "Финальная обработка")
             self._clear_series_for_compilations()
             self.logger.log("[OK] Series cleared for compilations")
             
             # ===== Save CSV =====
+            if progress_callback:
+                progress_callback(95, 100, "Сохранение CSV")
             self._save_csv()
             self.logger.log(f"[OK] CSV saved to {self.output_csv}")
             
@@ -383,6 +414,9 @@ class RegenCSVService:
             print(f"   Output: {self.output_csv}")
             print(f"   Records: {len(self.records)}")
             print("="*80 + "\n")
+            
+            if progress_callback:
+                progress_callback(100, 100, "Завершено")
             
             return True
             

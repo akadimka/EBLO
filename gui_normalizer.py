@@ -4,11 +4,38 @@ import os
 import threading
 import sys
 from pathlib import Path
+from io import StringIO
 
 try:
     from regen_csv import RegenCSVService
 except ImportError:
     from .regen_csv import RegenCSVService
+
+
+class StdoutRedirector:
+    """Перехватывает вывод stdout и обновляет progress_var."""
+    def __init__(self, progress_var, root, original_stdout):
+        self.progress_var = progress_var
+        self.root = root
+        self.original_stdout = original_stdout
+        self.buffer = ""
+    
+    def write(self, message):
+        """Перехватить вывод и обновить progress_var."""
+        self.original_stdout.write(message)  # Также выводим в оригинальный stdout
+        
+        # Очищаем управляющие символы для отображения в progress
+        display_message = message.rstrip()
+        if display_message and not display_message.startswith("="):
+            # Обновляем progress_var (потокобезопасно)
+            try:
+                self.root.after(0, lambda: self.progress_var.set(display_message))
+            except:
+                pass
+    
+    def flush(self):
+        """Flush метод для совместимости."""
+        self.original_stdout.flush()
 
 
 class CSVNormalizerApp:
@@ -29,6 +56,9 @@ class CSVNormalizerApp:
             self.folder_path.set(folder_path)
         else:
             self.folder_path.set("E:/Users/dmitriy.murov/Downloads/Tribler/Downloads/Test1")
+        
+        # Переменная для прогресса
+        self.progress_var = tk.StringVar(value="Готово")
         
         # Сервис для генерации CSV
         self.csv_service = RegenCSVService()
@@ -54,6 +84,8 @@ class CSVNormalizerApp:
         # Основная таблица
         table_frame = ttk.Frame(self.root, padding="5")
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
         
         # Scrollbars
         v_scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL)
@@ -95,23 +127,14 @@ class CSVNormalizerApp:
             self.tree.heading(col, text=column_names[col])
             self.tree.column(col, width=120, minwidth=80)
         
-        # Размещение элементов
+        # Размещение элементов таблицы
         self.tree.grid(row=0, column=0, sticky='nsew')
         v_scrollbar.grid(row=0, column=1, sticky='ns')
         h_scrollbar.grid(row=1, column=0, sticky='ew')
         
-        table_frame.grid_rowconfigure(0, weight=1)
-        table_frame.grid_columnconfigure(0, weight=1)
-        
-        # Нижняя панель с кнопками
-        bottom_frame = ttk.Frame(self.root, padding="5")
-        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        
-        ttk.Label(bottom_frame, text="Готово").pack(side=tk.LEFT, padx=10)
-        
-        # Кнопки
-        buttons_frame = ttk.Frame(bottom_frame)
-        buttons_frame.pack(side=tk.LEFT, padx=20)
+        # Панель кнопок (самая нижняя)
+        buttons_frame = ttk.Frame(self.root, padding="5")
+        buttons_frame.pack(fill=tk.X, side=tk.BOTTOM)
         
         ttk.Button(buttons_frame, text="Создать CSV", command=self.create_csv).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Отмена", command=self.cancel).pack(side=tk.LEFT, padx=2)
@@ -122,13 +145,36 @@ class CSVNormalizerApp:
         ttk.Button(buttons_frame, text="Удалить пустые папки", command=self.delete_empty_folders).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Логи", command=self.show_logs).pack(side=tk.LEFT, padx=2)
         
+        # Панель прогресса (над кнопками)
+        progress_frame = ttk.Frame(self.root, padding="5")
+        progress_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        progress_frame.grid_columnconfigure(1, weight=1)
+        
+        ttk.Label(progress_frame, text="Статус:").grid(row=0, column=0, sticky='w', padx=5)
+        ttk.Label(progress_frame, textvariable=self.progress_var, foreground="blue").grid(row=0, column=1, sticky='ew', padx=5)
+        
     def _log(self, message: str):
-        """Логирование в окно логов и консоль."""
+        """Логирование в основной логер приложения, консоль и прогресс-строку."""
+        import datetime
+        
+        # Формируем сообщение с временем
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        formatted_message = f"[{timestamp}] {message}"
+        
+        # Логируем в основной логер приложения (если есть)
         if self.logger:
             self.logger.log(message)
-        # Временное логирование в консоль
-        print(f"[NORMALIZER] {message}", file=sys.stdout)
+        
+        # Логируем в консоль
+        print(f"[NORMALIZER] {formatted_message}", file=sys.stdout)
         sys.stdout.flush()
+        
+        # Обновляем прогресс-строку (потокобезопасно)
+        try:
+            self.root.after(0, lambda: self.progress_var.set(formatted_message))
+        except:
+            pass  # Игнорируем ошибки если окно закрыто
+        
         
     def browse_folder(self):
         folder = filedialog.askdirectory(initialdir=self.folder_path.get())
@@ -163,13 +209,17 @@ class CSVNormalizerApp:
     
     def _process_csv_thread(self, folder_path: str):
         """Обработка CSV в отдельном потоке."""
+        # Сохраняем оригинальный stdout
+        original_stdout = sys.stdout
+        
         try:
             self._log(f"Начало генерации CSV для папки: {folder_path}")
             
             def progress_callback(current, total, status):
                 """Обновить прогресс в UI."""
                 self._log(f"Прогресс: {current}/{total} - {status}")
-                self.root.after(0, lambda: self._update_progress(current, total, status))
+                # Обновить прогресс в интерфейсе
+                self.root.after(0, lambda: self.progress_var.set(f"{status} ({current}/{total})"))
             
             # Определяем путь сохранения CSV если нужно
             output_csv_path = None
@@ -182,11 +232,20 @@ class CSVNormalizerApp:
             
             # Генерировать CSV
             self._log("Запуск сервиса генерации CSV")
-            records = self.csv_service.generate_csv(
-                folder_path,
-                output_csv_path=output_csv_path,
-                progress_callback=progress_callback
-            )
+            
+            # Перенаправляем stdout для перехвата логов из всех модулей
+            redirector = StdoutRedirector(self.progress_var, self.root, original_stdout)
+            sys.stdout = redirector
+            
+            try:
+                records = self.csv_service.generate_csv(
+                    folder_path,
+                    output_csv_path=output_csv_path,
+                    progress_callback=progress_callback
+                )
+            finally:
+                # Восстанавливаем оригинальный stdout
+                sys.stdout = original_stdout
             
             self._log(f"CSV сгенерирован: {len(records)} записей")
             if output_csv_path:
@@ -204,6 +263,7 @@ class CSVNormalizerApp:
                 )
             )
             self._log(f"Обработка завершена успешно: {len(records)} файлов")
+            self.root.after(0, lambda: self.progress_var.set("Готово"))
         except Exception as e:
             self._log(f"ОШИБКА при обработке CSV: {str(e)}")
             self.root.after(
@@ -213,22 +273,11 @@ class CSVNormalizerApp:
                     f"Ошибка при обработке: {str(e)}"
                 )
             )
+            self.root.after(0, lambda: self.progress_var.set("ОШИБКА"))
         finally:
+            # Убедимся, что stdout восстановлен
+            sys.stdout = original_stdout
             self.processing = False
-    
-    def _update_progress(self, current: int, total: int, status: str):
-        """Обновить статус прогресса."""
-        # Обновить лейбл внизу
-        status_label = None
-        for child in self.root.winfo_children():
-            if isinstance(child, ttk.Frame):
-                for widget in child.winfo_children():
-                    if isinstance(widget, ttk.Label) and 'Готово' in widget.cget('text'):
-                        status_label = widget
-                        break
-        
-        if status_label:
-            status_label.config(text=f"{status} ({current}/{total})")
     
     def _fill_table(self, records):
         """Заполнить таблицу записями."""

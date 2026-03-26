@@ -6,13 +6,13 @@
   "window_sizes": {
     "settings": "792x511+-2164+-2",
     "main": {
-      "geometry": "1066x631-2327+154",
+      "geometry": "1066x631-2426+48",
       "state": "normal"
     },
     "genres_manager": "944x406+221+220",
     "log": {
       "geometry": "1536x889+47+59",
-      "state": "zoomed"
+      "state": "maximized"
     },
     "duplicates_window": {
       "geometry": "1000x652+64+38",
@@ -31,7 +31,7 @@
       "state": "normal"
     },
     "normalizer": {
-      "geometry": "1400x700-2704+39",
+      "geometry": "1400x700-2769-165",
       "state": "normal"
     }
   },
