@@ -294,18 +294,27 @@ class Pass2Filename:
                             return fb2_author  # Return FB2 version (better normalization)
                     
                     # Partial match - check if extracted is substring of any FB2 author
-                    # This handles cases like \"Демченко\" matching \"Демченко Антон\"
+                    # This handles cases like \"Демченко\" matching \"Демченко Антон\" (single-word expansion)
+                    # BUT: Do NOT allow reversed word order like "Гулевич Александр" → "Александр Гулевич"
                     for fb2_author in fb2_authors:
                         fb2_lower = fb2_author.lower()
+                        extracted_words_list = extracted_lower.split()
+                        fb2_words_list = fb2_lower.split()
                         
-                        # Check if extracted author is a word in FB2 author name
-                        extracted_words = set(extracted_lower.split())
-                        fb2_words = set(fb2_lower.split())
-                        
-                        # If all extracted words are in FB2 author, use the fuller FB2 version
-                        if extracted_words and extracted_words.issubset(fb2_words):
+                        # Only expand if:
+                        # 1. Extracted is SINGLE WORD (legitimate expansion like "Демченко" → "Демченко Антон")
+                        # 2. OR first words match AND same number of words (order preserved in both)
+                        if len(extracted_words_list) == 1:
+                            # Single word expansion - check if it's in FB2 author
+                            if extracted_lower in fb2_words_list:
+                                self._add_to_author_cache(extracted_author, fb2_author)
+                                return fb2_author  # Use fuller name from FB2
+                        elif (len(extracted_words_list) == len(fb2_words_list) and 
+                              extracted_words_list[0] == fb2_words_list[0]):
+                            # Multi-word with matching first word (likely normalized case variation)
                             self._add_to_author_cache(extracted_author, fb2_author)
-                            return fb2_author  # Use fuller name from FB2
+                            return fb2_author
+                        # Otherwise: different number of words OR reversed order → skip (don't match)
             
             except Exception as e:
                 self.logger.log(f"[PASS 2] WARNING: Failed to validate author against FB2: {e}")
