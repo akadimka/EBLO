@@ -27,10 +27,7 @@ try:
     importlib.reload(genre_assign)
     from genre_assign import assign_genre_threaded
 except Exception:
-    try:
-        from .genre_assign import assign_genre_threaded
-    except ImportError:
-        from fb2parser.genre_assign import assign_genre_threaded
+    from .genre_assign import assign_genre_threaded
 
 # Window persistence
 from window_persistence import save_window_geometry, restore_window_geometry
@@ -64,20 +61,12 @@ try:
     from synchronization import SynchronizationService
     
 except Exception as e:
-    try:
-        from .genres_manager import GenresManager
-        from .settings_manager import SettingsManager
-        from .logger import Logger
-        from .gui_genres import GenresManagerWindow
-        from .gui_normalizer import CSVNormalizerApp
-        from .synchronization import SynchronizationService
-    except ImportError:
-        from fb2parser.genres_manager import GenresManager
-        from fb2parser.settings_manager import SettingsManager
-        from fb2parser.logger import Logger
-        from fb2parser.gui_genres import GenresManagerWindow
-        from fb2parser.gui_normalizer import CSVNormalizerApp
-        from fb2parser.synchronization import SynchronizationService
+    from .genres_manager import GenresManager
+    from .settings_manager import SettingsManager
+    from .logger import Logger
+    from .gui_genres import GenresManagerWindow
+    from .gui_normalizer import CSVNormalizerApp
+    from .synchronization import SynchronizationService
 
 
 class MainWindow(tk.Tk):
@@ -454,10 +443,7 @@ class MainWindow(tk.Tk):
             importlib.reload(gui_settings)
             from gui_settings import SettingsWindow
         except Exception:
-            try:
-                from .gui_settings import SettingsWindow
-            except ImportError:
-                from fb2parser.gui_settings import SettingsWindow
+            from .gui_settings import SettingsWindow
         
         SettingsWindow(self, self.settings)
 
@@ -527,10 +513,7 @@ class MainWindow(tk.Tk):
             importlib.reload(gui_normalizer)
             from gui_normalizer import CSVNormalizerApp
         except Exception:
-            try:
-                from .gui_normalizer import CSVNormalizerApp
-            except ImportError:
-                from fb2parser.gui_normalizer import CSVNormalizerApp
+            from .gui_normalizer import CSVNormalizerApp
         
         from window_persistence import setup_window_persistence, save_window_geometry
         
