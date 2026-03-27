@@ -53,7 +53,9 @@ class SynchronizationService:
         # Get paths from config
         self.library_path = Path(self.settings.get_library_path())
         self.last_scan_path = Path(self.settings.get_last_scan_path())
-        self.db_path = self.library_path / '.library_cache.db'
+        
+        # Database is in project root, not in library
+        self.db_path = Path(__file__).parent / '.library_cache.db'
         
         # Statistics tracking
         self.stats = {
