@@ -25,15 +25,10 @@ try:
     from settings_manager import SettingsManager
     from logger import Logger
     from regen_csv import RegenCSVService
-except Exception:
-    try:
-        from .settings_manager import SettingsManager
-        from .logger import Logger
-        from .regen_csv import RegenCSVService
-    except ImportError:
-        from fb2parser.settings_manager import SettingsManager
-        from fb2parser.logger import Logger
-        from fb2parser.regen_csv import RegenCSVService
+except ImportError:
+    from .settings_manager import SettingsManager
+    from .logger import Logger
+    from .regen_csv import RegenCSVService
 
 
 class SynchronizationService:
