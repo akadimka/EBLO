@@ -33,6 +33,10 @@
     "normalizer": {
       "geometry": "1400x700-2769-165",
       "state": "normal"
+    },
+    "genre_select": {
+      "geometry": "400x300-1880+215",
+      "state": "normal"
     }
   },
   "generate_csv": true,

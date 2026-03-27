@@ -13,29 +13,27 @@ except ImportError:
     from window_persistence import setup_window_persistence
 
 class GenresManagerWindow(tk.Toplevel):
-    def __init__(self, master, genres_manager, update_callback=None):
-        super().__init__(master)
+    def __init__(self, root, genres_manager, logger=None, settings_manager=None, update_callback=None):
+        super().__init__(root)
         self.title('Управление жанрами')
         self.genres_manager = genres_manager
-        self.master_window = master
+        self.master_window = root.master() if hasattr(root, 'master') else root
         
         self.update_callback = update_callback
-        self.logger = getattr(master, 'logger', None)
+        self.logger = logger
+        self.settings = settings_manager
         
-        # Настройка сохранения размера и позиции окна
-        settings = getattr(master, 'settings', None)
-        if settings:
-            setup_window_persistence(self, 'genres_manager', settings, '700x500+200+150')
-        else:
-            self.geometry('700x500')
+        # Set default geometry if not using persistence
+        self.geometry('700x500')
         
-        # Управление окном через менеджер
-        window_manager = get_window_manager()
-        window_manager.open_child_window(
-            master,
-            self,
-            on_close=self._on_window_closing
-        )
+        # Управление окном через менеджер (только если передали master window)
+        if self.master_window != root:
+            window_manager = get_window_manager()
+            window_manager.open_child_window(
+                self.master_window,
+                self,
+                on_close=self._on_window_closing
+            )
 
         main_pane = ttk.PanedWindow(self, orient='horizontal')
         main_pane.pack(fill='both', expand=True)
@@ -69,8 +67,8 @@ class GenresManagerWindow(tk.Toplevel):
         
         # Восстановление состояния дерева жанров из настроек
         self._expanded_nodes = set()
-        if hasattr(master, 'settings'):
-            self._expanded_nodes = master.settings.get_genre_tree_state()
+        if self.settings:
+            self._expanded_nodes = self.settings.get_genre_tree_state()
             
         self._populate_tree()
 
@@ -483,28 +481,28 @@ class GenresManagerWindow(tk.Toplevel):
         """Save window state."""
         try:
             # Сохраняем состояние дерева жанров перед закрытием
-            if hasattr(self.master, 'settings'):
+            if self.settings:
                 expanded_nodes = self._get_expanded_nodes()
-                self.master.settings.set_genre_tree_state(expanded_nodes)
+                self.settings.set_genre_tree_state(expanded_nodes)
                 
             # Сохраняем размеры окна перед закрытием
-            if hasattr(self.master, 'settings'):
+            if self.settings:
                 geometry = self.geometry()
-                self.master.settings.set_window_geometry('genres_manager', geometry)
+                self.settings.set_window_geometry('genres_manager', geometry)
         except tk.TclError:
             pass
 
     def destroy(self):
         # Сохраняем состояние дерева жанров перед закрытием
-        if hasattr(self.master, 'settings'):
+        if self.settings:
             expanded_nodes = self._get_expanded_nodes()
-            self.master.settings.set_genre_tree_state(expanded_nodes)
+            self.settings.set_genre_tree_state(expanded_nodes)
             
         # Сохраняем размеры окна перед закрытием
-        if hasattr(self.master, 'settings'):
+        if self.settings:
             try:
                 geometry = self.geometry()
-                self.master.settings.set_window_geometry('genres_manager', geometry)
+                self.settings.set_window_geometry('genres_manager', geometry)
             except tk.TclError:
                 pass
         try:

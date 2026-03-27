@@ -380,7 +380,24 @@ class MainWindow(tk.Tk):
 
     def _open_genres_manager(self):
         """Открыть менеджер жанров."""
-        GenresManagerWindow(self, self.genres_manager, lambda: None)
+        from window_persistence import setup_window_persistence, save_window_geometry
+        
+        # Create window first
+        genres_window = tk.Toplevel(self)
+        
+        # Initialize manager (no persistence setup here yet)
+        GenresManagerWindow(genres_window, self.genres_manager, self.logger, self.settings, lambda: None)
+        
+        # Setup persistence AFTER window is created (like normalizer)
+        setup_window_persistence(genres_window, 'genres_manager', self.settings, '700x500+200+150')
+        
+        # Register close callback
+        window_manager = get_window_manager()
+        
+        def on_genres_close():
+            save_window_geometry(genres_window, 'genres_manager', self.settings)
+        
+        window_manager.open_child_window(self, genres_window, on_genres_close)
 
     def _open_settings(self):
         """Открыть окно настроек."""
