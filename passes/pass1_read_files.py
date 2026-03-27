@@ -2,6 +2,9 @@
 PASS 1: Read FB2 files and determine initial authors from folder hierarchy.
 """
 
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
@@ -59,58 +62,63 @@ class Pass1ReadFiles:
     
     def execute(self) -> List[BookRecord]:
         """Execute PASS 1: Read FB2 files and create BookRecords.
-        
+
+        Reads files in parallel (I/O-bound) using ThreadPoolExecutor.
+        Each file is read exactly once via _extract_all_metadata_at_once().
+
         Returns:
             List of BookRecord objects
         """
         print("[PASS 1] Reading FB2 files...")
-        
-        records = []
-        fb2_count = 0
-        
-        for fb2_file in self.work_dir.rglob('*.fb2'):
+
+        fb2_files = sorted(self.work_dir.rglob('*.fb2'))
+        total = len(fb2_files)
+        if total == 0:
+            self.logger.log("[PASS 1] No FB2 files found")
+            return []
+
+        print(f"[PASS 1] Found {total} files, processing in parallel...")
+
+        lock = threading.Lock()
+        processed_count = [0]
+
+        def process_file(fb2_file: Path):
             try:
-                fb2_count += 1
-                
-                # Show progress
-                if fb2_count <= 5 or fb2_count % 50 == 0:
-                    rel_path = fb2_file.relative_to(self.work_dir)
-                    print(f"  [{fb2_count:4d}] {rel_path}")
-                
-                # Extract metadata
-                title = self.extractor._extract_title_from_fb2(fb2_file)
-                metadata_authors = self.extractor._extract_all_authors_from_metadata(fb2_file)
-                metadata_series = self.extractor._extract_series_from_metadata(fb2_file)
-                metadata_genre = self.extractor._extract_genres_from_fb2(fb2_file)
-                
-                # Determine author from folder hierarchy cache
+                meta = self.extractor._extract_all_metadata_at_once(fb2_file)
                 author, author_source = self._get_author_for_file(fb2_file)
-                
-                # Relative path
                 rel_path = str(fb2_file.relative_to(self.work_dir))
-                
-                # Create BookRecord
+
                 record = BookRecord(
                     file_path=rel_path,
-                    file_title=title or "[no title]",
-                    metadata_authors=metadata_authors or "[unknown]",
+                    file_title=meta['title'] or "[no title]",
+                    metadata_authors=meta['authors'] or "[unknown]",
                     proposed_author=author or "",
                     author_source=author_source or "",
-                    metadata_series=metadata_series or "",
+                    metadata_series=meta['series'] or "",
                     proposed_series="",
                     series_source="",
-                    metadata_genre=metadata_genre or "",
-                    needs_filename_fallback=(author == "")  # If no folder author found, need filename PASS 2
+                    metadata_genre=meta['genre'] or "",
+                    needs_filename_fallback=(author == ""),
                 )
-                
-                records.append(record)
-                
-                if fb2_count % 100 == 0:
-                    self.logger.log(f"[PASS 1] Processed {fb2_count} files...")
-                    
+
+                with lock:
+                    processed_count[0] += 1
+                    count = processed_count[0]
+                if count <= 5 or count % 50 == 0:
+                    print(f"  [{count:4d}/{total}] {rel_path}")
+                if count % 100 == 0:
+                    self.logger.log(f"[PASS 1] Processed {count}/{total} files...")
+
+                return record
             except Exception as e:
                 self.logger.log(f"[PASS 1] Error reading {fb2_file}: {e}")
-        
+                return None
+
+        max_workers = min(8, total, os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(process_file, fb2_files))
+
+        records = [r for r in results if r is not None]
         self.logger.log(f"[PASS 1] Read {len(records)} files")
         return records
     

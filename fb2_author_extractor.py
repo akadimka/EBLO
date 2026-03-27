@@ -1166,6 +1166,70 @@ class FB2AuthorExtractor:
                     return True
         return False
     
+    def _extract_all_metadata_at_once(self, fb2_path: Path) -> dict:
+        """Извлечь title, authors, series, genre из FB2 за одно чтение файла.
+
+        Читает файл один раз, находит <title-info> один раз —
+        заменяет 4 отдельных вызова _extract_title/authors/series/genres в Pass 1.
+
+        Returns:
+            dict with keys: title (str), authors (str), series (str), genre (str)
+        """
+        result = {'title': '', 'authors': '', 'series': '', 'genre': ''}
+        try:
+            content = self._detect_correct_encoding(fb2_path)
+            if not content:
+                return result
+
+            title_info_match = re.search(
+                r'<(?:fb:)?title-info>.*?</(?:fb:)?title-info>', content, re.DOTALL
+            )
+            if not title_info_match:
+                return result
+
+            title_info = title_info_match.group(0)
+
+            # Title
+            title_m = re.search(r'<book-title>(.*?)</book-title>', title_info, re.DOTALL)
+            if title_m:
+                result['title'] = title_m.group(1).strip()
+
+            # All authors
+            authors = []
+            for author_m in re.finditer(
+                r'<(?:fb:)?author>(.*?)</(?:fb:)?author>', title_info, re.DOTALL
+            ):
+                author_text = author_m.group(0)
+                first_m = re.search(
+                    r'<(?:fb:)?first-name>(.*?)</(?:fb:)?first-name>', author_text
+                )
+                last_m = re.search(
+                    r'<(?:fb:)?last-name>(.*?)</(?:fb:)?last-name>', author_text
+                )
+                first = first_m.group(1) if first_m else ''
+                last = last_m.group(1) if last_m else ''
+                if first or last:
+                    name = f"{first} {last}".strip()
+                    if name and not self._is_blacklisted(name):
+                        authors.append(name)
+            result['authors'] = '; '.join(authors)
+
+            # Series
+            seq_m = re.search(
+                r'<sequence\s+[^>]*name=["\']([^"\']+)["\'][^>]*/?>', title_info, re.IGNORECASE
+            )
+            if seq_m:
+                result['series'] = seq_m.group(1).strip()
+
+            # Genre
+            genres = re.findall(r'<genre[^>]*>(.*?)</genre>', title_info, re.DOTALL)
+            if genres:
+                result['genre'] = ', '.join(g.strip() for g in genres if g.strip())
+
+        except Exception:
+            pass
+        return result
+
     def _detect_correct_encoding(self, fb2_path: Path) -> str:
         """Автоматически определить правильную кодировку FB2 файла.
         
@@ -1265,8 +1329,6 @@ class FB2AuthorExtractor:
         Возвращает строку со всеми авторами разделённых '; '
         """
         try:
-            import re
-            
             # Использовать функцию автоматического определения кодировки
             content = self._detect_correct_encoding(fb2_path)
             
@@ -2048,8 +2110,6 @@ class FB2AuthorExtractor:
             Название серии из атрибута 'name', или пустая строка
         """
         try:
-            import re
-            
             # Использовать функцию автоматического определения кодировки
             content = self._detect_correct_encoding(fb2_path)
             

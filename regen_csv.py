@@ -60,7 +60,11 @@ class RegenCSVService:
         
         # Records list
         self.records = []
-        
+
+        # Compiled blacklist patterns — populated once per regenerate() run,
+        # capturing any settings changes made before the run.
+        self._compiled_blacklist: list = []
+
         # Author folder cache from PRECACHE
         self.author_folder_cache = {}
         
@@ -141,6 +145,45 @@ class RegenCSVService:
         author_normalized = self._normalize_name_for_comparison(proposed_author)
         
         return folder_normalized == author_normalized
+
+    def _surnames_match_folder(self, proposed_author: str, folder_name: str) -> bool:
+        """Проверить, является ли папка папкой автора с учётом склонения и формы.
+
+        Обрабатывает:
+        - Точное совпадение после нормализации (быстрый путь)
+        - Форму множественного числа: "Живовы" совпадает с фамилией "Живов"
+          (folder word startswith surname)
+        - Несколько авторов: "Живов Геннадий, Живов Георгий" ↔ "Живовы Георгий и Геннадий"
+          (все уникальные фамилии должны присутствовать в папке)
+        """
+        if not proposed_author or not folder_name:
+            return False
+
+        # Быстрый путь: точное совпадение после нормализации
+        if self._normalize_name_for_comparison(folder_name) == \
+                self._normalize_name_for_comparison(proposed_author):
+            return True
+
+        # Извлечь уникальные фамилии из proposed_author
+        # Формат: "Фамилия Имя" или "Фамилия Имя, Фамилия Имя"
+        surnames = []
+        for author in re.split(r'[,;]', proposed_author):
+            words = author.strip().replace('ё', 'е').split()
+            if words:
+                surnames.append(words[0].lower())
+        unique_surnames = list(dict.fromkeys(surnames))  # дедупликация с сохранением порядка
+        if not unique_surnames:
+            return False
+
+        folder_words = [w for w in re.split(r'[\s,;\-]+', folder_name.lower().replace('ё', 'е')) if w]
+
+        # Каждая уникальная фамилия должна совпадать хотя бы с одним словом папки.
+        # startswith учитывает форму множественного числа (Живов → Живовы)
+        for surname in unique_surnames:
+            if not any(fw == surname or fw.startswith(surname) for fw in folder_words):
+                return False
+
+        return True
     
     def _extract_series_from_folder_name(self, folder_name: str) -> str:
         """
@@ -184,37 +227,42 @@ class RegenCSVService:
         # ШАГ 3: Если ничего не помогло, берём всё имя
         return folder_name.strip()
     
+    def _compile_blacklist_for_run(self) -> list:
+        """Скомпилировать blacklist regex-паттерны один раз на прогон.
+
+        Вызывается в начале regenerate() — захватывает актуальные настройки
+        на момент запуска, включая все изменения, сделанные пользователем.
+        """
+        blacklist = self.settings.get_list('filename_blacklist')
+        if not blacklist:
+            return []
+        compiled = []
+        for bl_word in blacklist:
+            bl_word_lower = bl_word.lower().strip()
+            if bl_word_lower:
+                pattern = r'(?:^|\W)' + re.escape(bl_word_lower) + r'(?:\W|$)'
+                compiled.append(re.compile(pattern))
+        return compiled
+
     def _contains_blacklist_word_regen(self, text: str) -> bool:
         """
         Проверить, содержит ли text слово(а) из blacklist (заимствовано от Pass2).
-        
-        Используется для фильтрации folder names - папка "Боевая фантастика. Циклы"
-        содержит слово "боевая фантастика" (жанр), поэтому НЕ может быть series.
-        
+
+        Использует pre-compiled паттерны из self._compiled_blacklist.
+        Паттерны компилируются один раз в начале regenerate(), а не на каждый вызов.
+
         Args:
             text: Проверяемый текст (название папки)
-            
+
         Returns:
             True если найдено хотя бы одно blacklist слово, False иначе
         """
-        blacklist = self.settings.get_list('filename_blacklist')
-        if not text or not blacklist:
+        if not text:
             return False
-        
         text_lower = text.lower()
-        
-        # Проходим по каждому слову в blacklist
-        for bl_word in blacklist:
-            bl_word_lower = bl_word.lower().strip()
-            if not bl_word_lower:
-                continue
-            
-            # Проверяем наличие как целого слова (word boundary check)
-            import re
-            pattern = r'(?:^|\W)' + re.escape(bl_word_lower) + r'(?:\W|$)'
-            if re.search(pattern, text_lower):
+        for pattern in self._compiled_blacklist:
+            if pattern.search(text_lower):
                 return True
-        
         return False
     
     def regenerate(self, progress_callback=None) -> bool:
@@ -227,11 +275,14 @@ class RegenCSVService:
             True if successful, False otherwise
         """
         try:
+            # Пункт 3: compile blacklist once per run with current settings
+            self._compiled_blacklist = self._compile_blacklist_for_run()
+
             print("\n" + "="*80)
             print("  CSV REGENERATION - 6-PASS SYSTEM (Modular)")
             print(f"  Work folder: {self.work_dir}\n")
             print("="*80 + "\n")
-            
+
             self.logger.log("=== Starting CSV regeneration ===")
             if progress_callback:
                 progress_callback(0, 100, "Инициализация")
@@ -279,24 +330,39 @@ class RegenCSVService:
             if progress_callback:
                 progress_callback(30, 100, "Извлечение серий")
             print("\n[SERIES] Extracting series from folder structure...")
+
+            # Пункт 5: cache normalized name lookups — avoids repeated re.sub() calls
+            #          for the same strings across thousands of records.
+            _norm_cache: dict = {}
+
+            def _norm(name: str) -> str:
+                if name not in _norm_cache:
+                    _norm_cache[name] = self._normalize_name_for_comparison(name)
+                return _norm_cache[name]
+
+            # Пункт 6: cache Path(...).parts per file_path to avoid constructing
+            #          a new Path object on each iteration.
+            _parts_cache: dict = {}
+
             for record in self.records:
                 if record.proposed_series:
                     continue  # Skip if series already set
-                
-                # Extract series from file path structure
-                file_path_parts = Path(record.file_path).parts
-                
+
+                # Пункт 6: use cached path parts
+                file_path_parts = _parts_cache.get(record.file_path)
+                if file_path_parts is None:
+                    file_path_parts = Path(record.file_path).parts
+                    _parts_cache[record.file_path] = file_path_parts
 
                 # Key Strategy: Find author folder in path and skip it
                 # Everything below author folder = series/subseries
                 author_folder_index = -1  # Not found by default
-                
+
                 if record.proposed_author:
-                    # Try to find which folder is the author folder
-                    # by comparing folder names with proposed_author
-                    # (Check regardless of author_source because author might be from filename extraction)
+                    # Поиск папки автора с учётом формы множественного числа фамилии
+                    # и нескольких авторов (Живов Геннадий, Живов Георгий ↔ Живовы Георгий и Геннадий)
                     for idx, part in enumerate(file_path_parts[:-1]):  # Exclude filename
-                        if self._is_author_folder(part, record.proposed_author):
+                        if self._surnames_match_folder(record.proposed_author, part):
                             author_folder_index = idx
                             break  # Found the author folder
                 

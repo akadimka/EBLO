@@ -27,6 +27,46 @@ import sys
 from pathlib import Path
 from typing import List
 
+
+def _author_matches_folder(proposed_author: str, folder_part: str) -> bool:
+    """Проверить, является ли folder_part папкой автора proposed_author.
+
+    Обрабатывает:
+    - Вхождение строки (быстрый путь)
+    - Форму множественного числа фамилии: "Живовы" ↔ "Живов" (startswith)
+    - Несколько авторов с союзом "и": "Живовы Георгий и Геннадий" ↔
+      "Живов Геннадий, Живов Георгий" (все уникальные фамилии есть в папке)
+    """
+    if not proposed_author or not folder_part:
+        return False
+
+    proposed_lower = proposed_author.lower().replace('ё', 'е')
+    folder_lower = folder_part.lower().replace('ё', 'е')
+
+    # Быстрый путь: вхождение строки
+    if proposed_lower in folder_lower or folder_lower in proposed_lower:
+        return True
+
+    # Извлечь уникальные фамилии (первое слово каждого автора после split по , ;)
+    surnames = []
+    for author in re.split(r'[,;]', proposed_author):
+        words = author.strip().replace('ё', 'е').split()
+        if words:
+            surnames.append(words[0].lower())
+    unique_surnames = list(dict.fromkeys(surnames))
+    if not unique_surnames:
+        return False
+
+    folder_words = [w for w in re.split(r'[\s,;\-]+', folder_lower) if w]
+
+    # Каждая уникальная фамилия должна совпадать с хотя бы одним словом папки
+    # (startswith для формы мн. числа: живов → живовы)
+    for surname in unique_surnames:
+        if not any(fw == surname or fw.startswith(surname) for fw in folder_words):
+            return False
+
+    return True
+
 try:
     from BookRecord import BookRecord
 except ImportError:
@@ -315,14 +355,12 @@ class Pass2SeriesFilename:
             # Папка прямо под серией = подсерия
             author_name = record.proposed_author or record.metadata_authors
             if author_name:
-                author_normalized = author_name.lower().replace('ё', 'е')
                 path_parts = Path(record.file_path).parts  # e.g., (TopFolder, Author, Series, File.fb2)
-                
+
                 for i, part in enumerate(path_parts):
-                    part_normalized = part.lower().replace('ё', 'е')
-                    
-                    # Ищем папку автора (простое совпадение)
-                    if author_normalized in part_normalized or part_normalized in author_normalized:
+
+                    # Ищем папку автора с учётом формы мн. числа и нескольких авторов
+                    if _author_matches_folder(author_name, part):
                         # Найдена папка автора на позиции i
                         # Следующая папка (i+1) это серия (если это не файл)
                         if i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
