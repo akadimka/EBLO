@@ -212,6 +212,11 @@ class SynchronizationService:
         existing_entries = self._get_existing_entries()
         self._log(f"Существующих записей в БД: {len(existing_entries)}")
         
+        # Debug: Log first few existing entries
+        if existing_entries:
+            for entry in list(existing_entries)[:3]:
+                self._log(f"  БД запись: {entry}")
+        
         for i, record in enumerate(records):
             # Progress update
             if progress_callback and i % 10 == 0:
@@ -230,11 +235,17 @@ class SynchronizationService:
             
             # Detect duplicates
             dup_key = (author, series, title)
+            self._log(f"  Файл [{i+1}]: {record.file_path}")
+            self._log(f"    -> Ключ дубликата: {dup_key}")
+            self._log(f"    -> В БД: {dup_key in existing_entries}")
+            
             if dup_key in existing_entries:
-                self._log(f"Найден дубликат: {author} | {series} | {title}")
+                self._log(f"    ✗ ДУБЛИКАТ найден")
                 duplicates[dup_key].append(record.file_path)
                 self.stats['duplicates_found'] += 1
                 continue
+            
+            self._log(f"    ✓ Новый файл, добавляем в структуру")
             
             # Store subseries info if present (parse from filename)
             subseries = self._extract_subseries(record)
@@ -247,7 +258,7 @@ class SynchronizationService:
                 subseries
             )
             
-            self._log(f"Добавлен в структуру: {author} | {primary_genre} | {series}")
+            self._log(f"    Добавлен: {author} | {primary_genre} | {series}")
             
             # Record as existing for duplicate detection
             existing_entries.add(dup_key)
@@ -288,17 +299,23 @@ class SynchronizationService:
         self._log("Начало перемещения файлов")
         self._log(f"Всего записей: {len(records)}, в структуре: {len(folder_structure)}")
         
+        # Log first few items in folder_structure
+        if folder_structure:
+            for file_path in list(folder_structure.keys())[:3]:
+                self._log(f"  В структуре: {file_path}")
+        
+        if len(folder_structure) < len(records):
+            self._log(f"⚠️  {len(records) - len(folder_structure)} файлов не в структуре (дубликаты или ошибки)")
+        
         moved_records = []
         
         for i, record in enumerate(records):
             # Skip if no structure (duplicate)
             if record.file_path not in folder_structure:
+                self._log(f"[{i+1}/{len(records)}] ⊘ ПРОПУЩЕН: {record.file_path} (не в структуре)")
                 continue
             
-            # Progress update
-            if progress_callback:
-                progress_callback(50 + (i / len(records) * 30), 100,
-                                f"Перемещение {i+1}/{len(records)}")
+            self._log(f"[{i+1}/{len(records)}] ◆ Обработка: {record.file_path}")
             
             try:
                 genre, author, series, subseries = folder_structure[record.file_path]
