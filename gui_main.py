@@ -658,15 +658,10 @@ class MainWindow(tk.Tk):
             return
         
         # Создать окно выбора
-        from window_persistence import setup_window_persistence
+        from window_persistence import setup_window_persistence, save_window_geometry
         
         dialog = tk.Toplevel(self)
         dialog.title('Выбор жанра')
-        dialog.transient(self)
-        dialog.grab_set()
-        
-        # Настройка сохранения размера и позиции окна
-        setup_window_persistence(dialog, 'genre_select', self.settings, '400x300+200+200')
         
         ttk.Label(dialog, text=f'Выберите жанр для:\n{path_text}').pack(padx=10, pady=10)
         
@@ -706,8 +701,13 @@ class MainWindow(tk.Tk):
             nonlocal progress_window
             
             if progress_window:
+                # Сохранить позицию прогресс окна перед закрытием
+                save_window_geometry(progress_window, 'assign_genre_progress', self.settings)
                 progress_window.destroy()
                 progress_window = None
+            
+            # Сохранить позицию диалога перед закрытием
+            save_window_geometry(dialog, 'genre_select', self.settings)
             
             # Обновить статус бар
             self.progress_var.set(f'Жанр изменен у {count} файлов')
@@ -729,22 +729,9 @@ class MainWindow(tk.Tk):
             # Создать окно прогресса
             # ВАЖНО: Создаем как child от main window (self), НЕ от dialog!
             # Так оно останется видимым когда мы скроем dialog
-            from window_persistence import setup_window_persistence
-            
             progress_window = tk.Toplevel(self)
             progress_window.title('Присвоение жанра')
-            # transient от main window, чтобы было окно на переднем плане
-            progress_window.transient(self)
             progress_window.resizable(False, False)
-            
-            # Настройка сохранения размера и позиции окна
-            setup_window_persistence(progress_window, 'assign_genre_progress', self.settings, '450x120+250+250')
-            
-            # Отключить закрытие окна во время обработки
-            def on_closing():
-                messagebox.showwarning('Внимание', 'Пожалуйста, дождитесь завершения обработки')
-            
-            progress_window.protocol('WM_DELETE_WINDOW', on_closing)
             
             # Информация
             info_label = ttk.Label(
@@ -770,6 +757,29 @@ class MainWindow(tk.Tk):
             )
             counter_label.pack(padx=10, pady=(2, 8))
             
+            # Отключить закрытие окна во время обработки
+            def on_closing():
+                messagebox.showwarning('Внимание', 'Пожалуйста, дождитесь завершения обработки')
+            
+            progress_window.protocol('WM_DELETE_WINDOW', on_closing)
+            
+            # Настройка сохранения размера и позиции окна (ПОСЛЕ создания всех элементов)
+            # Используем деferred callback для правильной работы в мультимониторной среде
+            def setup_progress_persistence():
+                progress_window.transient(self)
+                setup_window_persistence(progress_window, 'assign_genre_progress', self.settings, '450x120+250+250')
+                
+                # Сохранить позицию на закрытие
+                def on_progress_close():
+                    save_window_geometry(progress_window, 'assign_genre_progress', self.settings)
+                    progress_window.destroy()
+                
+                # Переопределить обработчик закрытия после setup
+                progress_window.protocol('WM_DELETE_WINDOW', on_closing)
+            
+            # Отложить setup до следующей итерации event loop
+            progress_window.after(1, setup_progress_persistence)
+            
             # Показать окно прогресса
             progress_window.deiconify()
             progress_window.update()
@@ -778,7 +788,6 @@ class MainWindow(tk.Tk):
             dialog.withdraw()
             
             # Запустить присвоение жанра в отдельном потоке
-            
             assign_genre_threaded(
                 folder_path,
                 selected_genre,
@@ -795,6 +804,23 @@ class MainWindow(tk.Tk):
         
         ttk.Button(btn_frame, text='Присвоить', command=confirm).pack(side='left', padx=5)
         ttk.Button(btn_frame, text='Отмена', command=dialog.destroy).pack(side='left', padx=5)
+        
+        # Настройка сохранения размера и позиции окна (ПОСЛЕ создания всех элементов)
+        # Используем деferred callback для правильной работы в мультимониторной среде
+        def setup_dialog_persistence():
+            dialog.transient(self)
+            dialog.grab_set()
+            setup_window_persistence(dialog, 'genre_select', self.settings, '400x300+200+200')
+            
+            # Сохранить позицию на закрытие
+            def on_dialog_close():
+                save_window_geometry(dialog, 'genre_select', self.settings)
+                dialog.destroy()
+            
+            dialog.protocol('WM_DELETE_WINDOW', on_dialog_close)
+        
+        # Отложить setup до следующей итерации event loop
+        dialog.after(1, setup_dialog_persistence)
     
     def _store_genre_for_item(self, tree_item: str, path: str, genre: str):
         """Сохранить выбранный жанр для элемента дерева."""
