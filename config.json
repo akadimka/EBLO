@@ -4,9 +4,9 @@
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
   "genre_association_method": "context_menu",
   "window_sizes": {
-    "settings": "792x511-2234+140",
+    "settings": "708x466+250+200",
     "main": {
-      "geometry": "1066x631-2279+29",
+      "geometry": "982x688+198+88",
       "state": "normal"
     },
     "genres_manager": "944x406+221+220",
@@ -32,6 +32,18 @@
     },
     "normalizer": {
       "geometry": "1400x700-2769-165",
+      "state": "normal"
+    },
+    "genre_select": {
+      "geometry": "400x300-2101+286",
+      "state": "normal"
+    },
+    "assign_genre_progress": {
+      "geometry": "450x120-400+345",
+      "state": "normal"
+    },
+    "database_viewer": {
+      "geometry": "1000x500+200+150",
       "state": "normal"
     }
   },

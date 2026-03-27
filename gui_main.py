@@ -369,6 +369,8 @@ class MainWindow(tk.Tk):
         
         win = tk.Toplevel(self)
         win.title('Лог')
+        win.transient(self)  # Сделать окно зависимым от главного
+        win.grab_set()  # Перехватить фокус - окно модальное
         win.withdraw()  # Скрыть окно изначально
         
         # Настройка сохранения размера и позиции окна
@@ -420,6 +422,8 @@ class MainWindow(tk.Tk):
         
         # Create window first
         genres_window = tk.Toplevel(self)
+        genres_window.transient(self)  # Сделать окно зависимым от главного
+        genres_window.grab_set()  # Перехватить фокус - окно модальное
         
         # Initialize manager (no persistence setup here yet)
         GenresManagerWindow(genres_window, self.genres_manager, self.logger, self.settings, lambda: None)
@@ -522,6 +526,8 @@ class MainWindow(tk.Tk):
         
         # Создаем новое окно для нормализации
         normalizer_root = tk.Toplevel(self)
+        normalizer_root.transient(self)  # Сделать окно зависимым от главного
+        normalizer_root.grab_set()  # Перехватить фокус - окно модальное
         
         # Инициализируем app (геометрия будет восстановлена автоматически)
         app = CSVNormalizerApp(normalizer_root, current_folder, self.logger, self.settings)
@@ -641,6 +647,8 @@ class MainWindow(tk.Tk):
         db_window = tk.Toplevel(self)
         db_window.title('База данных - Просмотр')
         db_window.minsize(1000, 500)
+        db_window.transient(self)  # Сделать окно зависимым от главного
+        db_window.grab_set()  # Перехватить фокус - окно модальное
         
         # Notebook для вкладок (books и series)
         notebook = ttk.Notebook(db_window)
@@ -839,6 +847,8 @@ class MainWindow(tk.Tk):
         
         dialog = tk.Toplevel(self)
         dialog.title('Выбор жанра')
+        dialog.transient(self)  # Сделать окно зависимым от главного
+        dialog.grab_set()  # Перехватить фокус - окно модальное
         
         ttk.Label(dialog, text=f'Выберите жанр для:\n{path_text}').pack(padx=10, pady=10)
         
@@ -909,6 +919,8 @@ class MainWindow(tk.Tk):
             progress_window = tk.Toplevel(self)
             progress_window.title('Присвоение жанра')
             progress_window.resizable(False, False)
+            progress_window.transient(self)  # Сделать окно зависимым от главного
+            progress_window.grab_set()  # Перехватить фокус - окно модальное
             
             # Информация
             info_label = ttk.Label(

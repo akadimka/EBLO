@@ -365,6 +365,8 @@ class CSVNormalizerApp:
         # Создаем новое окно логов
         self.log_window = tk.Toplevel(self.root)
         self.log_window.title("Логи нормализации")
+        self.log_window.transient(self.root)  # Сделать окно зависимым от главного
+        self.log_window.grab_set()  # Перехватить фокус - окно модальное
         self.log_window.geometry("800x400")
         
         # Frame с Text и Scrollbar

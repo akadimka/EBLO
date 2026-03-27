@@ -10,6 +10,9 @@ class BrokenFilesWindow:
     def __init__(self, parent=None, settings_manager=None):
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
         self.window.title("Битые файлы")
+        if parent:
+            self.window.transient(parent)  # Сделать окно зависимым от главного
+            self.window.grab_set()  # Перехватить фокус - окно модальное
         self.settings_manager = settings_manager
         
         # Настройка сохранения размера и позиции окна
