@@ -1,0 +1,488 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Synchronization Service - Move and organize FB2 files into library structure.
+
+Handles:
+- CSV generation from last_scan_path
+- Duplicate detection (author + series + title)
+- Folder structure creation (genre/author/series/)
+- File movement to library_path
+- Database recording
+- Empty folder cleanup
+- Progress reporting and statistics
+"""
+
+import sqlite3
+import shutil
+import hashlib
+from pathlib import Path
+from datetime import datetime
+from typing import List, Dict, Tuple, Optional, Callable
+from collections import defaultdict
+
+try:
+    from settings_manager import SettingsManager
+    from logger import Logger
+    from regen_csv import RegenCSVService
+except Exception:
+    try:
+        from .settings_manager import SettingsManager
+        from .logger import Logger
+        from .regen_csv import RegenCSVService
+    except ImportError:
+        from fb2parser.settings_manager import SettingsManager
+        from fb2parser.logger import Logger
+        from fb2parser.regen_csv import RegenCSVService
+
+
+class SynchronizationService:
+    """Service for synchronizing FB2 library into organized structure."""
+    
+    def __init__(self, config_path: str = 'config.json'):
+        """Initialize the service.
+        
+        Args:
+            config_path: Path to config.json
+        """
+        self.config_path = Path(config_path)
+        self.settings = SettingsManager(config_path)
+        self.logger = Logger()
+        self.csv_service = RegenCSVService(config_path)
+        
+        # Get paths from config
+        self.library_path = Path(self.settings.get_library_path())
+        self.last_scan_path = Path(self.settings.get_last_scan_path())
+        self.db_path = self.library_path / '.library_cache.db'
+        
+        # Statistics tracking
+        self.stats = {
+            'files_moved': 0,
+            'duplicates_found': 0,
+            'folders_deleted': 0,
+            'errors': 0,
+            'total_files': 0,
+            'start_time': None,
+            'end_time': None,
+        }
+        
+    def synchronize(self, progress_callback: Optional[Callable] = None) -> Dict:
+        """Execute full synchronization process.
+        
+        Args:
+            progress_callback: Function(current, total, status_str) for progress updates
+            
+        Returns:
+            Dictionary with statistics
+        """
+        self.stats['start_time'] = datetime.now()
+        
+        try:
+            # Step 1: Generate CSV
+            if progress_callback:
+                progress_callback(5, 100, "Генерация CSV из исходной папки")
+            
+            records = self._generate_csv_data(progress_callback)
+            self.stats['total_files'] = len(records)
+            
+            if not records:
+                if progress_callback:
+                    progress_callback(10, 100, "Нет файлов для обработки")
+                self.logger.log("Синхронизация: нет файлов в исходной папке")
+                return self.stats
+            
+            # Step 2: Build folder structure and detect duplicates
+            if progress_callback:
+                progress_callback(15, 100, "Анализ дубликатов")
+            
+            folder_structure = self._build_folder_structure(records, progress_callback)
+            
+            # Step 3: Move files and track successfully moved
+            if progress_callback:
+                progress_callback(50, 100, "Перемещение файлов в библиотеку")
+            
+            moved_records = self._move_files(records, folder_structure, progress_callback)
+            
+            # Step 4: Update database with moved files
+            if progress_callback:
+                progress_callback(80, 100, "Обновление базы данных")
+            
+            self._update_database(moved_records, progress_callback)
+            
+            # Step 5: Cleanup empty folders
+            if progress_callback:
+                progress_callback(90, 100, "Очистка пустых папок")
+            
+            self._cleanup_empty_folders()
+            
+            if progress_callback:
+                progress_callback(100, 100, "Синхронизация завершена")
+            
+            self.stats['end_time'] = datetime.now()
+            self.logger.log(f"Синхронизация завершена: {self.stats}")
+            
+            return self.stats
+            
+        except Exception as e:
+            self.logger.log(f"ОШИБКА при синхронизации: {str(e)}")
+            self.stats['errors'] += 1
+            self.stats['end_time'] = datetime.now()
+            raise
+    
+    def _generate_csv_data(self, progress_callback: Optional[Callable] = None) -> List:
+        """Generate CSV data from last_scan_path without saving to file.
+        
+        Args:
+            progress_callback: Function(current, total, status_str) for progress
+            
+        Returns:
+            List of BookRecord objects
+        """
+        self.logger.log(f"Генерация CSV из: {self.last_scan_path}")
+        
+        try:
+            records = self.csv_service.generate_csv(
+                str(self.last_scan_path),
+                output_csv_path=None,  # Don't save CSV file
+                progress_callback=progress_callback
+            )
+            
+            self.logger.log(f"CSV сгенерирован: {len(records)} записей")
+            return records
+            
+        except Exception as e:
+            self.logger.log(f"Ошибка при генерации CSV: {str(e)}")
+            raise
+    
+    def _build_folder_structure(
+        self,
+        records: List,
+        progress_callback: Optional[Callable] = None
+    ) -> Dict:
+        """Build folder structure and detect duplicates.
+        
+        Args:
+            records: List of BookRecord objects
+            progress_callback: Progress callback function
+            
+        Returns:
+            Dictionary mapping file_path -> (genre, author, series, subseries)
+        """
+        self.logger.log("Построение структуры папок")
+        
+        folder_structure = {}
+        duplicates = defaultdict(list)
+        
+        # Check database for existing entries
+        existing_entries = self._get_existing_entries()
+        
+        for i, record in enumerate(records):
+            # Progress update
+            if progress_callback and i % 10 == 0:
+                progress_callback(15 + (i / len(records) * 35), 100, 
+                                f"Анализ файла {i+1}/{len(records)}")
+            
+            # Extract metadata
+            genre = record.metadata_genre or "Без жанра"
+            author = record.proposed_author or "Неизвестный автор"
+            series = record.proposed_series or ""
+            title = record.file_title or Path(record.file_path).stem
+            
+            # Handle genre with multiple entries
+            genres = [g.strip() for g in genre.split(',') if g.strip()]
+            primary_genre = genres[0] if genres else "Без жанра"
+            
+            # Detect duplicates
+            dup_key = (author, series, title)
+            if dup_key in existing_entries:
+                self.logger.log(f"Найден дубликат: {author} | {series} | {title}")
+                duplicates[dup_key].append(record.file_path)
+                self.stats['duplicates_found'] += 1
+                continue
+            
+            # Store subseries info if present (parse from filename)
+            subseries = self._extract_subseries(record)
+            
+            # Build folder path
+            folder_structure[record.file_path] = (
+                primary_genre,
+                author,
+                series,
+                subseries
+            )
+            
+            # Record as existing for duplicate detection
+            existing_entries.add(dup_key)
+        
+        self.logger.log(f"Структура создана: {len(folder_structure)} файлов, "
+                       f"{len(duplicates)} дубликатов")
+        
+        return folder_structure
+    
+    def _extract_subseries(self, record) -> str:
+        """Extract subseries information from record if present.
+        
+        Args:
+            record: BookRecord object
+            
+        Returns:
+            Subseries string or empty string
+        """
+        # For now, return empty - can be enhanced to parse from metadata
+        return ""
+    
+    def _move_files(
+        self,
+        records: List,
+        folder_structure: Dict,
+        progress_callback: Optional[Callable] = None
+    ) -> List:
+        """Move files to library structure.
+        
+        Args:
+            records: List of BookRecord objects
+            folder_structure: Dictionary with folder mapping
+            progress_callback: Progress callback function
+            
+        Returns:
+            List of successfully moved records with updated file_path
+        """
+        self.logger.log("Начало перемещения файлов")
+        
+        moved_records = []
+        
+        for i, record in enumerate(records):
+            # Skip if no structure (duplicate)
+            if record.file_path not in folder_structure:
+                continue
+            
+            # Progress update
+            if progress_callback:
+                progress_callback(50 + (i / len(records) * 30), 100,
+                                f"Перемещение {i+1}/{len(records)}")
+            
+            try:
+                genre, author, series, subseries = folder_structure[record.file_path]
+                
+                # Build target path
+                target_dir = self.library_path / genre / author
+                if series:
+                    target_dir = target_dir / series
+                if subseries:
+                    target_dir = target_dir / subseries
+                
+                # Create directories
+                target_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Build source and target file paths
+                source_file = self.last_scan_path / record.file_path
+                target_file = target_dir / source_file.name
+                
+                # Check if file already exists at target
+                if target_file.exists():
+                    self.logger.log(f"Файл уже существует: {target_file}")
+                    self.stats['duplicates_found'] += 1
+                    continue
+                
+                # Move file
+                if source_file.exists():
+                    shutil.move(str(source_file), str(target_file))
+                    self.logger.log(f"Перемещён: {source_file} -> {target_file}")
+                    self.stats['files_moved'] += 1
+                    
+                    # Update record with new path (relative to library_path)
+                    record.file_path = str(target_file.relative_to(self.library_path))
+                    moved_records.append(record)
+                else:
+                    self.logger.log(f"ОШИБКА: файл не найден: {source_file}")
+                    self.stats['errors'] += 1
+                    
+            except Exception as e:
+                self.logger.log(f"Ошибка при перемещении {record.file_path}: {str(e)}")
+                self.stats['errors'] += 1
+        
+        return moved_records
+    
+    def _update_database(
+        self,
+        records: List,
+        progress_callback: Optional[Callable] = None
+    ) -> None:
+        """Insert records into database.
+        
+        Args:
+            records: List of BookRecord objects (successfully moved files)
+            progress_callback: Progress callback function
+        """
+        self.logger.log(f"Обновление базы данных: {self.db_path}")
+        
+        if not records:
+            self.logger.log("Нет файлов для внесения в БД")
+            return
+        
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            cursor = conn.cursor()
+            
+            inserted_count = 0
+            
+            for i, record in enumerate(records):
+                # Progress update
+                if progress_callback and i % 10 == 0:
+                    progress_callback(80 + (i / len(records) * 10), 100,
+                                    f"Запись в БД: {i+1}/{len(records)}")
+                
+                try:
+                    # Calculate file hash
+                    file_hash = self._calculate_file_hash(
+                        self.library_path / record.file_path
+                    )
+                    
+                    now = datetime.now().isoformat()
+                    
+                    cursor.execute("""
+                        INSERT INTO books (
+                            author, author_source, series, series_source,
+                            subseries, title, file_path, file_hash, genre,
+                            added_date, updated_date, last_sync_check
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        record.proposed_author,
+                        record.author_source,
+                        record.proposed_series,
+                        record.series_source,
+                        getattr(record, 'subseries', ''),
+                        record.file_title,
+                        record.file_path,
+                        file_hash,
+                        record.metadata_genre,
+                        now,
+                        now,
+                        now
+                    ))
+                    
+                    inserted_count += 1
+                    
+                except Exception as e:
+                    self.logger.log(f"Ошибка при записи в БД {record.file_path}: {str(e)}")
+                    self.stats['errors'] += 1
+            
+            conn.commit()
+            conn.close()
+            
+            self.logger.log(f"Записано в БД: {inserted_count} записей")
+            
+        except Exception as e:
+            self.logger.log(f"Ошибка при обновлении БД: {str(e)}")
+            self.stats['errors'] += 1
+    
+    def _cleanup_empty_folders(self) -> None:
+        """Remove empty folders from source directory, preserving root.
+        
+        Recursively deletes empty directories but preserves last_scan_path root.
+        """
+        self.logger.log(f"Очистка пустых папок в: {self.last_scan_path}")
+        
+        try:
+            self._remove_empty_dirs_recursive(self.last_scan_path)
+            self.logger.log(f"Удалено пустых папок: {self.stats['folders_deleted']}")
+        except Exception as e:
+            self.logger.log(f"Ошибка при очистке папок: {str(e)}")
+    
+    def _remove_empty_dirs_recursive(self, path: Path) -> None:
+        """Recursively remove empty directories.
+        
+        Args:
+            path: Directory to clean
+        """
+        if not path.is_dir():
+            return
+        
+        # Don't delete root scan path
+        if path == self.last_scan_path:
+            # Just process subdirectories
+            for item in path.iterdir():
+                if item.is_dir():
+                    self._remove_empty_dirs_recursive(item)
+            return
+        
+        # Try to remove if empty
+        try:
+            # First, recursively process subdirectories
+            for item in path.iterdir():
+                if item.is_dir():
+                    self._remove_empty_dirs_recursive(item)
+            
+            # Now try to remove this directory if empty
+            if not any(path.iterdir()):  # Check if empty
+                path.rmdir()
+                self.stats['folders_deleted'] += 1
+                self.logger.log(f"Удалена пустая папка: {path}")
+        except Exception as e:
+            # Ignore errors (directory may be in use, has files, etc)
+            pass
+    
+    def _get_existing_entries(self) -> set:
+        """Get existing entries from database.
+        
+        Returns:
+            Set of (author, series, title) tuples
+        """
+        existing = set()
+        
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT author, series, title FROM books
+            """)
+            
+            for row in cursor.fetchall():
+                existing.add(tuple(row))
+            
+            conn.close()
+        except Exception as e:
+            self.logger.log(f"Ошибка при чтении БД: {str(e)}")
+        
+        return existing
+    
+    def _calculate_file_hash(self, file_path: Path, chunk_size: int = 8192) -> str:
+        """Calculate SHA256 hash of file.
+        
+        Args:
+            file_path: Path to file
+            chunk_size: Size of chunks to read
+            
+        Returns:
+            Hexadecimal hash string
+        """
+        try:
+            hash_obj = hashlib.sha256()
+            
+            with open(file_path, 'rb') as f:
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    hash_obj.update(chunk)
+            
+            return hash_obj.hexdigest()
+        except Exception as e:
+            self.logger.log(f"Ошибка при расчёте хеша {file_path}: {str(e)}")
+            return ""
+    
+    def get_statistics(self) -> Dict:
+        """Get current statistics.
+        
+        Returns:
+            Dictionary with statistics
+        """
+        stats = self.stats.copy()
+        
+        if stats['start_time'] and stats['end_time']:
+            duration = (stats['end_time'] - stats['start_time']).total_seconds()
+            stats['duration_seconds'] = duration
+            stats['duration_str'] = f"{int(duration)} секунд"
+        
+        return stats

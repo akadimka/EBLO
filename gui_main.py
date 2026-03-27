@@ -15,6 +15,7 @@ import threading
 import sys
 import os
 from pathlib import Path
+from typing import Dict
 
 # Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(__file__))
@@ -58,6 +59,10 @@ try:
     importlib.reload(gui_normalizer)
     from gui_normalizer import CSVNormalizerApp
     
+    import synchronization
+    importlib.reload(synchronization)
+    from synchronization import SynchronizationService
+    
 except Exception as e:
     try:
         from .genres_manager import GenresManager
@@ -65,12 +70,14 @@ except Exception as e:
         from .logger import Logger
         from .gui_genres import GenresManagerWindow
         from .gui_normalizer import CSVNormalizerApp
+        from .synchronization import SynchronizationService
     except ImportError:
         from fb2parser.genres_manager import GenresManager
         from fb2parser.settings_manager import SettingsManager
         from fb2parser.logger import Logger
         from fb2parser.gui_genres import GenresManagerWindow
         from fb2parser.gui_normalizer import CSVNormalizerApp
+        from fb2parser.synchronization import SynchronizationService
 
 
 class MainWindow(tk.Tk):
@@ -486,8 +493,91 @@ class MainWindow(tk.Tk):
 
     def _on_synchronization_action(self):
         """Обработчик действия 'Синхронизация'."""
+        # Check if synchronization is already running
+        if hasattr(self, '_sync_running') and self._sync_running:
+            messagebox.showwarning("Внимание", "Синхронизация уже выполняется")
+            return
+        
+        # Confirm before starting
+        if not messagebox.askyesno(
+            "Подтверждение",
+            "Начать синхронизацию библиотеки?\n\n"
+            "Файлы будут перемещены из исходной папки в структурированную библиотеку."
+        ):
+            return
+        
+        self._sync_running = True
         self.logger.log('Синхронизация запущена')
-        # TODO: Реализовать синхронизацию
+        
+        # Launch synchronization in background thread
+        thread = threading.Thread(
+            target=self._synchronize_thread,
+            daemon=True
+        )
+        thread.start()
+    
+    def _synchronize_thread(self):
+        """Execute synchronization in background thread."""
+        original_stdout = sys.stdout
+        
+        try:
+            # Create synchronization service
+            sync_service = SynchronizationService('config.json')
+            
+            def progress_callback(current, total, status):
+                """Update progress bar in UI."""
+                self.after(0, lambda: self.progress_var.set(f"{status} ({current}/{total})"))
+                self.logger.log(f"{status}: {current}/{total}")
+            
+            # Run synchronization
+            self.after(0, lambda: self.progress_var.set("Инициализация синхронизации..."))
+            stats = sync_service.synchronize(progress_callback=progress_callback)
+            
+            # Update final status
+            self.after(0, lambda: self.progress_var.set("Синхронизация завершена"))
+            
+            # Show statistics popup
+            self._show_synchronization_stats(stats)
+            
+            self.logger.log("Синхронизация успешно завершена")
+            
+        except Exception as e:
+            self.logger.log(f"ОШИБКА при синхронизации: {str(e)}")
+            self.after(
+                0,
+                lambda: messagebox.showerror(
+                    "Ошибка",
+                    f"Ошибка при синхронизации: {str(e)}"
+                )
+            )
+            self.after(0, lambda: self.progress_var.set("ОШИБКА"))
+        
+        finally:
+            sys.stdout = original_stdout
+            self._sync_running = False
+    
+    def _show_synchronization_stats(self, stats: Dict):
+        """Show statistics popup after synchronization.
+        
+        Args:
+            stats: Dictionary with statistics from synchronization
+        """
+        # Calculate duration
+        duration_str = stats.get('duration_str', 'неизвестно')
+        
+        message = (
+            f"Синхронизация завершена\n\n"
+            f"Перемещено файлов: {stats['files_moved']}\n"
+            f"Найдено дубликатов: {stats['duplicates_found']}\n"
+            f"Удалено пустых папок: {stats['folders_deleted']}\n"
+            f"Ошибок: {stats['errors']}\n"
+            f"Время: {duration_str}"
+        )
+        
+        self.after(
+            0,
+            lambda: messagebox.showinfo("Статистика синхронизации", message)
+        )
 
     def _on_folder_tree_right_click(self, event):
         """Обработчик ПКМ на Treeview элемент."""

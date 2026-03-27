@@ -4,15 +4,15 @@
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
   "genre_association_method": "context_menu",
   "window_sizes": {
-    "settings": "792x511+-2164+-2",
+    "settings": "792x511-2234+140",
     "main": {
-      "geometry": "1066x631-2426+48",
+      "geometry": "1066x631-2152+31",
       "state": "normal"
     },
     "genres_manager": "944x406+221+220",
     "log": {
-      "geometry": "1536x889+47+59",
-      "state": "maximized"
+      "geometry": "1536x889-2480-94",
+      "state": "normal"
     },
     "duplicates_window": {
       "geometry": "1000x652+64+38",
