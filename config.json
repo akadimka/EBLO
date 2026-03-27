@@ -1,15 +1,15 @@
 {
-  "library_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/EBook Library",
-  "last_scan_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
-  "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
+  "library_path": "D:/Temp/EBookLibrary",
+  "last_scan_path": "D:/Temp/Test1",
+  "genres_file_path": "D:\\FB2 Parser\\fb2parser\\genres.xml",
   "genre_association_method": "context_menu",
   "window_sizes": {
     "settings": "708x466+250+200",
     "main": {
-      "geometry": "982x688+198+88",
+      "geometry": "982x688+603+211",
       "state": "normal"
     },
-    "genres_manager": "944x406+221+220",
+    "genres_manager": "700x456+690+361",
     "log": {
       "geometry": "1536x889-2480-94",
       "state": "normal"
@@ -31,19 +31,27 @@
       "state": "normal"
     },
     "normalizer": {
-      "geometry": "1400x700-2769-165",
+      "geometry": "1400x700+150+100",
       "state": "normal"
     },
     "genre_select": {
-      "geometry": "400x300-2101+286",
+      "geometry": "400x300+894+405",
       "state": "normal"
     },
     "assign_genre_progress": {
-      "geometry": "450x120-400+345",
+      "geometry": "450x120+902+497",
       "state": "normal"
     },
     "database_viewer": {
       "geometry": "1000x500+200+150",
+      "state": "normal"
+    },
+    "duplicate_finder": {
+      "geometry": "1400x900+350+300",
+      "state": "normal"
+    },
+    "broken_files": {
+      "geometry": "1000x600+300+250",
       "state": "normal"
     }
   },
@@ -52,7 +60,9 @@
   "folder_parse_limit": 3,
   "genre_tree_state": {
     "expanded_nodes": [
-      "Фантастика"
+      "Фантастика",
+      "Роман",
+      "Детектив"
     ]
   },
   "filename_blacklist": [
@@ -478,7 +488,7 @@
     "Лейкин Марк": "Мах Макс",
     "Кондакова Анна": "Райро А.",
     "Шмаев Валерий": "Сержант Леший",
-    "Гоблин, Каин":"Гоблин MeXXanik"
+    "Гоблин, Каин": "Гоблин MeXXanik"
   },
   "genre_category_words": [
     "фантастический",
