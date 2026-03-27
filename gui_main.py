@@ -703,7 +703,7 @@ class MainWindow(tk.Tk):
             return
         
         # Создать окно выбора
-        from window_persistence import setup_window_persistence, save_window_geometry
+        from window_persistence import setup_window_persistence, save_window_geometry, center_window_on_parent
         
         dialog = tk.Toplevel(self)
         dialog.title('Выбор жанра')
@@ -812,7 +812,11 @@ class MainWindow(tk.Tk):
             # Используем деferred callback для правильной работы в мультимониторной среде
             def setup_progress_persistence():
                 progress_window.transient(self)
-                setup_window_persistence(progress_window, 'assign_genre_progress', self.settings, '450x120+250+250')
+                
+                # Получить центрированную позицию (в случае если было сохранено за границами экрана)
+                centered_geometry = center_window_on_parent(progress_window, self, width=450, height=120)
+                
+                setup_window_persistence(progress_window, 'assign_genre_progress', self.settings, centered_geometry)
                 
                 # Сохранить позицию на закрытие
                 def on_progress_close():
@@ -855,7 +859,11 @@ class MainWindow(tk.Tk):
         def setup_dialog_persistence():
             dialog.transient(self)
             dialog.grab_set()
-            setup_window_persistence(dialog, 'genre_select', self.settings, '400x300+200+200')
+            
+            # Получить центрированную позицию (в случае если было сохранено за границами экрана)
+            centered_geometry = center_window_on_parent(dialog, self, width=400, height=300)
+            
+            setup_window_persistence(dialog, 'genre_select', self.settings, centered_geometry)
             
             # Сохранить позицию на закрытие
             def on_dialog_close():

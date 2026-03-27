@@ -50,6 +50,76 @@ def save_window_geometry(window: tk.Tk, window_name: str, settings_manager):
         pass
 
 
+def _is_geometry_visible(geometry_str: str, window) -> bool:
+    """
+    Check if a window geometry (position and size) is visible on screen.
+    
+    Args:
+        geometry_str: Geometry string like "WxH+X+Y"
+        window: Tkinter window (for accessing screen dimensions)
+    
+    Returns:
+        True if window is (at least partially) visible on screen, False otherwise
+    """
+    try:
+        import re
+        # Parse geometry: WxH+X+Y or WxH-X-Y
+        match = re.match(r'(\d+)x(\d+)([\+\-])(\d+)([\+\-])(\d+)', geometry_str)
+        if not match:
+            return False
+        
+        width = int(match.group(1))
+        height = int(match.group(2))
+        x_sign = match.group(3)
+        x_coord = int(match.group(4))
+        y_sign = match.group(5)
+        y_coord = int(match.group(6))
+        
+        # Apply signs
+        if x_sign == '-':
+            x_coord = -x_coord
+        if y_sign == '-':
+            y_coord = -y_coord
+        
+        # Get screen dimensions
+        try:
+            # For multi-monitor setup, we check against virtual screen
+            screen_width = window.winfo_screenwidth()
+            screen_height = window.winfo_screenheight()
+        except:
+            # Fallback: assume common screen size
+            screen_width = 1920
+            screen_height = 1080
+        
+        # Window bounds
+        window_left = x_coord
+        window_right = x_coord + width
+        window_top = y_coord
+        window_bottom = y_coord + height
+        
+        # Screen bounds (including negative coordinates for multi-monitor)
+        # Allow some margin for window decorations
+        screen_left = -4000  # Allow far left monitors
+        screen_right = screen_width + 4000  # Allow far right monitors
+        screen_top = -2000   # Allow above-screen positioning
+        screen_bottom = screen_height + 2000  # Allow below-screen positioning
+        
+        # Check if window overlaps with screen area
+        # Window is visible if it intersects the screen rectangle
+        window_visible = not (
+            window_right < screen_left or
+            window_left > screen_right or
+            window_bottom < screen_top or
+            window_top > screen_bottom
+        )
+        
+        return window_visible
+        
+    except Exception as e:
+        # If we can't determine visibility, assume it's OK
+        return True
+
+
 def restore_window_geometry(window: tk.Tk, window_name: str, settings_manager,
                            default_geometry: Optional[str] = None,
                            default_state: str = 'normal') -> bool:
@@ -87,6 +157,10 @@ def restore_window_geometry(window: tk.Tk, window_name: str, settings_manager,
                 # Only validate minimum size, don't touch coordinates
                 # (negative coords are valid for multi-monitor systems)
                 if width < 200 or height < 100:
+                    return None
+                
+                # Check if window is visible on screen
+                if not _is_geometry_visible(geom_str, window):
                     return None
                 
                 # Return geometry as-is (after cleanup)
@@ -207,6 +281,47 @@ def _apply_window_state(window: tk.Tk, state: str, default_state: str) -> None:
             window.state(default_state)
         except:
             pass
+
+
+def center_window_on_parent(window: tk.Toplevel, parent: tk.Tk, width: int = 400, height: int = 300) -> str:
+    """
+    Center a child window on its parent window.
+    
+    Args:
+        window: Child window (Toplevel) to center
+        parent: Parent window (Tk)
+        width: Desired width of child window
+        height: Desired height of child window
+    
+    Returns:
+        Geometry string "WxH+X+Y" for the centered position
+    """
+    try:
+        # Get parent window position and size
+        parent_x = parent.winfo_x()
+        parent_y = parent.winfo_y()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        
+        # Calculate centered position
+        child_x = parent_x + (parent_width - width) // 2
+        child_y = parent_y + (parent_height - height) // 2
+        
+        # Ensure window doesn't go off-screen (with some margin)
+        min_x = -width + 50  # At least 50px visible
+        max_x = parent.winfo_screenwidth() - 50
+        min_y = -height + 50
+        max_y = parent.winfo_screenheight() - 50
+        
+        child_x = max(min_x, min(child_x, max_x))
+        child_y = max(min_y, min(child_y, max_y))
+        
+        geometry = f"{width}x{height}+{child_x}+{child_y}"
+        return geometry
+        
+    except Exception as e:
+        # Fallback to default
+        return f"{width}x{height}+200+200"
 
 
 def setup_window_persistence(window: tk.Tk, window_name: str, settings_manager,
