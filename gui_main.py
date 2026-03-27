@@ -195,6 +195,8 @@ class MainWindow(tk.Tk):
         self.action_menu.add_command(label='Сканирование', command=self._on_scan_action)
         self.action_menu.add_command(label='Нормализация', command=self._on_normalization_action)
         self.action_menu.add_command(label='Синхронизация', command=self._on_synchronization_action)
+        self.action_menu.add_separator()
+        self.action_menu.add_command(label='База данных', command=self._open_database_viewer)
         menubar.add_cascade(label='Действия', menu=self.action_menu)
         
         # Жанры
@@ -647,6 +649,153 @@ class MainWindow(tk.Tk):
             0,
             lambda: messagebox.showinfo("Статистика синхронизации", message)
         )
+
+    def _open_database_viewer(self):
+        """Открыть окно просмотра содержимого базы данных."""
+        from window_persistence import restore_window_geometry, save_window_geometry
+        import sqlite3
+        
+        db_window = tk.Toplevel(self)
+        db_window.title('База данных - Просмотр')
+        db_window.minsize(1000, 500)
+        
+        # Notebook для вкладок (books и series)
+        notebook = ttk.Notebook(db_window)
+        notebook.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Вкладка Books
+        books_frame = ttk.Frame(notebook)
+        notebook.add(books_frame, text='Книги (Books)')
+        
+        # Treeview для books
+        books_tree = ttk.Treeview(books_frame, columns=[
+            'id', 'author', 'title', 'genre', 'series', 'file_path'
+        ], height=20)
+        
+        books_tree.heading('#0', text='')
+        books_tree.column('#0', width=0)
+        books_tree.heading('id', text='ID')
+        books_tree.heading('author', text='Автор')
+        books_tree.heading('title', text='Название')
+        books_tree.heading('genre', text='Жанр')
+        books_tree.heading('series', text='Серия')
+        books_tree.heading('file_path', text='Путь к файлу')
+        
+        books_tree.column('id', width=40)
+        books_tree.column('author', width=150)
+        books_tree.column('title', width=200)
+        books_tree.column('genre', width=100)
+        books_tree.column('series', width=150)
+        books_tree.column('file_path', width=300)
+        
+        # Scrollbar для books tree
+        books_scrollbar_y = ttk.Scrollbar(books_frame, orient='vertical', command=books_tree.yview)
+        books_scrollbar_x = ttk.Scrollbar(books_frame, orient='horizontal', command=books_tree.xview)
+        books_tree.configure(yscroll=books_scrollbar_y.set, xscroll=books_scrollbar_x.set)
+        
+        books_tree.grid(row=0, column=0, sticky='nsew')
+        books_scrollbar_y.grid(row=0, column=1, sticky='ns')
+        books_scrollbar_x.grid(row=1, column=0, sticky='ew')
+        
+        books_frame.rowconfigure(0, weight=1)
+        books_frame.columnconfigure(0, weight=1)
+        
+        # Вкладка Series
+        series_frame = ttk.Frame(notebook)
+        notebook.add(series_frame, text='Серии (Series)')
+        
+        # Treeview для series
+        series_tree = ttk.Treeview(series_frame, columns=[
+            'id', 'series_name', 'book_count', 'created_date'
+        ], height=20)
+        
+        series_tree.heading('#0', text='')
+        series_tree.column('#0', width=0)
+        series_tree.heading('id', text='ID')
+        series_tree.heading('series_name', text='Название серии')
+        series_tree.heading('book_count', text='Книг в серии')
+        series_tree.heading('created_date', text='Дата создания')
+        
+        series_tree.column('id', width=40)
+        series_tree.column('series_name', width=300)
+        series_tree.column('book_count', width=100)
+        series_tree.column('created_date', width=150)
+        
+        # Scrollbar для series tree
+        series_scrollbar_y = ttk.Scrollbar(series_frame, orient='vertical', command=series_tree.yview)
+        series_scrollbar_x = ttk.Scrollbar(series_frame, orient='horizontal', command=series_tree.xview)
+        series_tree.configure(yscroll=series_scrollbar_y.set, xscroll=series_scrollbar_x.set)
+        
+        series_tree.grid(row=0, column=0, sticky='nsew')
+        series_scrollbar_y.grid(row=0, column=1, sticky='ns')
+        series_scrollbar_x.grid(row=1, column=0, sticky='ew')
+        
+        series_frame.rowconfigure(0, weight=1)
+        series_frame.columnconfigure(0, weight=1)
+        
+        # Нижняя панель с кнопками
+        button_frame = ttk.Frame(db_window)
+        button_frame.pack(fill='x', padx=5, pady=5)
+        
+        ttk.Button(button_frame, text='Обновить', command=lambda: self._load_database_data(books_tree, series_tree)).pack(side='left', padx=5)
+        ttk.Button(button_frame, text='Закрыть', command=db_window.destroy).pack(side='left', padx=5)
+        
+        # Загрузить данные
+        self._load_database_data(books_tree, series_tree)
+        
+        # Сохранение geometrии окна
+        restore_window_geometry(db_window, 'database_viewer', self.settings, default_geometry='1000x500+200+150')
+        
+        def on_close():
+            save_window_geometry(db_window, 'database_viewer', self.settings)
+            db_window.destroy()
+        
+        db_window.protocol('WM_DELETE_WINDOW', on_close)
+    
+    def _load_database_data(self, books_tree, series_tree):
+        """Загрузить данные из базы и отобразить в таблицах."""
+        import sqlite3
+        
+        try:
+            db_path = '.library_cache.db'
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Очистить таблицы
+            for item in books_tree.get_children():
+                books_tree.delete(item)
+            for item in series_tree.get_children():
+                series_tree.delete(item)
+            
+            # Загрузить books
+            cursor.execute('SELECT id, author, title, genre, series, file_path FROM books ORDER BY id DESC LIMIT 1000')
+            for row in cursor.fetchall():
+                books_tree.insert('', 0, values=(
+                    row['id'],
+                    row['author'][:50] if row['author'] else '',
+                    row['title'][:50] if row['title'] else '',
+                    row['genre'][:30] if row['genre'] else '',
+                    row['series'][:40] if row['series'] else '',
+                    row['file_path'][:100] if row['file_path'] else ''
+                ))
+            
+            # Загрузить series
+            cursor.execute('SELECT id, series_name, book_count, created_date FROM series ORDER BY id DESC')
+            for row in cursor.fetchall():
+                series_tree.insert('', 0, values=(
+                    row['id'],
+                    row['series_name'][:60] if row['series_name'] else '',
+                    row['book_count'] if row['book_count'] else 0,
+                    row['created_date'][:19] if row['created_date'] else ''
+                ))
+            
+            conn.close()
+            self.logger.log(f"[DB] Загружены данные из базы")
+            
+        except Exception as e:
+            self.logger.log(f"[DB] Ошибка при загрузке данных: {str(e)}")
+            messagebox.showerror('Ошибка', f'Не удалось загрузить данные из базы:\n{str(e)}')
 
     def _on_folder_tree_right_click(self, event):
         """Обработчик ПКМ на Treeview элемент."""
