@@ -13,6 +13,7 @@ Handles:
 - Progress reporting and statistics
 """
 
+import os
 import sqlite3
 import shutil
 import hashlib
@@ -59,6 +60,7 @@ class SynchronizationService:
         self.stats = {
             'files_moved': 0,
             'duplicates_found': 0,
+            'duplicates_deleted': 0,
             'folders_deleted': 0,
             'errors': 0,
             'total_files': 0,
@@ -252,7 +254,15 @@ class SynchronizationService:
                 progress_callback(100, 100, "Синхронизация завершена")
             
             self.stats['end_time'] = datetime.now()
-            self._log(f"Синхронизация завершена: {self.stats}")
+            
+            # Log summary statistics
+            self._log("")
+            self._log("=" * 60)
+            self._log("ИТОГОВАЯ СТАТИСТИКА:")
+            self._log(f"  Файлов перемещено: {self.stats['files_moved']}")
+            self._log(f"  Дубликатов найдено и удалено: {self.stats['duplicates_found']}")
+            self._log(f"  Папок удалено: {self.stats['folders_deleted']}")
+            self._log(f"  Ошибок: {self.stats['errors']}")
             self._log("=" * 60)
             
             return self.stats
@@ -361,6 +371,18 @@ class SynchronizationService:
                 duplicates[dup_key].append(record.file_path)
                 self.stats['duplicates_found'] += 1
                 duplicate_files_count += 1
+                
+                # Удаляем дубликат из файловой системы
+                try:
+                    file_to_delete = self.last_scan_path / record.file_path
+                    if file_to_delete.exists():
+                        os.unlink(str(file_to_delete))
+                        self._log(f"       ✓ Удален")
+                    else:
+                        self._log(f"       ⚠️  Файл не найден для удаления")
+                except Exception as e:
+                    self._log(f"       ✗ Ошибка при удалении: {str(e)}")
+                    self.stats['errors'] += 1
                 continue
             
             # New file - add to structure
@@ -424,16 +446,27 @@ class SynchronizationService:
             for file_path in list(folder_structure.keys())[:3]:
                 self._log(f"  В структуре: {file_path}")
         
-        skipped_duplicates = len(records) - len(folder_structure)
-        if skipped_duplicates > 0:
-            self._log(f"⚠️  {skipped_duplicates} файлов пропущены как дубликаты")
+        deleted_duplicates = len(records) - len(folder_structure)
+        if deleted_duplicates > 0:
+            self._log(f"🗑️  {deleted_duplicates} дубликатов удалены")
         
         moved_records = []
         
         for i, record in enumerate(records):
-            # Skip if no structure (duplicate)
+            # Delete if no structure (duplicate)
             if record.file_path not in folder_structure:
-                self._log(f"[{i+1}/{len(records)}] ⊘ ПРОПУЩЕН: {record.file_path} (дубликат - уже в БД)")
+                self._log(f"[{i+1}/{len(records)}] 🗑️  УДАЛЕН: {record.file_path} (дубликат - уже в БД)")
+                try:
+                    file_to_delete = self.last_scan_path / record.file_path
+                    if file_to_delete.exists():
+                        os.unlink(str(file_to_delete))
+                        self._log(f"       ✓ Успешно удален")
+                        self.stats['duplicates_deleted'] = self.stats.get('duplicates_deleted', 0) + 1
+                    else:
+                        self._log(f"       ⚠️  Файл не найден")
+                except Exception as e:
+                    self._log(f"       ✗ Ошибка при удалении: {str(e)}")
+                    self.stats['errors'] += 1
                 continue
             
             self._log(f"[{i+1}/{len(records)}] ◆ Обработка: {record.file_path}")
