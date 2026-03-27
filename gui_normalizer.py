@@ -13,15 +13,16 @@ except ImportError:
 
 
 class StdoutRedirector:
-    """Перехватывает вывод stdout и обновляет progress_var."""
-    def __init__(self, progress_var, root, original_stdout):
+    """Перехватывает вывод stdout и обновляет progress_var и логи."""
+    def __init__(self, progress_var, root, original_stdout, log_callback=None):
         self.progress_var = progress_var
         self.root = root
         self.original_stdout = original_stdout
+        self.log_callback = log_callback  # Функция для добавления текста в логи
         self.buffer = ""
     
     def write(self, message):
-        """Перехватить вывод и обновить progress_var."""
+        """Перехватить вывод и обновить progress_var и логи."""
         self.original_stdout.write(message)  # Также выводим в оригинальный stdout
         
         # Очищаем управляющие символы для отображения в progress
@@ -30,6 +31,13 @@ class StdoutRedirector:
             # Обновляем progress_var (потокобезопасно)
             try:
                 self.root.after(0, lambda: self.progress_var.set(display_message))
+            except:
+                pass
+        
+        # Добавляем в логи окна
+        if self.log_callback:
+            try:
+                self.root.after(0, lambda msg=message: self.log_callback(msg))
             except:
                 pass
     
@@ -63,6 +71,11 @@ class CSVNormalizerApp:
         # Сервис для генерации CSV
         self.csv_service = RegenCSVService()
         self.processing = False
+        
+        # Окно логов и буфер логов
+        self.log_window = None
+        self.log_text = None
+        self.log_buffer = []  # Буфер для сохранения всех логов
         
         self._log("Инициализация окна нормализации")
         
@@ -154,7 +167,7 @@ class CSVNormalizerApp:
         ttk.Label(progress_frame, textvariable=self.progress_var, foreground="blue").grid(row=0, column=1, sticky='ew', padx=5)
         
     def _log(self, message: str):
-        """Логирование в основной логер приложения, консоль и прогресс-строку."""
+        """Логирование в основной логер приложения, консоль, прогресс и окно логов."""
         import datetime
         
         # Формируем сообщение с временем
@@ -168,6 +181,9 @@ class CSVNormalizerApp:
         # Логируем в консоль
         print(f"[NORMALIZER] {formatted_message}", file=sys.stdout)
         sys.stdout.flush()
+        
+        # Добавляем в окно логов (если оно открыто)
+        self._add_log(f"[NORMALIZER] {formatted_message}\n")
         
         # Обновляем прогресс-строку (потокобезопасно)
         try:
@@ -234,7 +250,7 @@ class CSVNormalizerApp:
             self._log("Запуск сервиса генерации CSV")
             
             # Перенаправляем stdout для перехвата логов из всех модулей
-            redirector = StdoutRedirector(self.progress_var, self.root, original_stdout)
+            redirector = StdoutRedirector(self.progress_var, self.root, original_stdout, log_callback=self._add_log)
             sys.stdout = redirector
             
             try:
@@ -295,6 +311,13 @@ class CSVNormalizerApp:
         
     def cancel(self):
         if messagebox.askyesno("Подтверждение", "Вы уверены, что хотите отменить?"):
+            # Закрываем окно логов если оно открыто
+            if self.log_window is not None and self.log_window.winfo_exists():
+                self.log_window.destroy()
+            # Очищаем логи
+            self.log_text = None
+            self.log_window = None
+            self.log_buffer = []
             self.root.quit()
             
     def apply_changes(self):
@@ -332,7 +355,94 @@ class CSVNormalizerApp:
             messagebox.showinfo("Информация", "Пустые папки удалены")
             
     def show_logs(self):
-        messagebox.showinfo("Информация", "Показать логи")
+        """Открыть окно логов."""
+        if self.log_window is not None and self.log_window.winfo_exists():
+            # Окно уже открыто, просто поднимаем его на передний план
+            self.log_window.lift()
+            self.log_window.focus()
+            return
+        
+        # Создаем новое окно логов
+        self.log_window = tk.Toplevel(self.root)
+        self.log_window.title("Логи нормализации")
+        self.log_window.geometry("800x400")
+        
+        # Frame с Text и Scrollbar
+        frame = ttk.Frame(self.log_window)
+        frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL)
+        scrollbar.grid(row=0, column=1, sticky='ns')
+        
+        # Text widget для логов
+        self.log_text = tk.Text(
+            frame,
+            wrap=tk.WORD,
+            yscrollcommand=scrollbar.set,
+            bg='#f5f5f5',
+            font=('Courier', 9)
+        )
+        scrollbar.config(command=self.log_text.yview)
+        self.log_text.grid(row=0, column=0, sticky='nsew')
+        
+        # Загружаем все сохраненные логи в текстовое окно
+        for log_line in self.log_buffer:
+            self.log_text.insert(tk.END, log_line)
+        
+        # Прокрутка к концу
+        self.log_text.see(tk.END)
+        
+        # Кнопка очистки логов
+        button_frame = ttk.Frame(self.log_window)
+        button_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Button(button_frame, text="Очистить логи", command=self._clear_logs).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="Копировать все", command=self._copy_logs).pack(side=tk.LEFT, padx=2)
+        
+        self._log("Открыто окно логов")
+    
+    def _add_log(self, message: str):
+        """Добавить текст в буфер логов и в окно если оно открыто."""
+        # Всегда добавляем в буфер
+        self.log_buffer.append(message)
+        
+        # Добавляем в Text widget если окно открыто
+        if self.log_text is not None:
+            try:
+                self.log_text.config(state=tk.NORMAL)
+                self.log_text.insert(tk.END, message)
+                # Автопрокрутка к последней строке
+                self.log_text.see(tk.END)
+            except:
+                pass  # Игнорируем ошибки если окно закрыто
+    
+    def _clear_logs(self):
+        """Очистить логи."""
+        # Очищаем буфер
+        self.log_buffer = []
+        
+        # Очищаем Text widget если открыт
+        if self.log_text is not None:
+            try:
+                self.log_text.config(state=tk.NORMAL)
+                self.log_text.delete(1.0, tk.END)
+                self._log("Логи очищены")
+            except:
+                pass
+    
+    def _copy_logs(self):
+        """Копировать все логи в буфер обмена."""
+        if self.log_text is not None:
+            try:
+                content = self.log_text.get(1.0, tk.END)
+                self.root.clipboard_clear()
+                self.root.clipboard_append(content)
+                self._log("Логи скопированы в буфер обмена")
+            except:
+                pass
 
 def main():
     root = tk.Tk()
