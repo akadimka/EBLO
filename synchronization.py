@@ -79,6 +79,13 @@ class SynchronizationService:
         """
         self.stats['start_time'] = datetime.now()
         
+        self.logger.log("=" * 60)
+        self.logger.log("НАЧАЛО СИНХРОНИЗАЦИИ")
+        self.logger.log("=" * 60)
+        self.logger.log(f"Library path: {self.library_path}")
+        self.logger.log(f"Last scan path: {self.last_scan_path}")
+        self.logger.log(f"DB path: {self.db_path}")
+        
         try:
             # Step 1: Generate CSV
             if progress_callback:
@@ -122,13 +129,17 @@ class SynchronizationService:
             
             self.stats['end_time'] = datetime.now()
             self.logger.log(f"Синхронизация завершена: {self.stats}")
+            self.logger.log("=" * 60)
             
             return self.stats
             
         except Exception as e:
             self.logger.log(f"ОШИБКА при синхронизации: {str(e)}")
+            import traceback
+            self.logger.log(f"Stacktrace: {traceback.format_exc()}")
             self.stats['errors'] += 1
             self.stats['end_time'] = datetime.now()
+            self.logger.log("=" * 60)
             raise
     
     def _generate_csv_data(self, progress_callback: Optional[Callable] = None) -> List:
@@ -141,6 +152,7 @@ class SynchronizationService:
             List of BookRecord objects
         """
         self.logger.log(f"Генерация CSV из: {self.last_scan_path}")
+        self.logger.log(f"Путь существует: {self.last_scan_path.exists()}")
         
         try:
             records = self.csv_service.generate_csv(
@@ -150,10 +162,17 @@ class SynchronizationService:
             )
             
             self.logger.log(f"CSV сгенерирован: {len(records)} записей")
+            for i, record in enumerate(records[:5]):  # Log first 5 records
+                self.logger.log(f"  [{i+1}] {record.proposed_author} | {record.file_title}")
+            if len(records) > 5:
+                self.logger.log(f"  ... и ещё {len(records) - 5} записей")
+            
             return records
             
         except Exception as e:
             self.logger.log(f"Ошибка при генерации CSV: {str(e)}")
+            import traceback
+            self.logger.log(f"Stacktrace: {traceback.format_exc()}")
             raise
     
     def _build_folder_structure(
@@ -177,6 +196,7 @@ class SynchronizationService:
         
         # Check database for existing entries
         existing_entries = self._get_existing_entries()
+        self.logger.log(f"Существующих записей в БД: {len(existing_entries)}")
         
         for i, record in enumerate(records):
             # Progress update
@@ -212,6 +232,8 @@ class SynchronizationService:
                 series,
                 subseries
             )
+            
+            self.logger.log(f"Добавлен в структуру: {author} | {primary_genre} | {series}")
             
             # Record as existing for duplicate detection
             existing_entries.add(dup_key)
@@ -250,6 +272,7 @@ class SynchronizationService:
             List of successfully moved records with updated file_path
         """
         self.logger.log("Начало перемещения файлов")
+        self.logger.log(f"Всего записей: {len(records)}, в структуре: {len(folder_structure)}")
         
         moved_records = []
         
@@ -295,14 +318,18 @@ class SynchronizationService:
                     # Update record with new path (relative to library_path)
                     record.file_path = str(target_file.relative_to(self.library_path))
                     moved_records.append(record)
+                    self.logger.log(f"  -> Добавлен в moved_records (новый путь: {record.file_path})")
                 else:
                     self.logger.log(f"ОШИБКА: файл не найден: {source_file}")
                     self.stats['errors'] += 1
                     
             except Exception as e:
                 self.logger.log(f"Ошибка при перемещении {record.file_path}: {str(e)}")
+                import traceback
+                self.logger.log(f"Stacktrace: {traceback.format_exc()}")
                 self.stats['errors'] += 1
         
+        self.logger.log(f"Перемещение завершено: {len(moved_records)} файлов переместили")
         return moved_records
     
     def _update_database(
@@ -317,9 +344,11 @@ class SynchronizationService:
             progress_callback: Progress callback function
         """
         self.logger.log(f"Обновление базы данных: {self.db_path}")
+        self.logger.log(f"Количество записей для внесения: {len(records)}")
         
         if not records:
-            self.logger.log("Нет файлов для внесения в БД")
+            self.logger.log("ВНИМАНИЕ: Нет файлов для внесения в БД")
+            self.logger.log("Проверьте, были ли файлы успешно перемещены")
             return
         
         try:
@@ -341,6 +370,8 @@ class SynchronizationService:
                     )
                     
                     now = datetime.now().isoformat()
+                    
+                    self.logger.log(f"Запись в БД: {record.proposed_author} | {record.proposed_series} | {record.file_title}")
                     
                     cursor.execute("""
                         INSERT INTO books (
@@ -364,18 +395,25 @@ class SynchronizationService:
                     ))
                     
                     inserted_count += 1
+                    self.logger.log(f"  -> Успешно записано (ID: {cursor.lastrowid})")
                     
                 except Exception as e:
-                    self.logger.log(f"Ошибка при записи в БД {record.file_path}: {str(e)}")
+                    self.logger.log(f"ОШИБКА при записи в БД {record.file_path}: {str(e)}")
+                    import traceback
+                    self.logger.log(f"Stacktrace: {traceback.format_exc()}")
                     self.stats['errors'] += 1
             
+            self.logger.log(f"Коммит базы данных... ({inserted_count} записей)")
             conn.commit()
+            self.logger.log(f"Коммит завершён успешно")
             conn.close()
             
             self.logger.log(f"Записано в БД: {inserted_count} записей")
             
         except Exception as e:
-            self.logger.log(f"Ошибка при обновлении БД: {str(e)}")
+            self.logger.log(f"ОШИБКА при обновлении БД: {str(e)}")
+            import traceback
+            self.logger.log(f"Stacktrace: {traceback.format_exc()}")
             self.stats['errors'] += 1
     
     def _cleanup_empty_folders(self) -> None:
@@ -433,6 +471,10 @@ class SynchronizationService:
         existing = set()
         
         try:
+            if not self.db_path.exists():
+                self.logger.log(f"БД не найдена: {self.db_path}")
+                return existing
+            
             conn = sqlite3.connect(str(self.db_path))
             cursor = conn.cursor()
             
@@ -440,12 +482,18 @@ class SynchronizationService:
                 SELECT author, series, title FROM books
             """)
             
-            for row in cursor.fetchall():
+            rows = cursor.fetchall()
+            self.logger.log(f"Прочитано из БД: {len(rows)} существующих записей")
+            
+            for row in rows:
                 existing.add(tuple(row))
+                self.logger.log(f"  Существующий: {row[0]} | {row[1]} | {row[2]}")
             
             conn.close()
         except Exception as e:
             self.logger.log(f"Ошибка при чтении БД: {str(e)}")
+            import traceback
+            self.logger.log(f"Stacktrace: {traceback.format_exc()}")
         
         return existing
     
