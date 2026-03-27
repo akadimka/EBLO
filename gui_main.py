@@ -91,7 +91,15 @@ class MainWindow(tk.Tk):
 
         # Загружаем файл жанров из конфига (если он там сохранен)
         genres_file = self.settings.get_genres_file_path()
+        # Если в конфиге указан несуществующий файл, пробуем локальный genres.xml из каталога приложения
+        if not Path(genres_file).exists():
+            local_genres = Path(__file__).resolve().parent / 'genres.xml'
+            if local_genres.exists():
+                genres_file = str(local_genres)
+                self.settings.set_genres_file_path(genres_file)
+
         self.genres_manager = GenresManager(genres_file)
+        self.genres_manager.load()  # Принудительно загрузка, чтобы окно жанров всегда показывало актуальный файл
         
         # Переменные состояния
         self.selected_folder = tk.StringVar()
@@ -420,15 +428,12 @@ class MainWindow(tk.Tk):
         """Открыть менеджер жанров."""
         from window_persistence import setup_window_persistence, save_window_geometry
         
-        # Create window first
-        genres_window = tk.Toplevel(self)
-        genres_window.transient(self)  # Сделать окно зависимым от главного
-        genres_window.grab_set()  # Перехватить фокус - окно модальное
+        # Принудительно обновляем из файла genres.xml перед открытием окна
+        self.genres_manager.load()
+        # Create genres manager window directly (avoid extra empty Toplevel)
+        genres_window = GenresManagerWindow(self, self.genres_manager, self.logger, self.settings, lambda: None)
         
-        # Initialize manager (no persistence setup here yet)
-        GenresManagerWindow(genres_window, self.genres_manager, self.logger, self.settings, lambda: None)
-        
-        # Setup persistence AFTER window is created (like normalizer)
+        # Setup persistence AFTER window is created
         setup_window_persistence(genres_window, 'genres_manager', self.settings, '700x500+200+150')
         
         # Register close callback

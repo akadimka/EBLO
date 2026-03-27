@@ -19,12 +19,22 @@ class GenresManagerWindow(tk.Toplevel):
         self.transient(root)  # Сделать окно зависимым от главного
         self.grab_set()  # Перехватить фокус - окно модальное
         self.genres_manager = genres_manager
-        self.master_window = root.master() if hasattr(root, 'master') else root
+        if hasattr(root, 'master'):
+            master_attr = root.master
+            self.master_window = master_attr() if callable(master_attr) else master_attr
+        else:
+            self.master_window = root
         
         self.update_callback = update_callback
         self.logger = logger
         self.settings = settings_manager
-        
+
+        # Принудительная загрузка текущего файла genres.xml, если он изменился извне
+        try:
+            self.genres_manager.load()
+        except Exception as exc:
+            messagebox.showerror('Ошибка загрузки жанров', f'Не удалось загрузить genres.xml:\n{exc}')
+
         # Set default geometry if not using persistence
         self.geometry('700x500')
         
@@ -496,12 +506,12 @@ class GenresManagerWindow(tk.Toplevel):
 
     def destroy(self):
         # Сохраняем состояние дерева жанров перед закрытием
-        if self.settings:
+        if hasattr(self, 'settings') and self.settings:
             expanded_nodes = self._get_expanded_nodes()
             self.settings.set_genre_tree_state(expanded_nodes)
             
         # Сохраняем размеры окна перед закрытием
-        if self.settings:
+        if hasattr(self, 'settings') and self.settings:
             try:
                 geometry = self.geometry()
                 self.settings.set_window_geometry('genres_manager', geometry)

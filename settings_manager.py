@@ -91,7 +91,16 @@ class SettingsManager:
 
     def get_genres_file_path(self):
         """Get genres file path / Получить путь к файлу жанров."""
-        return self.settings.get('genres_file_path', 'genres.xml')
+        genres_path = Path(self.settings.get('genres_file_path', 'genres.xml'))
+        if genres_path.exists():
+            return str(genres_path)
+
+        local_genres = Path(__file__).resolve().parent / 'genres.xml'
+        if local_genres.exists():
+            self.set_genres_file_path(str(local_genres))
+            return str(local_genres)
+
+        return str(genres_path)
         
     def set_genres_file_path(self, path):
         """Set genres file path / Установить путь к файлу жанров."""
