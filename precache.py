@@ -78,6 +78,14 @@ class Precache:
         Returns:
             Dictionary {folder_path: (author_name, confidence)}
         """
+        # Ensure stdout can handle Cyrillic folder names on any platform/encoding.
+        import sys
+        try:
+            if sys.stdout.encoding and sys.stdout.encoding.lower().replace('-', '') not in ('utf8', 'utf8bom'):
+                sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, Exception):
+            pass
+
         print("[PRECACHE] Building author folder hierarchy...")
         
         conversions = self.settings.get_author_surname_conversions()
@@ -138,8 +146,10 @@ class Precache:
                 # Don't cache, allow parent inheritance to work
                 # Continue to subfolder scanning without caching this folder
             
-            # If folder is not author but name parses → cache for inheritance (no FB2 files)
-            elif author_name and depth > 0:
+            # If folder is not author but name parses → cache for inheritance (no FB2 files).
+            # Require valid person name so genre/category folders (e.g. "по авторам и циклам")
+            # don't pollute the cache and interfere with the walk-up author search.
+            elif author_name and depth > 0 and self._contains_valid_name(author_name):
                 result = (author_name, "low")
                 self.author_folder_cache[folder] = result
             

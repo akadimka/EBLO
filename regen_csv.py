@@ -513,6 +513,7 @@ class RegenCSVService:
     def _save_csv(self) -> None:
         """Save records to CSV file."""
         
+
         # Sort by file_path
         self.records.sort(key=lambda r: r.file_path)
         

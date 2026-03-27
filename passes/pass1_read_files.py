@@ -124,26 +124,31 @@ class Pass1ReadFiles:
     
     def _get_author_for_file(self, fb2_file: Path) -> Tuple[str, str]:
         """Determine author for a file using folder hierarchy cache.
-        
-        Starting from file's folder, walk up the hierarchy searching in
-        author_folder_cache. Return first match or empty string.
-        
+
+        Walks UP from the file's folder toward work_dir (up to folder_parse_limit
+        steps), collecting ALL cache hits. Returns the hit CLOSEST to work_dir
+        (= last found), so a real author folder higher up takes precedence over a
+        deeper pseudonym/series folder that also looks like a name.
+
+        Example: "Волк Антон\Макс Лайт\file.fb2"
+          - Макс Лайт → cache hit (HIGH)
+          - Волк Антон → cache hit (LOW, closer to work_dir)  ← returned
+
         Returns:
             (author_name, source) where source = "folder_dataset" or ""
         """
         current_dir = fb2_file.parent
         parse_levels = 0
-        
+        last_hit: str = ""
+
         while parse_levels < self.folder_parse_limit:
             if current_dir == self.work_dir:
                 break
-            
-            # Check cache
+
             if current_dir in self.author_folder_cache:
                 author_name, confidence = self.author_folder_cache[current_dir]
-                return author_name, "folder_dataset"
-            
-            # Move up
+                last_hit = author_name  # keep going — higher folder wins
+
             try:
                 parent_dir = current_dir.parent
                 if parent_dir == current_dir:
@@ -152,5 +157,7 @@ class Pass1ReadFiles:
                 parse_levels += 1
             except Exception:
                 break
-        
+
+        if last_hit:
+            return last_hit, "folder_dataset"
         return "", ""
