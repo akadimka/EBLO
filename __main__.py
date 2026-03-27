@@ -13,14 +13,13 @@ import os
 
 def _import_mainwindow():
     """
-    Import and return MainWindow class using a few fallbacks.
+    Import and return MainWindow class using fallbacks.
 
     1. Try direct import from current directory first (PRIORITY!)
-    2. Try normal package import `from fb2parser.gui_main import MainWindow`.
-    3. If that fails, ensure parent of repository root is on sys.path and retry.
-    4. As a last resort, load `gui_main.py` directly from the repository path.
+       This works when run as: python __main__.py or python -m fb2parser
+    2. Try relative import as fallback for when imported as a module
     
-    / Импортировать и вернуть класс MainWindow с использованием нескольких резервных вариантов.
+    / Импортировать и вернуть класс MainWindow с использованием резервных вариантов.
     """
     # PRIORITY: Direct import from current directory
     repo_root = os.path.abspath(os.path.dirname(__file__))
@@ -36,32 +35,12 @@ def _import_mainwindow():
     except Exception:
         pass
     
-    # Fallback to package import
+    # Fallback: Try relative import (when imported as a module)
     try:
-        from fb2parser.gui_main import MainWindow
+        from .gui_main import MainWindow
         return MainWindow
     except Exception:
-        pass
-
-    # Try adding parent dir of the repo to sys.path so package import can work
-    parent = os.path.dirname(repo_root)
-    if parent not in sys.path:
-        sys.path.insert(0, parent)
-    try:
-        from fb2parser.gui_main import MainWindow
-        return MainWindow
-    except Exception:
-        pass
-
-    # Last resort: import the gui_main module directly from file path
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("fb2parser.gui_main.local", os.path.join(repo_root, 'gui_main.py'))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return getattr(mod, 'MainWindow')
-    except Exception:
-        raise
+        raise ImportError("Could not import MainWindow from gui_main")
 
 
 def main():
