@@ -136,19 +136,42 @@ class MainWindow(tk.Tk):
         try:
             from synchronization import SynchronizationService
             
+            # Показать статус очистки БД
+            self.progress_var.set("Проверка БД на orphaned записи...")
+            self.update()  # Force UI update
+            
+            def cleanup_progress_callback(current, total, status):
+                """Callback для отображения прогресса очистки БД."""
+                self.progress_var.set(f"{status} ({current}/{total})")
+                self.update()
+            
             sync_service = SynchronizationService('config.json')
             stats = sync_service.sync_database_with_library(
-                log_callback=self.logger.log
+                log_callback=self.logger.log,
+                progress_callback=cleanup_progress_callback
             )
             
+            # Отобразить результаты
             if stats['deleted'] > 0:
-                self.progress_var.set(f'При старте удалено {stats["deleted"]} orphaned записей из БД')
-                self.logger.log(f"[STARTUP] Удалено orphaned записей: {stats['deleted']}")
+                msg = f"При старте удалено {stats['deleted']} orphaned записей из БД"
+                self.progress_var.set(msg)
+                self.logger.log(f"[STARTUP] {msg}")
+            elif stats['checked'] > 0:
+                msg = f"БД проверена: {stats['checked']} записей, все файлы актуальны"
+                self.progress_var.set(msg)
+                self.logger.log(f"[STARTUP] {msg}")
+            else:
+                self.progress_var.set("БД пуста или отсутствует")
+                self.logger.log("[STARTUP] БД пуста или отсутствует")
+            
+            self.update()
             
         except Exception as e:
             self.logger.log(f"[STARTUP] Ошибка при очистке БД: {str(e)}")
             import traceback
             self.logger.log(f"[STARTUP] Stacktrace: {traceback.format_exc()}")
+            self.progress_var.set("Ошибка при проверке БД")
+            self.update()
 
     def _create_menu(self):
         """Создание главного меню."""

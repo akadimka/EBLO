@@ -77,7 +77,8 @@ class SynchronizationService:
         else:
             self.logger.log(msg)
         
-    def sync_database_with_library(self, log_callback: Optional[Callable] = None) -> Dict:
+    def sync_database_with_library(self, log_callback: Optional[Callable] = None, 
+                                   progress_callback: Optional[Callable] = None) -> Dict:
         """Synchronize database with actual library structure.
         
         Removes entries for files that physically no longer exist in the library.
@@ -85,6 +86,7 @@ class SynchronizationService:
         
         Args:
             log_callback: Function(message_str) for logging messages to UI
+            progress_callback: Function(current, total, status_str) for progress updates
             
         Returns:
             Dictionary with statistics {'deleted': count, 'checked': count}
@@ -113,13 +115,21 @@ class SynchronizationService:
             cursor.execute("SELECT id, file_path, author, series, title FROM books")
             rows = cursor.fetchall()
             
-            self._log(f"Всего записей в БД: {len(rows)}")
+            total_rows = len(rows)
+            self._log(f"Проверка {total_rows} записей в БД...")
+            
+            if progress_callback:
+                progress_callback(0, total_rows, "Проверка БД...")
             
             deleted_ids = []
             
-            for row in rows:
+            for i, row in enumerate(rows):
                 record_id, file_path, author, series, title = row
                 stats['checked'] += 1
+                
+                # Progress update
+                if progress_callback and i % max(1, total_rows // 10) == 0:
+                    progress_callback(i, total_rows, f"Проверка записей БД ({i}/{total_rows})")
                 
                 # Check if file physically exists
                 full_path = self.library_path / file_path
@@ -129,11 +139,16 @@ class SynchronizationService:
                     self._log(f"  Файл не найден: {file_path}")
                     deleted_ids.append(record_id)
                     stats['deleted'] += 1
+                    stats['deleted'] += 1
             
             # Delete orphaned records
             if deleted_ids:
                 placeholders = ','.join(['?' for _ in deleted_ids])
                 cursor.execute(f"DELETE FROM books WHERE id IN ({placeholders})", deleted_ids)
+                
+                if progress_callback:
+                    progress_callback(len(deleted_ids), len(deleted_ids), 
+                                    f"Удаление orphaned записей...")
                 
                 self._log(f"Удалено orphaned записей: {len(deleted_ids)}")
                 conn.commit()
@@ -143,6 +158,9 @@ class SynchronizationService:
             self._log(f"Синхронизация БД завершена: "
                      f"проверено {stats['checked']}, удалено {stats['deleted']}")
             self._log("=" * 60)
+            
+            if progress_callback:
+                progress_callback(100, 100, "БД синхронизирована")
             
         except Exception as e:
             self._log(f"ОШИБКА при синхронизации БД: {str(e)}")
@@ -174,8 +192,20 @@ class SynchronizationService:
         
         try:
             # Step 0: Cleanup orphaned database entries
+            if progress_callback:
+                progress_callback(1, 100, "Очистка БД от orphaned записей")
+            
             self._log("Шаг 0: Очистка БД от orphaned записей")
-            db_cleanup = self.sync_database_with_library(log_callback)
+            
+            def db_cleanup_progress(current, total, status):
+                """Progress callback for DB cleanup."""
+                if progress_callback:
+                    progress_callback(1 + (current / max(total, 1) * 3), 100, status)
+            
+            db_cleanup = self.sync_database_with_library(
+                log_callback=log_callback,
+                progress_callback=db_cleanup_progress
+            )
             self._log(f"  Удалено orphaned записей: {db_cleanup['deleted']}")
             
             # Step 1: Generate CSV
