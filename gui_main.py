@@ -706,7 +706,7 @@ class MainWindow(tk.Tk):
         
         # Treeview для series
         series_tree = ttk.Treeview(series_frame, columns=[
-            'id', 'series_name', 'book_count', 'created_date'
+            'id', 'series_name', 'book_count', 'last_updated'
         ], height=20)
         
         series_tree.heading('#0', text='')
@@ -714,12 +714,12 @@ class MainWindow(tk.Tk):
         series_tree.heading('id', text='ID')
         series_tree.heading('series_name', text='Название серии')
         series_tree.heading('book_count', text='Книг в серии')
-        series_tree.heading('created_date', text='Дата создания')
+        series_tree.heading('last_updated', text='Обновлено')
         
         series_tree.column('id', width=40)
         series_tree.column('series_name', width=300)
         series_tree.column('book_count', width=100)
-        series_tree.column('created_date', width=150)
+        series_tree.column('last_updated', width=150)
         
         # Scrollbar для series tree
         series_scrollbar_y = ttk.Scrollbar(series_frame, orient='vertical', command=series_tree.yview)
@@ -781,13 +781,13 @@ class MainWindow(tk.Tk):
                 ))
             
             # Загрузить series
-            cursor.execute('SELECT id, series_name, book_count, created_date FROM series ORDER BY id DESC')
+            cursor.execute('SELECT id, series_name, book_count, last_updated FROM series ORDER BY id DESC')
             for row in cursor.fetchall():
                 series_tree.insert('', 0, values=(
                     row['id'],
                     row['series_name'][:60] if row['series_name'] else '',
                     row['book_count'] if row['book_count'] else 0,
-                    row['created_date'][:19] if row['created_date'] else ''
+                    row['last_updated'][:19] if row['last_updated'] else ''
                 ))
             
             conn.close()
