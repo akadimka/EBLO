@@ -669,24 +669,24 @@ class MainWindow(tk.Tk):
         
         # Treeview для books
         books_tree = ttk.Treeview(books_frame, columns=[
-            'id', 'author', 'title', 'genre', 'series', 'file_path'
+            'id', 'file_path', 'author', 'series', 'title', 'genre'
         ], height=20)
         
         books_tree.heading('#0', text='')
         books_tree.column('#0', width=0)
         books_tree.heading('id', text='ID')
+        books_tree.heading('file_path', text='Путь к файлу')
         books_tree.heading('author', text='Автор')
+        books_tree.heading('series', text='Серия')
         books_tree.heading('title', text='Название')
         books_tree.heading('genre', text='Жанр')
-        books_tree.heading('series', text='Серия')
-        books_tree.heading('file_path', text='Путь к файлу')
         
         books_tree.column('id', width=40)
+        books_tree.column('file_path', width=300)
         books_tree.column('author', width=150)
+        books_tree.column('series', width=150)
         books_tree.column('title', width=200)
         books_tree.column('genre', width=100)
-        books_tree.column('series', width=150)
-        books_tree.column('file_path', width=300)
         
         # Scrollbar для books tree
         books_scrollbar_y = ttk.Scrollbar(books_frame, orient='vertical', command=books_tree.yview)
@@ -773,11 +773,11 @@ class MainWindow(tk.Tk):
             for row in cursor.fetchall():
                 books_tree.insert('', 0, values=(
                     row['id'],
+                    row['file_path'][:100] if row['file_path'] else '',
                     row['author'][:50] if row['author'] else '',
-                    row['title'][:50] if row['title'] else '',
-                    row['genre'][:30] if row['genre'] else '',
                     row['series'][:40] if row['series'] else '',
-                    row['file_path'][:100] if row['file_path'] else ''
+                    row['title'][:50] if row['title'] else '',
+                    row['genre'][:30] if row['genre'] else ''
                 ))
             
             # Загрузить series
