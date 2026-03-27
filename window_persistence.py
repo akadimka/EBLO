@@ -29,6 +29,11 @@ def save_window_geometry(window: tk.Tk, window_name: str, settings_manager):
         # Get state (normal, maximized, iconified, etc.)
         state = window.state()
         
+        # Don't save hidden states - dialogs shouldn't be saved as 'withdrawn'
+        # This prevents dialogs from being invisible when reopened
+        if state == 'withdrawn':
+            state = 'normal'
+        
         # Normalize state for cross-platform compatibility
         # Tkinter on Windows returns "zoomed", convert to "maximized" for portability
         if state == 'zoomed':
@@ -347,7 +352,19 @@ def setup_window_persistence(window: tk.Tk, window_name: str, settings_manager,
     # Restore geometry using deferred callback to ensure window is ready
     # This is more reliable than relying on <Map> event timing
     def restore_deferred():
-        restore_window_geometry(window, window_name, settings_manager, default_geometry)
+        result = restore_window_geometry(window, window_name, settings_manager, default_geometry)
+        
+        # Extra check: if window is a Toplevel and might be off-screen, ensure it's visible
+        # This handles edge cases where old geometries were saved from different monitor configs
+        if isinstance(window, tk.Toplevel) and default_geometry:
+            try:
+                current_geom = window.geometry()
+                # Check if current geometry is off-screen
+                if not _is_geometry_visible(current_geom, window):
+                    # If not visible, apply the default geometry
+                    window.geometry(default_geometry)
+            except:
+                pass
     
     # Schedule restoration for next event loop iteration (after window initialization)
     window.after(1, restore_deferred)

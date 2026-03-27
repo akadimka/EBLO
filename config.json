@@ -6,7 +6,7 @@
   "window_sizes": {
     "settings": "792x511-2234+140",
     "main": {
-      "geometry": "1066x631-2541+18",
+      "geometry": "1066x631-2279+29",
       "state": "normal"
     },
     "genres_manager": "944x406+221+220",
@@ -32,10 +32,6 @@
     },
     "normalizer": {
       "geometry": "1400x700-2769-165",
-      "state": "normal"
-    },
-    "genre_select": {
-      "geometry": "400x300-1880+215",
       "state": "normal"
     }
   },
