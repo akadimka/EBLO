@@ -63,6 +63,9 @@ def _is_geometry_visible(geometry_str: str, window) -> bool:
     """
     try:
         import re
+        # Clean up malformed coordinates (+-1953 -> -1953)
+        geometry_str = re.sub(r'\+-', '-', geometry_str)
+        
         # Parse geometry: WxH+X+Y or WxH-X-Y
         match = re.match(r'(\d+)x(\d+)([\+\-])(\d+)([\+\-])(\d+)', geometry_str)
         if not match:
@@ -97,12 +100,12 @@ def _is_geometry_visible(geometry_str: str, window) -> bool:
         window_top = y_coord
         window_bottom = y_coord + height
         
-        # Screen bounds (including negative coordinates for multi-monitor)
-        # Allow some margin for window decorations
-        screen_left = -4000  # Allow far left monitors
-        screen_right = screen_width + 4000  # Allow far right monitors
-        screen_top = -2000   # Allow above-screen positioning
-        screen_bottom = screen_height + 2000  # Allow below-screen positioning
+        # Screen bounds - allow small margins for multi-monitor and decorations
+        # But be more strict than before - only allow up to 200px margin
+        screen_left = -200
+        screen_right = screen_width + 200
+        screen_top = -200
+        screen_bottom = screen_height + 200
         
         # Check if window overlaps with screen area
         # Window is visible if it intersects the screen rectangle
