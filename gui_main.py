@@ -112,6 +112,9 @@ class MainWindow(tk.Tk):
         # Обработчик закрытия окна
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
+        # Очистка БД от orphaned записей при старте приложения
+        self._cleanup_database_on_startup()
+
         # Создание UI
         self._create_menu()
         self._create_main_ui()
@@ -127,6 +130,25 @@ class MainWindow(tk.Tk):
         # Восстановление геометрии окна ПОСЛЕ отображения (более надежный способ)
         self.after(50, lambda: restore_window_geometry(self, 'main', self.settings, 
                                                        default_geometry='1000x700+100+50'))
+
+    def _cleanup_database_on_startup(self):
+        """Очистить БД от записей о несуществующих файлах при старте приложения."""
+        try:
+            from synchronization import SynchronizationService
+            
+            sync_service = SynchronizationService('config.json')
+            stats = sync_service.sync_database_with_library(
+                log_callback=self.logger.log
+            )
+            
+            if stats['deleted'] > 0:
+                self.progress_var.set(f'При старте удалено {stats["deleted"]} orphaned записей из БД')
+                self.logger.log(f"[STARTUP] Удалено orphaned записей: {stats['deleted']}")
+            
+        except Exception as e:
+            self.logger.log(f"[STARTUP] Ошибка при очистке БД: {str(e)}")
+            import traceback
+            self.logger.log(f"[STARTUP] Stacktrace: {traceback.format_exc()}")
 
     def _create_menu(self):
         """Создание главного меню."""

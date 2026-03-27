@@ -77,6 +77,81 @@ class SynchronizationService:
         else:
             self.logger.log(msg)
         
+    def sync_database_with_library(self, log_callback: Optional[Callable] = None) -> Dict:
+        """Synchronize database with actual library structure.
+        
+        Removes entries for files that physically no longer exist in the library.
+        Call this at application startup to clean up orphaned database records.
+        
+        Args:
+            log_callback: Function(message_str) for logging messages to UI
+            
+        Returns:
+            Dictionary with statistics {'deleted': count, 'checked': count}
+        """
+        self.log_callback = log_callback
+        
+        self._log("=" * 60)
+        self._log("СИНХРОНИЗАЦИЯ БД С БИБЛИОТЕКОЙ (удаление orphaned записей)")
+        self._log("=" * 60)
+        
+        stats = {'deleted': 0, 'checked': 0, 'errors': 0}
+        
+        try:
+            if not self.db_path.exists():
+                self._log(f"БД не найдена: {self.db_path} - синхронизация не требуется")
+                return stats
+            
+            if not self.library_path.exists():
+                self._log(f"Папка библиотеки не найдена: {self.library_path}")
+                return stats
+            
+            conn = sqlite3.connect(str(self.db_path))
+            cursor = conn.cursor()
+            
+            # Read all book entries
+            cursor.execute("SELECT id, file_path, author, series, title FROM books")
+            rows = cursor.fetchall()
+            
+            self._log(f"Всего записей в БД: {len(rows)}")
+            
+            deleted_ids = []
+            
+            for row in rows:
+                record_id, file_path, author, series, title = row
+                stats['checked'] += 1
+                
+                # Check if file physically exists
+                full_path = self.library_path / file_path
+                
+                if not full_path.exists():
+                    self._log(f"✗ Orphaned запись: {author} | {series} | {title}")
+                    self._log(f"  Файл не найден: {file_path}")
+                    deleted_ids.append(record_id)
+                    stats['deleted'] += 1
+            
+            # Delete orphaned records
+            if deleted_ids:
+                placeholders = ','.join(['?' for _ in deleted_ids])
+                cursor.execute(f"DELETE FROM books WHERE id IN ({placeholders})", deleted_ids)
+                
+                self._log(f"Удалено orphaned записей: {len(deleted_ids)}")
+                conn.commit()
+            
+            conn.close()
+            
+            self._log(f"Синхронизация БД завершена: "
+                     f"проверено {stats['checked']}, удалено {stats['deleted']}")
+            self._log("=" * 60)
+            
+        except Exception as e:
+            self._log(f"ОШИБКА при синхронизации БД: {str(e)}")
+            import traceback
+            self._log(f"Stacktrace: {traceback.format_exc()}")
+            stats['errors'] += 1
+        
+        return stats
+    
     def synchronize(self, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> Dict:
         """Execute full synchronization process.
         
@@ -98,6 +173,11 @@ class SynchronizationService:
         self._log(f"DB path: {self.db_path}")
         
         try:
+            # Step 0: Cleanup orphaned database entries
+            self._log("Шаг 0: Очистка БД от orphaned записей")
+            db_cleanup = self.sync_database_with_library(log_callback)
+            self._log(f"  Удалено orphaned записей: {db_cleanup['deleted']}")
+            
             # Step 1: Generate CSV
             if progress_callback:
                 progress_callback(5, 100, "Генерация CSV из исходной папки")
