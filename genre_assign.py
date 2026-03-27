@@ -215,19 +215,72 @@ class GenreAssignmentService:
             
             # Если не ZIP, читаем как обычный текстовый файл
             if content is None:
-                # Попробовать разные кодировки
-                for encoding in ['utf-8-sig', 'utf-8', 'cp1251', 'latin-1']:
+                raw_bytes = fb2_path.read_bytes()
+
+                # Определение кодировки из XML declaration, если указана
+                declared_encoding = None
+                decl_match = re.search(br'<\?xml[^>]*encoding\s*=\s*["\']([^"\']+)["\']', raw_bytes, re.IGNORECASE)
+                if decl_match:
                     try:
-                        with open(fb2_path, 'r', encoding=encoding, errors='replace') as f:
-                            content = f.read()
-                        if content.strip().startswith('<?xml') or content.strip().startswith('<'):
-                            break
+                        declared_encoding = decl_match.group(1).decode('ascii', errors='ignore')
                     except Exception:
+                        declared_encoding = None
+
+                # Список испытания кодировок (первой ставим объявленную, если есть)
+                enc_candidates = []
+                if declared_encoding:
+                    enc_candidates.append(declared_encoding)
+
+                enc_candidates.extend(['utf-8-sig', 'utf-8', 'cp1251', 'latin-1'])
+
+                seen_encodings = set()
+                good_content = None
+
+                # Первая попытка - строгий декод, не потеряв символы
+                for encoding in enc_candidates:
+                    if not encoding or encoding.lower() in seen_encodings:
                         continue
-                
+                    seen_encodings.add(encoding.lower())
+                    try:
+                        candidate = raw_bytes.decode(encoding, errors='strict')
+                    except (LookupError, UnicodeDecodeError):
+                        continue
+                    if candidate.strip().startswith('<?xml') or candidate.strip().startswith('<'):
+                        good_content = candidate
+                        content_encoding = encoding
+                        break
+
+                # Вторая попытка - более мягкая, если строгая не сработала
+                if good_content is None:
+                    for encoding in enc_candidates:
+                        if not encoding or encoding.lower() in seen_encodings:
+                            continue
+                        seen_encodings.add(encoding.lower())
+                        try:
+                            candidate = raw_bytes.decode(encoding, errors='replace')
+                        except (LookupError, UnicodeDecodeError):
+                            continue
+                        if candidate.strip().startswith('<?xml') or candidate.strip().startswith('<'):
+                            good_content = candidate
+                            content_encoding = encoding
+                            break
+
+                content = good_content
+
                 if content is None:
                     self.logger.log(f"ОШИБКА: {fb2_path} - не удалось прочитать с известными кодировками")
                     return False
+
+                # Если мы прочитали с заменой символов, попробуем не терять данные: дать предпочтение cp1251 для файла с явно cp1251 xml
+                if declared_encoding and declared_encoding.lower() in ['cp1251', 'windows-1251'] and content_encoding not in ['cp1251', 'windows-1251']:
+                    try:
+                        content_cp = raw_bytes.decode('cp1251', errors='strict')
+                        if content_cp.strip().startswith('<?xml') or content_cp.strip().startswith('<'):
+                            content = content_cp
+                            content_encoding = 'cp1251'
+                        
+                    except UnicodeDecodeError:
+                        pass
             
             # Проверить, что это валидный XML
             content_stripped = content.strip()
