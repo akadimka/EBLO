@@ -294,8 +294,16 @@ class SynchronizationService:
         
         # Debug: Log first few existing entries
         if existing_entries:
-            for entry in list(existing_entries)[:3]:
-                self._log(f"  БД запись: {entry}")
+            entries_list = list(existing_entries)[:5]
+            for entry in entries_list:
+                self._log(f"  БД содержит: {entry[0]} | {entry[1]} | {entry[2]}")
+            if len(existing_entries) > 5:
+                self._log(f"  ... и ещё {len(existing_entries) - 5} записей")
+        else:
+            self._log("  (БД пуста или очищена)")
+        
+        new_files_count = 0
+        duplicate_files_count = 0
         
         for i, record in enumerate(records):
             # Progress update
@@ -315,17 +323,18 @@ class SynchronizationService:
             
             # Detect duplicates
             dup_key = (author, series, title)
-            self._log(f"  Файл [{i+1}]: {record.file_path}")
-            self._log(f"    -> Ключ дубликата: {dup_key}")
-            self._log(f"    -> В БД: {dup_key in existing_entries}")
+            in_db = dup_key in existing_entries
             
-            if dup_key in existing_entries:
-                self._log(f"    ✗ ДУБЛИКАТ найден")
+            if in_db:
+                self._log(f"  [{i+1}] ДУБЛИКАТ: {author} | {series} | {title}")
+                self._log(f"       Файл: {record.file_path}")
                 duplicates[dup_key].append(record.file_path)
                 self.stats['duplicates_found'] += 1
+                duplicate_files_count += 1
                 continue
             
-            self._log(f"    ✓ Новый файл, добавляем в структуру")
+            # New file - add to structure
+            new_files_count += 1
             
             # Store subseries info if present (parse from filename)
             subseries = self._extract_subseries(record)
@@ -338,13 +347,14 @@ class SynchronizationService:
                 subseries
             )
             
-            self._log(f"    Добавлен: {author} | {primary_genre} | {series}")
-            
-            # Record as existing for duplicate detection
+            # Record as existing for duplicate detection in this batch
             existing_entries.add(dup_key)
         
-        self._log(f"Структура создана: {len(folder_structure)} файлов, "
-                       f"{len(duplicates)} дубликатов")
+        self._log(f"")
+        self._log(f"РЕЗУЛЬТАТЫ АНАЛИЗА:")
+        self._log(f"  Новые файлы: {new_files_count}")
+        self._log(f"  Дубликаты: {duplicate_files_count}")
+        self._log(f"  Итого файлов в структуре: {len(folder_structure)}")
         
         return folder_structure
     
@@ -384,15 +394,16 @@ class SynchronizationService:
             for file_path in list(folder_structure.keys())[:3]:
                 self._log(f"  В структуре: {file_path}")
         
-        if len(folder_structure) < len(records):
-            self._log(f"⚠️  {len(records) - len(folder_structure)} файлов не в структуре (дубликаты или ошибки)")
+        skipped_duplicates = len(records) - len(folder_structure)
+        if skipped_duplicates > 0:
+            self._log(f"⚠️  {skipped_duplicates} файлов пропущены как дубликаты")
         
         moved_records = []
         
         for i, record in enumerate(records):
             # Skip if no structure (duplicate)
             if record.file_path not in folder_structure:
-                self._log(f"[{i+1}/{len(records)}] ⊘ ПРОПУЩЕН: {record.file_path} (не в структуре)")
+                self._log(f"[{i+1}/{len(records)}] ⊘ ПРОПУЩЕН: {record.file_path} (дубликат - уже в БД)")
                 continue
             
             self._log(f"[{i+1}/{len(records)}] ◆ Обработка: {record.file_path}")
@@ -416,28 +427,31 @@ class SynchronizationService:
                 
                 # Check if file already exists at target
                 if target_file.exists():
-                    self._log(f"Файл уже существует: {target_file}")
+                    self._log(f"⚠️  Файл уже существует в библиотеке: {target_file}")
+                    self._log(f"    Пропускаем перемещение")
                     self.stats['duplicates_found'] += 1
                     continue
                 
                 # Move file
                 if source_file.exists():
+                    self._log(f"  → Перемещение: {source_file.name}")
                     shutil.move(str(source_file), str(target_file))
-                    self._log(f"Перемещён: {source_file} -> {target_file}")
+                    self._log(f"  ✓ Успешно перемещён")
                     self.stats['files_moved'] += 1
                     
                     # Update record with new path (relative to library_path)
                     record.file_path = str(target_file.relative_to(self.library_path))
                     moved_records.append(record)
-                    self._log(f"  -> Добавлен в moved_records (новый путь: {record.file_path})")
+                    self._log(f"    Новый путь: {record.file_path}")
                 else:
-                    self._log(f"ОШИБКА: файл не найден: {source_file}")
+                    self._log(f"  ✗ Ошибка: файл не найден: {source_file}")
                     self.stats['errors'] += 1
                     
             except Exception as e:
-                self._log(f"Ошибка при перемещении {record.file_path}: {str(e)}")
+                self._log(f"ОШИБКА при перемещении {record.file_path}: {str(e)}")
                 import traceback
                 self._log(f"Stacktrace: {traceback.format_exc()}")
+                self.stats['errors'] += 1
                 self.stats['errors'] += 1
         
         self._log(f"Перемещение завершено: {len(moved_records)} файлов переместили")
