@@ -529,9 +529,16 @@ class MainWindow(tk.Tk):
                 self.after(0, lambda: self.progress_var.set(f"{status} ({current}/{total})"))
                 self.logger.log(f"{status}: {current}/{total}")
             
+            def log_callback(message: str):
+                """Callback for logging from synchronization service."""
+                self.logger.log(f"[SYNC] {message}")
+            
             # Run synchronization
             self.after(0, lambda: self.progress_var.set("Инициализация синхронизации..."))
-            stats = sync_service.synchronize(progress_callback=progress_callback)
+            stats = sync_service.synchronize(
+                progress_callback=progress_callback,
+                log_callback=log_callback
+            )
             
             # Update final status
             self.after(0, lambda: self.progress_var.set("Синхронизация завершена"))

@@ -57,6 +57,9 @@ class SynchronizationService:
         # Database is in project root, not in library
         self.db_path = Path(__file__).parent / '.library_cache.db'
         
+        # Log callback for UI integration
+        self.log_callback = None
+        
         # Statistics tracking
         self.stats = {
             'files_moved': 0,
@@ -67,24 +70,37 @@ class SynchronizationService:
             'start_time': None,
             'end_time': None,
         }
+    
+    def _log(self, msg: str):
+        """Log message using callback or logger.
         
-    def synchronize(self, progress_callback: Optional[Callable] = None) -> Dict:
+        Args:
+            msg: Message to log
+        """
+        if self.log_callback:
+            self.log_callback(msg)
+        else:
+            self.logger.log(msg)
+        
+    def synchronize(self, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> Dict:
         """Execute full synchronization process.
         
         Args:
             progress_callback: Function(current, total, status_str) for progress updates
+            log_callback: Function(message_str) for logging messages to UI
             
         Returns:
             Dictionary with statistics
         """
         self.stats['start_time'] = datetime.now()
+        self.log_callback = log_callback  # Store for use in other methods
         
-        self.logger.log("=" * 60)
-        self.logger.log("НАЧАЛО СИНХРОНИЗАЦИИ")
-        self.logger.log("=" * 60)
-        self.logger.log(f"Library path: {self.library_path}")
-        self.logger.log(f"Last scan path: {self.last_scan_path}")
-        self.logger.log(f"DB path: {self.db_path}")
+        self._log("=" * 60)
+        self._log("НАЧАЛО СИНХРОНИЗАЦИИ")
+        self._log("=" * 60)
+        self._log(f"Library path: {self.library_path}")
+        self._log(f"Last scan path: {self.last_scan_path}")
+        self._log(f"DB path: {self.db_path}")
         
         try:
             # Step 1: Generate CSV
@@ -97,7 +113,7 @@ class SynchronizationService:
             if not records:
                 if progress_callback:
                     progress_callback(10, 100, "Нет файлов для обработки")
-                self.logger.log("Синхронизация: нет файлов в исходной папке")
+                self._log("Синхронизация: нет файлов в исходной папке")
                 return self.stats
             
             # Step 2: Build folder structure and detect duplicates
@@ -111,6 +127,9 @@ class SynchronizationService:
                 progress_callback(50, 100, "Перемещение файлов в библиотеку")
             
             moved_records = self._move_files(records, folder_structure, progress_callback)
+            
+            self._log(f"Всего перемещено: {len(moved_records)} файлов")
+            self._log(f"Готово к внесению в БД: {len(moved_records)} записей")
             
             # Step 4: Update database with moved files
             if progress_callback:
@@ -128,18 +147,18 @@ class SynchronizationService:
                 progress_callback(100, 100, "Синхронизация завершена")
             
             self.stats['end_time'] = datetime.now()
-            self.logger.log(f"Синхронизация завершена: {self.stats}")
-            self.logger.log("=" * 60)
+            self._log(f"Синхронизация завершена: {self.stats}")
+            self._log("=" * 60)
             
             return self.stats
             
         except Exception as e:
-            self.logger.log(f"ОШИБКА при синхронизации: {str(e)}")
+            self._log(f"ОШИБКА при синхронизации: {str(e)}")
             import traceback
-            self.logger.log(f"Stacktrace: {traceback.format_exc()}")
+            self._log(f"Stacktrace: {traceback.format_exc()}")
             self.stats['errors'] += 1
             self.stats['end_time'] = datetime.now()
-            self.logger.log("=" * 60)
+            self._log("=" * 60)
             raise
     
     def _generate_csv_data(self, progress_callback: Optional[Callable] = None) -> List:
@@ -151,8 +170,8 @@ class SynchronizationService:
         Returns:
             List of BookRecord objects
         """
-        self.logger.log(f"Генерация CSV из: {self.last_scan_path}")
-        self.logger.log(f"Путь существует: {self.last_scan_path.exists()}")
+        self._log(f"Генерация CSV из: {self.last_scan_path}")
+        self._log(f"Путь существует: {self.last_scan_path.exists()}")
         
         try:
             records = self.csv_service.generate_csv(
@@ -161,18 +180,18 @@ class SynchronizationService:
                 progress_callback=progress_callback
             )
             
-            self.logger.log(f"CSV сгенерирован: {len(records)} записей")
+            self._log(f"CSV сгенерирован: {len(records)} записей")
             for i, record in enumerate(records[:5]):  # Log first 5 records
-                self.logger.log(f"  [{i+1}] {record.proposed_author} | {record.file_title}")
+                self._log(f"  [{i+1}] {record.proposed_author} | {record.file_title}")
             if len(records) > 5:
-                self.logger.log(f"  ... и ещё {len(records) - 5} записей")
+                self._log(f"  ... и ещё {len(records) - 5} записей")
             
             return records
             
         except Exception as e:
-            self.logger.log(f"Ошибка при генерации CSV: {str(e)}")
+            self._log(f"Ошибка при генерации CSV: {str(e)}")
             import traceback
-            self.logger.log(f"Stacktrace: {traceback.format_exc()}")
+            self._log(f"Stacktrace: {traceback.format_exc()}")
             raise
     
     def _build_folder_structure(
@@ -189,14 +208,14 @@ class SynchronizationService:
         Returns:
             Dictionary mapping file_path -> (genre, author, series, subseries)
         """
-        self.logger.log("Построение структуры папок")
+        self._log("Построение структуры папок")
         
         folder_structure = {}
         duplicates = defaultdict(list)
         
         # Check database for existing entries
         existing_entries = self._get_existing_entries()
-        self.logger.log(f"Существующих записей в БД: {len(existing_entries)}")
+        self._log(f"Существующих записей в БД: {len(existing_entries)}")
         
         for i, record in enumerate(records):
             # Progress update
@@ -217,7 +236,7 @@ class SynchronizationService:
             # Detect duplicates
             dup_key = (author, series, title)
             if dup_key in existing_entries:
-                self.logger.log(f"Найден дубликат: {author} | {series} | {title}")
+                self._log(f"Найден дубликат: {author} | {series} | {title}")
                 duplicates[dup_key].append(record.file_path)
                 self.stats['duplicates_found'] += 1
                 continue
@@ -233,12 +252,12 @@ class SynchronizationService:
                 subseries
             )
             
-            self.logger.log(f"Добавлен в структуру: {author} | {primary_genre} | {series}")
+            self._log(f"Добавлен в структуру: {author} | {primary_genre} | {series}")
             
             # Record as existing for duplicate detection
             existing_entries.add(dup_key)
         
-        self.logger.log(f"Структура создана: {len(folder_structure)} файлов, "
+        self._log(f"Структура создана: {len(folder_structure)} файлов, "
                        f"{len(duplicates)} дубликатов")
         
         return folder_structure
@@ -271,8 +290,8 @@ class SynchronizationService:
         Returns:
             List of successfully moved records with updated file_path
         """
-        self.logger.log("Начало перемещения файлов")
-        self.logger.log(f"Всего записей: {len(records)}, в структуре: {len(folder_structure)}")
+        self._log("Начало перемещения файлов")
+        self._log(f"Всего записей: {len(records)}, в структуре: {len(folder_structure)}")
         
         moved_records = []
         
@@ -305,31 +324,31 @@ class SynchronizationService:
                 
                 # Check if file already exists at target
                 if target_file.exists():
-                    self.logger.log(f"Файл уже существует: {target_file}")
+                    self._log(f"Файл уже существует: {target_file}")
                     self.stats['duplicates_found'] += 1
                     continue
                 
                 # Move file
                 if source_file.exists():
                     shutil.move(str(source_file), str(target_file))
-                    self.logger.log(f"Перемещён: {source_file} -> {target_file}")
+                    self._log(f"Перемещён: {source_file} -> {target_file}")
                     self.stats['files_moved'] += 1
                     
                     # Update record with new path (relative to library_path)
                     record.file_path = str(target_file.relative_to(self.library_path))
                     moved_records.append(record)
-                    self.logger.log(f"  -> Добавлен в moved_records (новый путь: {record.file_path})")
+                    self._log(f"  -> Добавлен в moved_records (новый путь: {record.file_path})")
                 else:
-                    self.logger.log(f"ОШИБКА: файл не найден: {source_file}")
+                    self._log(f"ОШИБКА: файл не найден: {source_file}")
                     self.stats['errors'] += 1
                     
             except Exception as e:
-                self.logger.log(f"Ошибка при перемещении {record.file_path}: {str(e)}")
+                self._log(f"Ошибка при перемещении {record.file_path}: {str(e)}")
                 import traceback
-                self.logger.log(f"Stacktrace: {traceback.format_exc()}")
+                self._log(f"Stacktrace: {traceback.format_exc()}")
                 self.stats['errors'] += 1
         
-        self.logger.log(f"Перемещение завершено: {len(moved_records)} файлов переместили")
+        self._log(f"Перемещение завершено: {len(moved_records)} файлов переместили")
         return moved_records
     
     def _update_database(
@@ -343,12 +362,12 @@ class SynchronizationService:
             records: List of BookRecord objects (successfully moved files)
             progress_callback: Progress callback function
         """
-        self.logger.log(f"Обновление базы данных: {self.db_path}")
-        self.logger.log(f"Количество записей для внесения: {len(records)}")
+        self._log(f"Обновление базы данных: {self.db_path}")
+        self._log(f"Количество записей для внесения: {len(records)}")
         
         if not records:
-            self.logger.log("ВНИМАНИЕ: Нет файлов для внесения в БД")
-            self.logger.log("Проверьте, были ли файлы успешно перемещены")
+            self._log("ВНИМАНИЕ: Нет файлов для внесения в БД")
+            self._log("Проверьте, были ли файлы успешно перемещены")
             return
         
         try:
@@ -371,7 +390,7 @@ class SynchronizationService:
                     
                     now = datetime.now().isoformat()
                     
-                    self.logger.log(f"Запись в БД: {record.proposed_author} | {record.proposed_series} | {record.file_title}")
+                    self._log(f"Запись в БД: {record.proposed_author} | {record.proposed_series} | {record.file_title}")
                     
                     cursor.execute("""
                         INSERT INTO books (
@@ -395,25 +414,25 @@ class SynchronizationService:
                     ))
                     
                     inserted_count += 1
-                    self.logger.log(f"  -> Успешно записано (ID: {cursor.lastrowid})")
+                    self._log(f"  -> Успешно записано (ID: {cursor.lastrowid})")
                     
                 except Exception as e:
-                    self.logger.log(f"ОШИБКА при записи в БД {record.file_path}: {str(e)}")
+                    self._log(f"ОШИБКА при записи в БД {record.file_path}: {str(e)}")
                     import traceback
-                    self.logger.log(f"Stacktrace: {traceback.format_exc()}")
+                    self._log(f"Stacktrace: {traceback.format_exc()}")
                     self.stats['errors'] += 1
             
-            self.logger.log(f"Коммит базы данных... ({inserted_count} записей)")
+            self._log(f"Коммит базы данных... ({inserted_count} записей)")
             conn.commit()
-            self.logger.log(f"Коммит завершён успешно")
+            self._log(f"Коммит завершён успешно")
             conn.close()
             
-            self.logger.log(f"Записано в БД: {inserted_count} записей")
+            self._log(f"Записано в БД: {inserted_count} записей")
             
         except Exception as e:
-            self.logger.log(f"ОШИБКА при обновлении БД: {str(e)}")
+            self._log(f"ОШИБКА при обновлении БД: {str(e)}")
             import traceback
-            self.logger.log(f"Stacktrace: {traceback.format_exc()}")
+            self._log(f"Stacktrace: {traceback.format_exc()}")
             self.stats['errors'] += 1
     
     def _cleanup_empty_folders(self) -> None:
@@ -421,13 +440,13 @@ class SynchronizationService:
         
         Recursively deletes empty directories but preserves last_scan_path root.
         """
-        self.logger.log(f"Очистка пустых папок в: {self.last_scan_path}")
+        self._log(f"Очистка пустых папок в: {self.last_scan_path}")
         
         try:
             self._remove_empty_dirs_recursive(self.last_scan_path)
-            self.logger.log(f"Удалено пустых папок: {self.stats['folders_deleted']}")
+            self._log(f"Удалено пустых папок: {self.stats['folders_deleted']}")
         except Exception as e:
-            self.logger.log(f"Ошибка при очистке папок: {str(e)}")
+            self._log(f"Ошибка при очистке папок: {str(e)}")
     
     def _remove_empty_dirs_recursive(self, path: Path) -> None:
         """Recursively remove empty directories.
@@ -457,7 +476,7 @@ class SynchronizationService:
             if not any(path.iterdir()):  # Check if empty
                 path.rmdir()
                 self.stats['folders_deleted'] += 1
-                self.logger.log(f"Удалена пустая папка: {path}")
+                self._log(f"Удалена пустая папка: {path}")
         except Exception as e:
             # Ignore errors (directory may be in use, has files, etc)
             pass
@@ -472,7 +491,7 @@ class SynchronizationService:
         
         try:
             if not self.db_path.exists():
-                self.logger.log(f"БД не найдена: {self.db_path}")
+                self._log(f"БД не найдена: {self.db_path}")
                 return existing
             
             conn = sqlite3.connect(str(self.db_path))
@@ -483,17 +502,17 @@ class SynchronizationService:
             """)
             
             rows = cursor.fetchall()
-            self.logger.log(f"Прочитано из БД: {len(rows)} существующих записей")
+            self._log(f"Прочитано из БД: {len(rows)} существующих записей")
             
             for row in rows:
                 existing.add(tuple(row))
-                self.logger.log(f"  Существующий: {row[0]} | {row[1]} | {row[2]}")
+                self._log(f"  Существующий: {row[0]} | {row[1]} | {row[2]}")
             
             conn.close()
         except Exception as e:
-            self.logger.log(f"Ошибка при чтении БД: {str(e)}")
+            self._log(f"Ошибка при чтении БД: {str(e)}")
             import traceback
-            self.logger.log(f"Stacktrace: {traceback.format_exc()}")
+            self._log(f"Stacktrace: {traceback.format_exc()}")
         
         return existing
     
