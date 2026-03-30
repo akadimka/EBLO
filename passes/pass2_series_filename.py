@@ -1224,6 +1224,23 @@ class Pass2SeriesFilename:
                         series_group_name = g_name
                         break
                 
+                # ✅ ЗАЩИТА: Если паттерн содержит service_words группу,
+                # проверить что захваченное значение — действительно служебное слово.
+                # Иначе паттерн "Author. service_words «Series»" сработает на любом тексте
+                # перед «», например "Легенда о «Ночном дозоре»" → service_words="Легенда о" (не служебное!)
+                if 'service_words' in group_names:
+                    try:
+                        sw_value = match.group('service_words').strip().rstrip('.').strip()
+                        sw_value_lower = sw_value.lower()
+                        is_real_service_word = any(
+                            sw_value_lower == sw.lower() or sw_value_lower.startswith(sw.lower())
+                            for sw in self.service_words
+                        )
+                        if not is_real_service_word:
+                            continue  # "Легенда о" — не служебное, пропустить этот паттерн
+                    except IndexError:
+                        pass
+
                 if series_group_name:
                     raw_series = match.group(series_group_name).strip()
                     
