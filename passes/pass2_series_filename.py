@@ -1688,6 +1688,9 @@ class Pass2SeriesFilename:
                 part
             ).strip()
             
+            # Дополнительно удаляем "№ N" или одиночный "№" в конце
+            series_name = re.sub(r'\s*№\s*\d*\s*$', '', series_name).strip()
+            
             if series_name:  # Добавляем только непустые части
                 hierarchy.append(series_name)
         
