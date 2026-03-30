@@ -335,8 +335,11 @@ class Pass2SeriesFilename:
         # Fallback - всё перед скобками это серия
         match = re.match(r'^(.+?)\s*\([^)]+\)\s*$', folder_name)
         if match:
-            return match.group(1).strip()
-        
+            folder_name = match.group(1).strip()
+
+        # По правилам русского языка после запятой всегда должен идти пробел
+        folder_name = re.sub(r',(\S)', r', \1', folder_name)
+
         return folder_name.strip()
     
     def execute(self, records: List[BookRecord]) -> None:
