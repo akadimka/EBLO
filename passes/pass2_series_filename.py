@@ -411,13 +411,15 @@ class Pass2SeriesFilename:
             )
             
             if series_candidate:
-                record.extracted_series_candidate = series_candidate
-                
-                # Базовые фильтры (НЕ валидация)
+                # Базовые фильтры (НЕ валидация) — ДО записи в extracted_series_candidate
                 if ',' in series_candidate:
                     series_candidate = None  # Список авторов
                 elif self._is_author_surname(series_candidate, record.proposed_author):
-                    series_candidate = None  # Фамилия
+                    series_candidate = None  # Фамилия или полное имя автора
+                
+                # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)
+                if series_candidate:
+                    record.extracted_series_candidate = series_candidate
             
             # Если прошел базовые фильтры → валидация
             if series_candidate:
@@ -2212,6 +2214,11 @@ class Pass2SeriesFilename:
         
         series_lower = series_candidate.lower()
         series_normalized = re.sub(r'[^\w]', '', series_lower)
+        
+        # Проверяем полное совпадение: серия == полное имя автора
+        # Пример: "Александрова Наталья" == "Александрова Наталья" → True
+        if series_lower.strip() == author.lower().strip():
+            return True
         
         # Проверяем КАЖДУЮ часть автора (может быть "Фамилия Имя" или "Имя Фамилия")
         for part in author_parts:
