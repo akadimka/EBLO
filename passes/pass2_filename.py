@@ -547,25 +547,15 @@ class Pass2Filename:
                 continue
             
             # CHECK: Is this file a collection/anthology?
-            # NEW LOGIC (Feb 20, 2026):
-            # - NEVER determine collection based on folder name
-            # - Only check if FILENAME contains collection keywords
-            # - Require 3+ authors in metadata to assign "Сборник"
-            
-            filename_only = Path(record.file_path).name.lower()  # Only filename, not full path
-            has_collection_keyword = any(kw.lower() in filename_only for kw in self.collection_keywords)
-            
-            if has_collection_keyword:
-                # Keyword found in filename - check author count
-                author_count = self._count_authors(record.metadata_authors)
-                
-                if author_count >= 3:
-                    # This is a true collection/anthology
-                    record.proposed_author = "Сборник"
-                    record.author_source = "collection"
-                    record.needs_filename_fallback = False
-                    processed_count += 1
-                    continue  # Skip regular filename parsing for collections
+            # Rule: if metadata contains 3+ authors → always "Сборник"
+            # (keyword check is secondary, count alone is sufficient)
+            author_count = self._count_authors(record.metadata_authors)
+            if author_count >= 3:
+                record.proposed_author = "Сборник"
+                record.author_source = "collection"
+                record.needs_filename_fallback = False
+                processed_count += 1
+                continue  # Skip regular filename parsing for collections
             
             # Try to extract from filename (NOT full path!)
             # Handle both Windows (\) and Unix (/) path separators
@@ -615,8 +605,12 @@ class Pass2Filename:
                     record.metadata_authors and 
                     not record.proposed_author):  # Only if not already set
                     # Use metadata as fallback, mark as hybrid (filename attempt + metadata fallback)
-                    record.proposed_author = record.metadata_authors
-                    record.author_source = "metadata"  # Couldn't extract from filename
+                    if self._count_authors(record.metadata_authors) >= 3:
+                        record.proposed_author = "Сборник"
+                        record.author_source = "collection"
+                    else:
+                        record.proposed_author = record.metadata_authors
+                        record.author_source = "metadata"  # Couldn't extract from filename
                     record.needs_filename_fallback = False
                     processed_count += 1
                 # else: keep existing (might be metadata or empty)
