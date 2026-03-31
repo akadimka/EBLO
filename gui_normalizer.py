@@ -166,21 +166,27 @@ class NamesDialog:
 class FemaleAuthorsDialog:
     """Окно 'Великомученницы': файлы, у которых все авторы — женщины."""
 
-    def __init__(self, parent, rows):
+    def __init__(self, parent, rows, work_dir=None):
         """
         Args:
-            rows: список кортежей (file_path, proposed_author)
+            rows: список кортежей (file_path, proposed_author),
+                  file_path — относительный путь от work_dir
+            work_dir: Path — корневая рабочая папка (граница удаления)
         """
+        from pathlib import Path as _Path
+        self.work_dir = _Path(work_dir) if work_dir else None
+        self._rows = list(rows)
         self.top = tk.Toplevel(parent)
         self.top.title("Великомученницы")
         self.top.geometry("1000x500")
         self.top.transient(parent)
         self.top.grab_set()
-        self._build_ui(rows)
+        self._build_ui()
 
-    def _build_ui(self, rows):
+    def _build_ui(self):
         # Счётчик
-        ttk.Label(self.top, text=f"Файлов: {len(rows)}").pack(
+        self._count_var = tk.StringVar(value=f"Файлов: {len(self._rows)}")
+        ttk.Label(self.top, textvariable=self._count_var).pack(
             side=tk.TOP, anchor="w", padx=8, pady=(5, 0))
 
         # Таблица
@@ -191,30 +197,101 @@ class FemaleAuthorsDialog:
 
         vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL)
         hsb = ttk.Scrollbar(frame, orient=tk.HORIZONTAL)
-        tree = ttk.Treeview(frame, columns=("file_path", "proposed_author"),
-                            show="headings",
-                            yscrollcommand=vsb.set,
-                            xscrollcommand=hsb.set)
-        vsb.config(command=tree.yview)
-        hsb.config(command=tree.xview)
+        self._tree = ttk.Treeview(frame, columns=("file_path", "proposed_author"),
+                                  show="headings",
+                                  yscrollcommand=vsb.set,
+                                  xscrollcommand=hsb.set)
+        vsb.config(command=self._tree.yview)
+        hsb.config(command=self._tree.xview)
 
-        tree.heading("file_path", text="Путь к файлу")
-        tree.heading("proposed_author", text="Автор(ы)")
-        tree.column("file_path", width=660, minwidth=200)
-        tree.column("proposed_author", width=280, minwidth=120)
+        self._tree.heading("file_path", text="Путь к файлу")
+        self._tree.heading("proposed_author", text="Автор(ы)")
+        self._tree.column("file_path", width=660, minwidth=200)
+        self._tree.column("proposed_author", width=280, minwidth=120)
 
-        tree.grid(row=0, column=0, sticky="nsew")
+        self._tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
-        for file_path, author in rows:
-            tree.insert("", "end", values=(file_path, author))
+        for file_path, author in self._rows:
+            self._tree.insert("", "end", values=(file_path, author))
 
         # Кнопки
         btn_frame = ttk.Frame(self.top, padding="5")
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Button(btn_frame, text="Удалить",
+                   command=self._delete_all).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="Закрыть",
                    command=self.top.destroy).pack(side=tk.LEFT, padx=2)
+
+    def _delete_all(self):
+        """Удалить все файлы списка и опустевшие папки выше них (не выше work_dir)."""
+        import os as _os
+        from pathlib import Path as _Path
+
+        if not self._rows:
+            messagebox.showinfo("Информация", "Список пуст")
+            return
+
+        if not messagebox.askyesno(
+            "Подтверждение удаления",
+            f"Удалить {len(self._rows)} файл(ов) и пустые директории после них?\n"
+            "Это действие необратимо."
+        ):
+            return
+
+        deleted_files = 0
+        errors = []
+        dirs_to_check = set()
+
+        for file_path, _ in self._rows:
+            if self.work_dir:
+                full_path = self.work_dir / file_path
+            else:
+                full_path = _Path(file_path)
+            try:
+                if full_path.exists():
+                    dirs_to_check.add(full_path.parent)
+                    full_path.unlink()
+                    deleted_files += 1
+            except Exception as e:
+                errors.append(f"{file_path}: {e}")
+
+        # Удаление опустевших папок, поднимаясь вверх,
+        # но не удаляя саму рабочую директорию
+        boundary = self.work_dir.resolve() if self.work_dir else None
+        dirs_sorted = sorted(
+            (d.resolve() for d in dirs_to_check),
+            key=lambda p: len(p.parts),
+            reverse=True  # сначала самые глубокие
+        )
+        deleted_dirs = 0
+        for start_dir in dirs_sorted:
+            current = start_dir
+            while True:
+                if boundary and (current == boundary or
+                                 not str(current).startswith(str(boundary))):
+                    break
+                try:
+                    if current.is_dir() and not any(current.iterdir()):
+                        current.rmdir()
+                        deleted_dirs += 1
+                        current = current.parent
+                    else:
+                        break
+                except Exception:
+                    break
+
+        # Обновить таблицу и счётчик
+        self._rows.clear()
+        for iid in self._tree.get_children():
+            self._tree.delete(iid)
+        self._count_var.set("Файлов: 0")
+
+        msg = f"Удалено файлов: {deleted_files}, папок: {deleted_dirs}"
+        if errors:
+            msg += "\n\nОшибки:\n" + "\n".join(errors)
+        messagebox.showinfo("Готово", msg)
 
 
 class StdoutRedirector:
@@ -724,7 +801,7 @@ class CSVNormalizerApp:
                     rows.append((rec.file_path, combined))
 
             self.root.after(0, lambda: self.progress_var.set("Готово"))
-            self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows))
+            self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows, work_dir))
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
