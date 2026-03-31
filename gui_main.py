@@ -33,6 +33,14 @@ except Exception:
 from window_persistence import save_window_geometry, restore_window_geometry
 from window_manager import get_window_manager
 
+# Тема
+try:
+    from gui_theme import apply_theme, SmartStatusBar, stripe_treeview
+except ImportError:
+    apply_theme = None
+    SmartStatusBar = None
+    stripe_treeview = None
+
 # Core imports
 try:
     import genres_manager
@@ -76,7 +84,11 @@ class MainWindow(tk.Tk):
         super().__init__()
         self.title('EBook Library Organizer')
         self.minsize(800, 500)
-        
+
+        # Применить тему до создания виджетов
+        if apply_theme:
+            apply_theme(self)
+
         # Инициализация менеджера окон
         window_manager = get_window_manager()
         window_manager.register_main_window(self)
@@ -239,8 +251,15 @@ class MainWindow(tk.Tk):
         ttk.Button(top_frame, text='Переключить вид', command=self._toggle_view_mode).pack(side='left', padx=2)
 
         # Статусная строка
-        self.status = ttk.Label(self, textvariable=self.progress_var, anchor='w')
-        self.status.pack(fill='x', side='bottom', padx=5, pady=2)
+        if SmartStatusBar:
+            self._status_bar = SmartStatusBar(self)
+            self._status_bar.pack(fill='x', side='bottom')
+            # Перепривязываем progress_var к переменной умного статус-бара
+            self.progress_var = self._status_bar.variable
+        else:
+            self.status = ttk.Label(self, textvariable=self.progress_var, anchor='w')
+            self.status.pack(fill='x', side='bottom', padx=5, pady=2)
+            self._status_bar = None
 
         # Основные панели
         self.main_pane = ttk.PanedWindow(self, orient='horizontal')
@@ -248,7 +267,14 @@ class MainWindow(tk.Tk):
 
         # Панель жанров
         self.genres_frame = ttk.LabelFrame(self.main_pane, text='Жанры', padding=5)
-        self.genres_list = tk.Listbox(self.genres_frame, height=15)
+        self.genres_list = tk.Listbox(
+            self.genres_frame, height=15,
+            font=("Segoe UI", 10), relief="flat",
+            background="#FFFFFF", foreground="#1A1A1A",
+            selectbackground="#CCE4F7", selectforeground="#003D7A",
+            borderwidth=0, highlightthickness=1, highlightcolor="#C8C8C8",
+            activestyle="none",
+        )
         self.genres_list.pack(fill='both', expand=True, side='left')
         self.genres_list.bind('<Double-Button-1>', self._on_genre_double_click)
         genres_scroll = ttk.Scrollbar(self.genres_frame, command=self.genres_list.yview)
@@ -257,7 +283,14 @@ class MainWindow(tk.Tk):
 
         # Панель ошибок
         self.errors_frame = ttk.LabelFrame(self.main_pane, text='Ошибки/Замечания', padding=5)
-        self.errors_list = tk.Listbox(self.errors_frame, height=15)
+        self.errors_list = tk.Listbox(
+            self.errors_frame, height=15,
+            font=("Segoe UI", 10), relief="flat",
+            background="#FFFFFF", foreground="#1A1A1A",
+            selectbackground="#CCE4F7", selectforeground="#003D7A",
+            borderwidth=0, highlightthickness=1, highlightcolor="#C8C8C8",
+            activestyle="none",
+        )
         self.errors_list.pack(fill='both', expand=True, side='left')
         errors_scroll = ttk.Scrollbar(self.errors_frame, command=self.errors_list.yview)
         self.errors_list.config(yscrollcommand=errors_scroll.set)
@@ -265,7 +298,14 @@ class MainWindow(tk.Tk):
 
         # Панель деталей
         self.details_frame = ttk.LabelFrame(self.main_pane, text='Детали', padding=5)
-        self.details_list = tk.Listbox(self.details_frame, height=15)
+        self.details_list = tk.Listbox(
+            self.details_frame, height=15,
+            font=("Segoe UI", 10), relief="flat",
+            background="#FFFFFF", foreground="#1A1A1A",
+            selectbackground="#CCE4F7", selectforeground="#003D7A",
+            borderwidth=0, highlightthickness=1, highlightcolor="#C8C8C8",
+            activestyle="none",
+        )
         self.details_list.pack(fill='both', expand=True, side='left')
         self.details_list.bind('<Double-Button-1>', self._on_detail_double_click)
         details_scroll = ttk.Scrollbar(self.details_frame, command=self.details_list.yview)
@@ -275,6 +315,8 @@ class MainWindow(tk.Tk):
         # Панель с деревом папок
         self.folder_tree_frame = ttk.LabelFrame(self.main_pane, text='Структура папок', padding=5)
         self.folder_tree = ttk.Treeview(self.folder_tree_frame)
+        if stripe_treeview:
+            stripe_treeview(self.folder_tree)
         self.folder_tree.pack(fill='both', expand=True, side='left')
         folder_tree_scroll = ttk.Scrollbar(self.folder_tree_frame, command=self.folder_tree.yview)
         self.folder_tree.config(yscrollcommand=folder_tree_scroll.set)
@@ -538,6 +580,8 @@ class MainWindow(tk.Tk):
             return
         
         self.progress_var.set('Сканирование...')
+        if self._status_bar:
+            self._status_bar.set('Сканирование...', 'busy')
         self.logger.log(f'Начато сканирование: {folder}')
         # TODO: Реализовать сканирование
 
@@ -612,6 +656,8 @@ class MainWindow(tk.Tk):
             def progress_callback(current, total, status):
                 """Update progress bar in UI."""
                 self.after(0, lambda: self.progress_var.set(f"{status} ({current}/{total})"))
+                if self._status_bar:
+                    self.after(0, lambda: self._status_bar.set(f"{status} ({current}/{total})", 'busy'))
                 self.logger.log(f"{status}: {current}/{total}")
             
             def log_callback(message: str):
@@ -619,14 +665,14 @@ class MainWindow(tk.Tk):
                 self.logger.log(f"[SYNC] {message}")
             
             # Run synchronization
-            self.after(0, lambda: self.progress_var.set("Инициализация синхронизации..."))
+            self.after(0, lambda: self._set_status("Инициализация синхронизации...", 'busy'))
             stats = sync_service.synchronize(
                 progress_callback=progress_callback,
                 log_callback=log_callback
             )
             
             # Update final status
-            self.after(0, lambda: self.progress_var.set("Синхронизация завершена"))
+            self.after(0, lambda: self._set_status("Синхронизация завершена", 'ok'))
             
             # Show statistics popup
             self._show_synchronization_stats(stats)
@@ -642,7 +688,7 @@ class MainWindow(tk.Tk):
                     f"Ошибка при синхронизации: {str(e)}"
                 )
             )
-            self.after(0, lambda: self.progress_var.set("ОШИБКА"))
+            self.after(0, lambda: self._set_status("ОШИБКА", 'error'))
         
         finally:
             sys.stdout = original_stdout
