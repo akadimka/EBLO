@@ -543,32 +543,40 @@ class CSVNormalizerApp:
             female_set = set(n.lower() for n in settings.get_female_names())
 
             rows = []
-            seen = set()
+            seen = set()  # деdup по одному автору
             for rec in records:
-                author = rec.proposed_author or ""
+                combined = rec.proposed_author or ""
                 source = rec.author_source or ""
-                if not author or author == "Сборник":
+                if not combined or combined == "Сборник":
                     continue
-                # Второе слово = имя (формат "Фамилия Имя" или "Фамилия Имя Отчество")
-                parts = author.split()
-                first_name = parts[1] if len(parts) >= 2 else ""
-                key = (source, author)
-                if key in seen:
-                    continue
-                seen.add(key)
-                # Определить пол по списку
-                fn_lower = first_name.lower()
-                if fn_lower in male_set:
-                    gender = "Муж."
-                elif fn_lower in female_set:
-                    gender = "Жен."
-                else:
-                    gender = ""  # неизвестно
 
-                # Показывать только тех, чьё имя ещё не в списках
-                if gender != "":
-                    continue
-                rows.append((source, author, first_name, gender))
+                # Разбить на отдельных авторов (разделители: ", " или "; ")
+                import re as _re
+                authors = [a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()]
+
+                for author in authors:
+                    key = author
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    # Второе слово = имя (формат "Фамилия Имя ...")
+                    parts = author.split()
+                    first_name = parts[1] if len(parts) >= 2 else ""
+
+                    # Определить пол по списку
+                    fn_lower = first_name.lower()
+                    if fn_lower in male_set:
+                        gender = "Муж."
+                    elif fn_lower in female_set:
+                        gender = "Жен."
+                    else:
+                        gender = ""  # неизвестно
+
+                    # Показывать только тех, чьё имя ещё не в списках
+                    if gender != "":
+                        continue
+                    rows.append((source, author, first_name, gender))
 
             self.root.after(0, lambda: self.progress_var.set("Готово"))
             self.root.after(0, lambda: NamesDialog(self.root, rows, self.settings_manager))
