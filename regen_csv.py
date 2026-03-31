@@ -278,6 +278,8 @@ class RegenCSVService:
         try:
             # Пункт 3: compile blacklist once per run with current settings
             self._compiled_blacklist = self._compile_blacklist_for_run()
+            # Загрузить пользовательский список «без серии» один раз на прогон
+            self._no_series_names = self.settings.get_no_series_folder_names()
 
             print("\n" + "="*80)
             print("  CSV REGENERATION - 6-PASS SYSTEM (Modular)")
@@ -386,7 +388,7 @@ class RegenCSVService:
                         # Это соблюдает cascade priority: FOLDER(3) > FILENAME(2) > METADATA(1)
                         # Do NOT set series_source here - let following passes handle it
                         pass
-                    elif any(is_no_series_folder(f) for f in series_folders):
+                    elif any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
                         # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии.
                         # Фиксируем пустую серию и блокируем дальнейшее извлечение.
                         record.proposed_series = ""

@@ -252,6 +252,19 @@ class SettingsManager:
             return list(v)
         return None
 
+    def get_no_series_folder_names(self) -> frozenset:
+        """Вернуть frozenset нормализованных имён папок «без серии» из конфига.
+
+        Нормализация: нижний регистр, ё→е.
+        """
+        lst = self.settings.get('no_series_folder_names')
+        if not isinstance(lst, list):
+            return frozenset()
+        return frozenset(
+            name.lower().replace('е́', 'е').replace('ё', 'е')
+            for name in lst if name
+        )
+
     def set_list(self, key, lst):
         """Set a top-level list value and save. If lst is None, remove the key.
         Removes duplicates (case-insensitive) while preserving order."""

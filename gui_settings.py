@@ -209,7 +209,18 @@ class SettingsWindow(tk.Toplevel):
                                     'Примеры:\n'
                                     '  фантастический\n'
                                     '  боевик\n'
-                                    '  детектив'
+                                    '  детектив',
+            'no_series_folder_names': 'Имена папок, означающих «книги без серии».\n'
+                                      'Если папка автора содержит такую подпапку,\n'
+                                      'proposed_series для всех файлов в ней\n'
+                                      'остаётся пустым и не заполняется из\n'
+                                      'имени файла или метаданных.\n\n'
+                                      'Сравнение ведётся без учёта регистра.\n\n'
+                                      'Примеры:\n'
+                                      '  Вне серий\n'
+                                      '  Без серии\n'
+                                      '  Отдельные произведения\n'
+                                      '  standalone'
         }
 
         # Populate combobox with list keys
@@ -223,7 +234,8 @@ class SettingsWindow(tk.Toplevel):
             'author_initials_and_suffixes',
             'genre_category_words',
             'male_names',
-            'female_names'
+            'female_names',
+            'no_series_folder_names',
         ]
         for key in required_keys:
             if key not in keys:

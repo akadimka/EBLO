@@ -142,12 +142,18 @@ NO_SERIES_FOLDER_NAMES: frozenset = frozenset({
 })
 
 
-def is_no_series_folder(folder_name: str) -> bool:
+def is_no_series_folder(folder_name: str, extra_names: frozenset = None) -> bool:
     """Return True if the folder name means 'books without a series'.
 
     Comparison is case-insensitive and treats е́ (ё) as е.
+    extra_names: optional frozenset of user-defined names loaded from config
+                 (no_series_folder_names). Built-in NO_SERIES_FOLDER_NAMES
+                 always acts as a fallback.
     """
-    return folder_name.lower().replace('е́', 'е').replace('ё', 'е') in NO_SERIES_FOLDER_NAMES
+    normalized = folder_name.lower().replace('е́', 'е').replace('ё', 'е')
+    if extra_names and normalized in extra_names:
+        return True
+    return normalized in NO_SERIES_FOLDER_NAMES
 
 class FilterReason:
     """Причины, по которым значение может быть отфильтровано."""

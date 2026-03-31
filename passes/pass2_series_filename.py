@@ -306,6 +306,8 @@ class Pass2SeriesFilename:
         self.collection_keywords = self.settings.get_list('collection_keywords')
         self.service_words = self.settings.get_list('service_words')
         self.filename_blacklist = self.settings.get_list('filename_blacklist')
+        # Пользовательский список папок «без серии» (дополняет встроенный NO_SERIES_FOLDER_NAMES)
+        self.no_series_names = self.settings.get_no_series_folder_names()
         
         # Получить паттерны из конфига
         self.file_patterns = self.settings.get_list('author_series_patterns_in_files') or []
@@ -383,7 +385,7 @@ class Pass2SeriesFilename:
                             series_folder = path_parts[i + 1]
                             if not series_folder.endswith('.fb2'):
                                 # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии
-                                if is_no_series_folder(series_folder):
+                                if is_no_series_folder(series_folder, self.no_series_names):
                                     record.proposed_series = ""
                                     record.series_source = "no_series_folder"
                                     break
