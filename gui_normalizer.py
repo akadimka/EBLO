@@ -398,7 +398,18 @@ class CSVNormalizerApp:
         path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
         ttk.Button(top_frame, text="Обзор", command=self.browse_folder).pack(side=tk.LEFT, padx=5)
-        
+
+        # Строка поиска / фильтр
+        search_frame = ttk.Frame(self.root, padding="2 0 5 0")
+        search_frame.pack(fill=tk.X, side=tk.TOP)
+        ttk.Label(search_frame, text="Фильтр:").pack(side=tk.LEFT, padx=5)
+        self.search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=60)
+        search_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self.search_var.trace('w', self._apply_filter)
+        ttk.Button(search_frame, text="✕", width=3,
+                   command=lambda: self.search_var.set("")).pack(side=tk.LEFT)
+
         # Основная таблица
         table_frame = ttk.Frame(self.root, padding="5")
         table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -413,7 +424,7 @@ class CSVNormalizerApp:
         columns = (
             "file_path", "metadata_authors", "proposed_author", "author_source",
             "metadata_series", "proposed_series", "series_source",
-            "book_title", "metadata_genre"
+            "book_title", "metadata_genre", "series_number"
         )
         
         self.tree = ttk.Treeview(
@@ -438,7 +449,8 @@ class CSVNormalizerApp:
             "proposed_series": "proposed_series",
             "series_source": "series_source",
             "book_title": "book_title",
-            "metadata_genre": "metadata_genre"
+            "metadata_genre": "metadata_genre",
+            "series_number": "series_number",
         }
         
         for col in columns:
@@ -600,6 +612,40 @@ class CSVNormalizerApp:
             sys.stdout = original_stdout
             self.processing = False
     
+    def _apply_filter(self, *_):
+        """Re-display table using current search query."""
+        PAGE_SIZE = 1000
+        query = self.search_var.get().lower().strip() if hasattr(self, 'search_var') else ''
+        all_records = getattr(self, '_all_records', [])
+        if not query:
+            self._display_records = all_records
+        else:
+            self._display_records = [
+                r for r in all_records
+                if query in ' '.join(str(v) for v in r.to_tuple()).lower()
+            ]
+        # Reload Treeview from scratch
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        if hasattr(self, '_load_more_btn') and self._load_more_btn:
+            try:
+                self._load_more_btn.destroy()
+            except Exception:
+                pass
+            self._load_more_btn = None
+        self._records_offset = 0
+        self._load_more_rows(PAGE_SIZE)
+        if self._records_offset < len(self._display_records):
+            remaining = len(self._display_records) - self._records_offset
+            self._load_more_btn = ttk.Button(
+                self.root,
+                text=f"Загрузить ещё ({remaining} записей)",
+                command=lambda: self._load_more_rows(PAGE_SIZE)
+            )
+            self._load_more_btn.pack(side=tk.BOTTOM, pady=2, before=self.tree.master)
+        else:
+            self._load_more_btn = None
+
     def _fill_table(self, records):
         """Заполнить таблицу записями (пагинация: первые PAGE_SIZE строк + кнопка 'Загрузить ещё')."""
         PAGE_SIZE = 1000
@@ -617,14 +663,15 @@ class CSVNormalizerApp:
             self._load_more_btn = None
 
         self._all_records = records
+        self._display_records = records  # No filter active yet
         self._records_offset = 0
 
         # Вставить первую страницу
         self._load_more_rows(PAGE_SIZE)
 
         # Если ещё остались записи, добавить кнопку 'Загрузить ещё'
-        if self._records_offset < len(self._all_records):
-            remaining = len(self._all_records) - self._records_offset
+        if self._records_offset < len(self._display_records):
+            remaining = len(self._display_records) - self._records_offset
             btn_frame = self.tree.master  # table_frame
             self._load_more_btn = ttk.Button(
                 self.root,
@@ -637,13 +684,14 @@ class CSVNormalizerApp:
 
     def _load_more_rows(self, count: int):
         """Insert up to *count* rows starting at self._records_offset."""
-        end = min(self._records_offset + count, len(self._all_records))
-        for record in self._all_records[self._records_offset:end]:
+        display = getattr(self, '_display_records', getattr(self, '_all_records', []))
+        end = min(self._records_offset + count, len(display))
+        for record in display[self._records_offset:end]:
             self.tree.insert('', tk.END, values=record.to_tuple())
         self._records_offset = end
 
         # Удалить кнопку если всё загружено
-        if self._records_offset >= len(getattr(self, '_all_records', [])):
+        if self._records_offset >= len(display):
             if hasattr(self, '_load_more_btn') and self._load_more_btn:
                 try:
                     self._load_more_btn.destroy()
@@ -651,7 +699,7 @@ class CSVNormalizerApp:
                     pass
                 self._load_more_btn = None
         elif hasattr(self, '_load_more_btn') and self._load_more_btn:
-            remaining = len(self._all_records) - self._records_offset
+            remaining = len(display) - self._records_offset
             self._load_more_btn.config(text=f"Загрузить ещё ({remaining} записей)")
         
     def cancel(self):

@@ -205,7 +205,19 @@ class MainWindow(tk.Tk):
         log_menu = tk.Menu(menubar, tearoff=0)
         log_menu.add_command(label='Показать лог', command=self._show_log_window)
         menubar.add_cascade(label='Лог', menu=log_menu)
-        
+
+        # Библиотека
+        lib_menu = tk.Menu(menubar, tearoff=0)
+        lib_menu.add_command(label='Статистика',         command=self._open_dashboard)
+        lib_menu.add_command(label='Поиск по метаданным', command=self._open_search)
+        lib_menu.add_separator()
+        lib_menu.add_command(label='Новые книги',         command=self._open_new_books)
+        lib_menu.add_command(label='Серии с пробелами',   command=self._open_series_gaps)
+        lib_menu.add_separator()
+        lib_menu.add_command(label='Проверка целостности FB2', command=self._open_integrity_check)
+        lib_menu.add_command(label='Генератор OPDS-каталога',  command=self._open_opds_generator)
+        menubar.add_cascade(label='Библиотека', menu=lib_menu)
+
         self.config(menu=menubar)
 
     def _create_main_ui(self):
@@ -756,6 +768,62 @@ class MainWindow(tk.Tk):
         
         db_window.protocol('WM_DELETE_WINDOW', on_close)
     
+    # ------------------------------------------------------------------
+    # Библиотека menu handlers
+    # ------------------------------------------------------------------
+
+    def _open_dashboard(self):
+        """Открыть окно статистики библиотеки."""
+        try:
+            from gui_dashboard import DashboardWindow
+        except ImportError:
+            from .gui_dashboard import DashboardWindow
+        DashboardWindow(parent=self, settings_manager=self.settings)
+
+    def _open_search(self):
+        """Открыть окно поиска по метаданным."""
+        try:
+            from gui_search import SearchWindow
+        except ImportError:
+            from .gui_search import SearchWindow
+        SearchWindow(parent=self, settings_manager=self.settings)
+
+    def _open_new_books(self):
+        """Открыть окно новых книг."""
+        try:
+            from gui_new_books import NewBooksWindow
+        except ImportError:
+            from .gui_new_books import NewBooksWindow
+        NewBooksWindow(parent=self, settings_manager=self.settings)
+
+    def _open_series_gaps(self):
+        """Открыть окно серий с пробелами."""
+        try:
+            from gui_series_gaps import SeriesGapsWindow
+        except ImportError:
+            from .gui_series_gaps import SeriesGapsWindow
+        SeriesGapsWindow(parent=self, settings_manager=self.settings)
+
+    def _open_integrity_check(self):
+        """Открыть окно глубокой проверки FB2."""
+        try:
+            from gui_integrity_check import IntegrityCheckWindow
+        except ImportError:
+            from .gui_integrity_check import IntegrityCheckWindow
+        folder = self.selected_folder.get() or ''
+        IntegrityCheckWindow(parent=self, settings_manager=self.settings,
+                             initial_folder=folder)
+
+    def _open_opds_generator(self):
+        """Открыть окно генератора OPDS-каталога."""
+        try:
+            from opds_generator import OPDSGeneratorWindow
+        except ImportError:
+            from .opds_generator import OPDSGeneratorWindow
+        OPDSGeneratorWindow(parent=self, settings_manager=self.settings)
+
+    # ------------------------------------------------------------------
+
     def _load_database_data(self, books_tree, series_tree):
         """Загрузить данные из базы и отобразить в таблицах."""
         import sqlite3

@@ -1175,7 +1175,7 @@ class FB2AuthorExtractor:
         Returns:
             dict with keys: title (str), authors (str), series (str), genre (str)
         """
-        result = {'title': '', 'authors': '', 'series': '', 'genre': ''}
+        result = {'title': '', 'authors': '', 'series': '', 'series_number': '', 'genre': ''}
         try:
             content = self._detect_correct_encoding(fb2_path)
             if not content:
@@ -1220,6 +1220,8 @@ class FB2AuthorExtractor:
             )
             if seq_m:
                 result['series'] = seq_m.group(1).strip()
+                num_m = re.search(r'number=["\']([\d]+)["\']', seq_m.group(0), re.IGNORECASE)
+                result['series_number'] = num_m.group(1) if num_m else ''
 
             # Genre
             genres = re.findall(r'<genre[^>]*>(.*?)</genre>', title_info, re.DOTALL)

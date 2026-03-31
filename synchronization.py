@@ -560,7 +560,32 @@ class SynchronizationService:
         try:
             conn = sqlite3.connect(str(self.db_path))
             cursor = conn.cursor()
-            
+
+            # Create table if not yet initialised
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS books (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    author TEXT,
+                    author_source TEXT,
+                    series TEXT,
+                    series_source TEXT,
+                    series_number TEXT DEFAULT '',
+                    subseries TEXT DEFAULT '',
+                    title TEXT,
+                    file_path TEXT UNIQUE,
+                    file_hash TEXT,
+                    genre TEXT,
+                    added_date TEXT,
+                    updated_date TEXT,
+                    last_sync_check TEXT
+                )
+            """)
+            # Migrate older DBs that pre-date the series_number column
+            try:
+                cursor.execute("ALTER TABLE books ADD COLUMN series_number TEXT DEFAULT ''")
+            except Exception:
+                pass  # Column already exists
+
             now = datetime.now().isoformat()
             rows_to_insert = []
 
@@ -579,6 +604,7 @@ class SynchronizationService:
                         record.author_source,
                         record.proposed_series,
                         record.series_source,
+                        getattr(record, 'series_number', ''),
                         getattr(record, 'subseries', ''),
                         record.file_title,
                         record.file_path,
@@ -594,9 +620,9 @@ class SynchronizationService:
                 cursor.executemany("""
                     INSERT INTO books (
                         author, author_source, series, series_source,
-                        subseries, title, file_path, file_hash, genre,
+                        series_number, subseries, title, file_path, file_hash, genre,
                         added_date, updated_date, last_sync_check
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, rows_to_insert)
 
             inserted_count = len(rows_to_insert) - self.stats.get('errors', 0)

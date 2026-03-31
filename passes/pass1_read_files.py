@@ -22,6 +22,7 @@ class BookRecord:
     proposed_series: str        # Final series after all PASS
     series_source: str          # Source of series
     metadata_genre: str = ""    # Genres from <genre> tags (comma-separated)
+    series_number: str = ""       # Sequence number within series (from <sequence number=.../>)
     extracted_series_candidate: str = ""  # Series found in filename (even if blocked by BL)
     needs_filename_fallback: bool = False  # True if folder parse found nothing, need filename PASS 2
     
@@ -36,7 +37,8 @@ class BookRecord:
             self.proposed_series,
             self.series_source,
             self.file_title,
-            self.metadata_genre
+            self.metadata_genre,
+            self.series_number,
         )
 
 
@@ -95,6 +97,7 @@ class Pass1ReadFiles:
                     proposed_author=author or "",
                     author_source=author_source or "",
                     metadata_series=meta['series'] or "",
+                    series_number=meta.get('series_number', ''),
                     proposed_series="",
                     series_source="",
                     metadata_genre=meta['genre'] or "",
