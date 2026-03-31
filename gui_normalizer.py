@@ -562,18 +562,21 @@ class CSVNormalizerApp:
                         continue
                     seen.add(key)
 
-                    # Второе слово = имя (формат "Фамилия Имя ...")
+                    # Второе слово = имя по умолчанию для отображения
                     parts = author.split()
                     first_name = parts[1] if len(parts) >= 2 else ""
 
-                    # Определить пол по списку
-                    fn_lower = first_name.lower()
-                    if fn_lower in male_set:
-                        gender = "Муж."
-                    elif fn_lower in female_set:
-                        gender = "Жен."
-                    else:
-                        gender = ""  # неизвестно
+                    # Проверяем ВСЕ слова автора — формат может быть как
+                    # "Фамилия Имя", так и "Имя Фамилия" (до нормализации Pass3)
+                    gender = ""
+                    for word in parts:
+                        w_lower = word.lower()
+                        if w_lower in male_set:
+                            gender = "Муж."
+                            break
+                        elif w_lower in female_set:
+                            gender = "Жен."
+                            break
 
                     # Показывать только тех, чьё имя ещё не в списках
                     if gender != "":
