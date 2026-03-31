@@ -501,7 +501,20 @@ class SynchronizationService:
                     shutil.move(str(source_file), str(target_file))
                     self._log(f"  ✓ Успешно перемещён")
                     self.stats['files_moved'] += 1
-                    
+
+                    # Patch FB2 metadata tags (author + series) in the moved file.
+                    # Books with >=3 original authors: do not touch author tags.
+                    orig_auth_count = len([
+                        a for a in re.split(r'[;,]+', record.metadata_authors or '')
+                        if a.strip()
+                    ])
+                    patch_author = record.proposed_author if orig_auth_count < 3 else None
+                    self._patch_fb2_tags(
+                        target_file,
+                        patch_author,
+                        record.proposed_series or "",
+                    )
+
                     # Update record with new path (relative to library_path)
                     record.file_path = str(target_file.relative_to(self.library_path))
                     moved_records.append(record)
@@ -724,3 +737,181 @@ class SynchronizationService:
             stats['duration_str'] = f"{int(duration)} секунд"
         
         return stats
+
+    # ------------------------------------------------------------------
+    # FB2 tag patching
+    # ------------------------------------------------------------------
+
+    def _patch_fb2_tags(
+        self,
+        fb2_path: Path,
+        proposed_author: Optional[str],
+        proposed_series: str,
+    ) -> None:
+        """Overwrite <author> and <sequence> tags in a FB2 file.
+
+        The file is read and written back with its **original** encoding
+        (detected from the XML declaration or trial-decoded).
+
+        Args:
+            fb2_path:        Absolute path to the already-moved FB2 file.
+            proposed_author: Author string in "Фамилия Имя[, …]" format.
+                             ``None`` — leave existing <author> tags untouched.
+            proposed_series: Series name to write into <sequence name="…"/>.
+                             Empty string — leave existing <sequence> untouched.
+        """
+        if proposed_author is None and not proposed_series:
+            return
+
+        try:
+            raw_bytes = fb2_path.read_bytes()
+
+            # ---- detect encoding ----
+            declared_enc = None
+            decl_m = re.search(
+                rb'<\?xml[^>]*encoding\s*=\s*["\']([^"\']+)["\']',
+                raw_bytes, re.IGNORECASE,
+            )
+            if decl_m:
+                try:
+                    declared_enc = decl_m.group(1).decode('ascii', errors='ignore')
+                except Exception:
+                    pass
+
+            enc_candidates = []
+            if declared_enc:
+                enc_candidates.append(declared_enc)
+            enc_candidates.extend(['utf-8-sig', 'utf-8', 'cp1251', 'latin-1'])
+
+            seen_enc: set = set()
+            content: Optional[str] = None
+            content_encoding = 'utf-8'
+
+            for enc in enc_candidates:
+                norm = enc.lower().replace('-', '').replace('_', '')
+                if norm in seen_enc:
+                    continue
+                seen_enc.add(norm)
+                try:
+                    candidate = raw_bytes.decode(enc, errors='strict')
+                except (LookupError, UnicodeDecodeError):
+                    continue
+                if candidate.lstrip('\ufeff').lstrip().startswith(('<', '<?')):
+                    content = candidate
+                    content_encoding = enc
+                    break
+
+            if content is None:
+                self._log(f"  ⚠️  Не удалось определить кодировку: {fb2_path.name}")
+                return
+
+            # ---- strip / remember BOM ----
+            has_bom = content.startswith('\ufeff')
+            if has_bom:
+                content = content[1:]
+
+            # ---- locate <title-info> section ----
+            ti_m = re.search(
+                r'(<(?:fb:)?title-info>)(.*?)(</(?:fb:)?title-info>)',
+                content, re.DOTALL,
+            )
+            if not ti_m:
+                self._log(f"  ⚠️  <title-info> не найден в {fb2_path.name}")
+                return
+
+            ti_open  = ti_m.group(1)
+            ti_body  = ti_m.group(2)
+            ti_close = ti_m.group(3)
+
+            # namespace prefix used in this file
+            ns = 'fb:' if ti_open.startswith('<fb:') else ''
+
+            # ---- 1. patch author tags ----
+            if proposed_author:
+                authors = [a.strip() for a in re.split(r'[,;]+', proposed_author) if a.strip()]
+                author_xmls = []
+                for auth in authors:
+                    parts = auth.split()
+                    if len(parts) == 1:
+                        xml = (
+                            f'<{ns}author>'
+                            f'<{ns}last-name>{parts[0]}</{ns}last-name>'
+                            f'</{ns}author>'
+                        )
+                    elif len(parts) == 2:
+                        xml = (
+                            f'<{ns}author>'
+                            f'<{ns}last-name>{parts[0]}</{ns}last-name>'
+                            f'<{ns}first-name>{parts[1]}</{ns}first-name>'
+                            f'</{ns}author>'
+                        )
+                    else:
+                        xml = (
+                            f'<{ns}author>'
+                            f'<{ns}last-name>{parts[0]}</{ns}last-name>'
+                            f'<{ns}first-name>{parts[1]}</{ns}first-name>'
+                            f'<{ns}middle-name>{" ".join(parts[2:])}</{ns}middle-name>'
+                            f'</{ns}author>'
+                        )
+                    author_xmls.append(xml)
+
+                new_authors_block = '\n    '.join(author_xmls)
+
+                # remove all existing <author> blocks (including whitespace around them)
+                ti_body = re.sub(
+                    r'\s*<(?:fb:)?author>.*?</(?:fb:)?author>',
+                    '', ti_body, flags=re.DOTALL,
+                )
+
+                # insert before <book-title> (or prepend if absent)
+                bt_m = re.search(r'<(?:fb:)?book-title', ti_body)
+                if bt_m:
+                    pos = bt_m.start()
+                    ti_body = (
+                        ti_body[:pos]
+                        + '\n    ' + new_authors_block + '\n    '
+                        + ti_body[pos:]
+                    )
+                else:
+                    ti_body = '\n    ' + new_authors_block + ti_body
+
+            # ---- 2. patch series tag ----
+            if proposed_series:
+                seq_m = re.search(r'<sequence\b[^>]*/?\s*>', ti_body, re.IGNORECASE)
+
+                # preserve existing <number> attribute if any
+                number_attr = ''
+                if seq_m:
+                    num_m = re.search(
+                        r'number\s*=\s*["\']([^"\']*)["\']',
+                        seq_m.group(0), re.IGNORECASE,
+                    )
+                    if num_m:
+                        number_attr = f' number="{num_m.group(1)}"'
+
+                new_seq = f'<sequence name="{proposed_series}"{number_attr}/>'
+                if seq_m:
+                    ti_body = ti_body[:seq_m.start()] + new_seq + ti_body[seq_m.end():]
+                else:
+                    ti_body = ti_body.rstrip() + '\n    ' + new_seq + '\n  '
+
+            # ---- reconstruct content ----
+            new_ti = ti_open + ti_body + ti_close
+            result = content[:ti_m.start()] + new_ti + content[ti_m.end():]
+
+            if has_bom:
+                result = '\ufeff' + result
+
+            # ---- write back with ORIGINAL encoding ----
+            try:
+                out_bytes = result.encode(content_encoding, errors='replace')
+            except LookupError:
+                out_bytes = result.encode('utf-8', errors='replace')
+
+            fb2_path.write_bytes(out_bytes)
+            self._log(f"  ✓ Теги обновлены ({content_encoding}): {fb2_path.name}")
+
+        except Exception as e:
+            import traceback
+            self._log(f"  ✗ Ошибка обновления тегов {fb2_path.name}: {e}")
+            self._log(traceback.format_exc())
