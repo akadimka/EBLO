@@ -124,7 +124,30 @@ FILE_EXTENSION_FOLDER_NAMES: frozenset = frozenset({
     'djvu', 'djv', 'mobi', 'azw', 'azw3', 'lit', 'lrf',
     'html', 'htm', 'odt', 'zip', 'rar', '7z',
 })
+# Нормализованные (нижний регистр, е́→е) имена папок, означающих «без серии».
+# Если папка с таким именем встречается в пути, proposed_series должно остаться пустым.
+NO_SERIES_FOLDER_NAMES: frozenset = frozenset({
+    # вне серий
+    'вне серий', 'вне серии',
+    # без серий
+    'без серии', 'без серий',
+    # несерийное
+    'несерийное', 'несерийный',
+    # внесерийное
+    'внесерийное',
+    # отдельные произведения
+    'отдельные произведения', 'отдельное произведение',
+    # standalone
+    'standalone',
+})
 
+
+def is_no_series_folder(folder_name: str) -> bool:
+    """Return True if the folder name means 'books without a series'.
+
+    Comparison is case-insensitive and treats е́ (ё) as е.
+    """
+    return folder_name.lower().replace('е́', 'е').replace('ё', 'е') in NO_SERIES_FOLDER_NAMES
 
 class FilterReason:
     """Причины, по которым значение может быть отфильтровано."""

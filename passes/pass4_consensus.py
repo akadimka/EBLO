@@ -367,6 +367,9 @@ class Pass4Consensus:
                             applies = True
                         
                         if applies:
+                            # Не перезаписываем «Без серии»
+                            if target_record.series_source == "no_series_folder":
+                                continue
                             # Apply consensus
                             target_record.proposed_series = series_base
                             target_record.series_source = "author-consensus"
@@ -408,6 +411,7 @@ class Pass4Consensus:
             # Apply to files with empty proposed_series if they have empty proposed_series
             for record in group_records:
                 if (not record.proposed_series and 
+                    record.series_source != "no_series_folder" and
                     record.metadata_series and 
                     record.metadata_series in consensus_metadata_series):
                     
@@ -450,6 +454,7 @@ class Pass4Consensus:
                 # ВАЖНО: проверяем что extracted_series_candidate is None, не just falsey
                 # Потому что "" (empty string) означает что это одна книга, не серия
                 if (not record.proposed_series and 
+                    record.series_source != "no_series_folder" and
                     record.extracted_series_candidate is None and
                     len(consensus_proposed_series) == 1):  # Only apply if unanimous consensus
                     

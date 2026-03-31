@@ -28,9 +28,9 @@ from pathlib import Path
 from typing import List
 
 try:
-    from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+    from extraction_constants import FILE_EXTENSION_FOLDER_NAMES, is_no_series_folder
 except ImportError:
-    from ..extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+    from ..extraction_constants import FILE_EXTENSION_FOLDER_NAMES, is_no_series_folder
 
 
 def _author_matches_folder(proposed_author: str, folder_part: str) -> bool:
@@ -382,6 +382,12 @@ class Pass2SeriesFilename:
                         if i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
                             series_folder = path_parts[i + 1]
                             if not series_folder.endswith('.fb2'):
+                                # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии
+                                if is_no_series_folder(series_folder):
+                                    record.proposed_series = ""
+                                    record.series_source = "no_series_folder"
+                                    break
+
                                 # Это серия - ВКЛЮЧАЕМ И ПАПКУ АВТОРА И ПАПКУ СЕРИИ в иерархию
                                 # "Суворовы (...)" + "1. Истребители" → "Суворовы\Истребители"
                                 author_folder = path_parts[i]
@@ -418,7 +424,10 @@ class Pass2SeriesFilename:
             
             if record.series_source == "folder_hierarchy":
                 continue  # Иерархия папок определила серию - готово!
-            
+
+            if record.series_source == "no_series_folder":
+                continue  # Папка «Вне серий» — серии нет, дальше не ищем
+
             if record.proposed_series and not is_depth4_without_real_series:
                 continue  # Серия уже установлена (кроме depth==4 ошибки)
             

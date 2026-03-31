@@ -28,7 +28,7 @@ from passes import (
 from passes.pass2_series_filename import Pass2SeriesFilename
 from passes.pass3_series_normalize import Pass3SeriesNormalize
 from passes.folder_series_parser import parse_series_from_folder_name
-from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+from extraction_constants import FILE_EXTENSION_FOLDER_NAMES, is_no_series_folder
 from pattern_converter import compile_patterns
 import re
 
@@ -386,6 +386,11 @@ class RegenCSVService:
                         # Это соблюдает cascade priority: FOLDER(3) > FILENAME(2) > METADATA(1)
                         # Do NOT set series_source here - let following passes handle it
                         pass
+                    elif any(is_no_series_folder(f) for f in series_folders):
+                        # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии.
+                        # Фиксируем пустую серию и блокируем дальнейшее извлечение.
+                        record.proposed_series = ""
+                        record.series_source = "no_series_folder"
                     else:
                         # Hierarchical OR simple series: Author / Series [/ SubSeries ...] / File
                         # NOTE: Папка автора НЕ включается в иерархию серии
