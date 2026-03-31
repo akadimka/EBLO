@@ -218,6 +218,11 @@ class MainWindow(tk.Tk):
         lib_menu.add_command(label='Генератор OPDS-каталога',  command=self._open_opds_generator)
         menubar.add_cascade(label='Библиотека', menu=lib_menu)
 
+        # Помощь
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label='Содержание', command=self._open_help)
+        menubar.add_cascade(label='Помощь', menu=help_menu)
+
         self.config(menu=menubar)
 
     def _create_main_ui(self):
@@ -821,6 +826,14 @@ class MainWindow(tk.Tk):
         except ImportError:
             from .opds_generator import OPDSGeneratorWindow
         OPDSGeneratorWindow(parent=self, settings_manager=self.settings)
+
+    def _open_help(self):
+        """Открыть окно справки."""
+        try:
+            from gui_help import HelpWindow
+        except ImportError:
+            from .gui_help import HelpWindow
+        HelpWindow(parent=self, settings_manager=self.settings)
 
     # ------------------------------------------------------------------
 
