@@ -643,50 +643,50 @@ class SynchronizationService:
                 pass
     
     def _cleanup_empty_folders(self) -> None:
-        """Remove empty folders from source directory, preserving root.
-        
-        Recursively deletes empty directories but preserves last_scan_path root.
+        """Remove folders from source directory after FB2 files have been moved.
+
+        Deletes every subdirectory of last_scan_path that contains no FB2 files
+        (recursively), regardless of other file types remaining in it.
+        The root working directory (last_scan_path) is never deleted.
         """
-        self._log(f"Очистка пустых папок в: {self.last_scan_path}")
-        
+        self._log(f"Очистка папок в: {self.last_scan_path}")
+
         try:
-            self._remove_empty_dirs_recursive(self.last_scan_path)
-            self._log(f"Удалено пустых папок: {self.stats['folders_deleted']}")
+            for item in sorted(self.last_scan_path.iterdir()):
+                if item.is_dir():
+                    self._remove_dir_if_no_fb2(item)
+            self._log(f"Удалено папок: {self.stats['folders_deleted']}")
         except Exception as e:
             self._log(f"Ошибка при очистке папок: {str(e)}")
-    
-    def _remove_empty_dirs_recursive(self, path: Path) -> None:
-        """Recursively remove empty directories.
-        
+
+    def _has_fb2_files(self, path: Path) -> bool:
+        """Return True if path contains any .fb2 files recursively."""
+        for f in path.rglob('*.fb2'):
+            return True
+        return False
+
+    def _remove_dir_if_no_fb2(self, path: Path) -> None:
+        """Remove directory tree if it contains no FB2 files.
+
         Args:
-            path: Directory to clean
+            path: Directory to evaluate and possibly remove
         """
         if not path.is_dir():
             return
-        
-        # Don't delete root scan path
-        if path == self.last_scan_path:
-            # Just process subdirectories
+
+        if self._has_fb2_files(path):
+            # Still has FB2 files — recurse into subdirectories only
             for item in path.iterdir():
                 if item.is_dir():
-                    self._remove_empty_dirs_recursive(item)
-            return
-        
-        # Try to remove if empty
-        try:
-            # First, recursively process subdirectories
-            for item in path.iterdir():
-                if item.is_dir():
-                    self._remove_empty_dirs_recursive(item)
-            
-            # Now try to remove this directory if empty
-            if not any(path.iterdir()):  # Check if empty
-                path.rmdir()
+                    self._remove_dir_if_no_fb2(item)
+        else:
+            # No FB2 files left — remove the whole subtree
+            try:
+                shutil.rmtree(path)
                 self.stats['folders_deleted'] += 1
-                self._log(f"Удалена пустая папка: {path}")
-        except Exception as e:
-            # Ignore errors (directory may be in use, has files, etc)
-            pass
+                self._log(f"Удалена папка: {path}")
+            except Exception as e:
+                self._log(f"Не удалось удалить папку {path}: {e}")
     
     def _get_existing_entries(self) -> set:
         """Get existing entries from database.
