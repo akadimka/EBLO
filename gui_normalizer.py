@@ -133,8 +133,9 @@ class NamesDialog:
         female_new = []
         for _, _, name_var, gender_var in self._row_data:
             name = name_var.get().strip()
-            gender = gender_var.get()
-            if not name:
+            gender = gender_var.get().strip()
+            # Пропускаем строку, если хоть одно из полей не заполнено
+            if not name or gender not in self.GENDER_OPTIONS:
                 continue
             if gender == "Муж.":
                 male_new.append(name)
