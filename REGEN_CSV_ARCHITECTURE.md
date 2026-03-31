@@ -1,6 +1,27 @@
-# Архитектура системы регенерации CSV (Версия 4.3)
+# Архитектура системы регенерации CSV (Версия 4.4)
 
 **📌 Дополнительная документация по поддержке соавторства (Co-authorship):** см. [COAUTHORSHIP_FEATURE.md](COAUTHORSHIP_FEATURE.md)
+
+---
+
+## 🚀 Март 31, 2026 (ночь) — НОВЫЕ ФУНКЦИИ: Настройки — пути к файлам конфига и жанров
+
+---
+
+### 1️⃣ Два новых поля пути на вкладке «Общие» окна настроек
+
+- **Файлы:** `gui_settings.py`, `settings_manager.py`, `gui_main.py`
+- **Задача:** Дать пользователю возможность явно указать, где находятся `config.json` (файл настроек) и `genres.xml` (файл жанров).
+- **Решение:**
+  - В `settings_manager.py` добавлены методы `get_settings_file_path()`, `set_settings_file_path()` и `auto_init_file_paths()`.
+    - `set_settings_file_path()` при непустом значении перенаправляет `self.config_path` — все последующие сохранения идут в новый файл.
+    - `auto_init_file_paths()` вызывается при запуске: проверяет `Path(__file__).resolve().parent / 'config.json'` и `/ 'genres.xml'`; заполняет поля если файлы существуют, оставляет пустыми если нет.
+  - В `gui_settings.py` добавлены:
+    - Два ряда (Label + Entry + кнопка «Обзор») между «Путь к библиотеке» и разделителем перед лимитом папок.
+    - Методы `_choose_settings_file()` и `_choose_genres_file()` — открывают `filedialog.askopenfilename`.
+    - `_save()` сохраняет оба пути через `set_settings_file_path()` / `set_genres_file_path()`.
+  - В `gui_main.py`: `self.settings.auto_init_file_paths()` вызывается сразу после создания `SettingsManager`.
+- **Результат:** При первом запуске пути к файлам определяются автоматически; пользователь может переопределить их через GUI ✅
 
 ---
 

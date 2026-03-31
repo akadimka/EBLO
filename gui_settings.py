@@ -72,22 +72,44 @@ class SettingsWindow(tk.Toplevel):
 
     def _create_general_tab(self):
         """Create General settings tab."""
+        # --- Library path ---
         self.path_var = tk.StringVar(value=self.settings_manager.get_library_path())
         ttk.Label(self.tab_general, text='Путь к библиотеке:').pack(anchor='w', padx=10, pady=(10, 0))
-        
-        # Frame for entry and button side by side
+
         entry_frame = ttk.Frame(self.tab_general)
         entry_frame.pack(fill='x', padx=10, pady=5)
-        entry_frame.columnconfigure(0, weight=1)  # Entry expands
-        
+        entry_frame.columnconfigure(0, weight=1)
+
         entry = ttk.Entry(entry_frame, textvariable=self.path_var)
         entry.grid(row=0, column=0, sticky='ew', padx=(0, 5))
         entry.focus_set()
         entry.bind('<Return>', lambda event: self._save())
-        
         ttk.Button(entry_frame, text='Обзор', command=self._choose_folder).grid(row=0, column=1)
-        
-        # Separator
+
+        ttk.Separator(self.tab_general, orient='horizontal').pack(fill='x', padx=10, pady=(10, 5))
+
+        # --- Settings file path ---
+        self.settings_file_var = tk.StringVar(value=self.settings_manager.get_settings_file_path())
+        ttk.Label(self.tab_general, text='Путь к файлу настроек (config.json):').pack(anchor='w', padx=10, pady=(0, 0))
+
+        sf_frame = ttk.Frame(self.tab_general)
+        sf_frame.pack(fill='x', padx=10, pady=5)
+        sf_frame.columnconfigure(0, weight=1)
+
+        ttk.Entry(sf_frame, textvariable=self.settings_file_var).grid(row=0, column=0, sticky='ew', padx=(0, 5))
+        ttk.Button(sf_frame, text='Обзор', command=self._choose_settings_file).grid(row=0, column=1)
+
+        # --- Genres file path ---
+        self.genres_file_var = tk.StringVar(value=self.settings_manager.get_genres_file_path())
+        ttk.Label(self.tab_general, text='Путь к файлу жанров (genres.xml):').pack(anchor='w', padx=10, pady=(0, 0))
+
+        gf_frame = ttk.Frame(self.tab_general)
+        gf_frame.pack(fill='x', padx=10, pady=5)
+        gf_frame.columnconfigure(0, weight=1)
+
+        ttk.Entry(gf_frame, textvariable=self.genres_file_var).grid(row=0, column=0, sticky='ew', padx=(0, 5))
+        ttk.Button(gf_frame, text='Обзор', command=self._choose_genres_file).grid(row=0, column=1)
+
         ttk.Separator(self.tab_general, orient='horizontal').pack(fill='x', padx=10, pady=10)
         
         # Folder parse limit
@@ -352,6 +374,22 @@ class SettingsWindow(tk.Toplevel):
         if folder:
             self.path_var.set(folder)
 
+    def _choose_settings_file(self):
+        path = filedialog.askopenfilename(
+            title='Выбрать файл настроек',
+            filetypes=[('JSON файлы', '*.json'), ('Все файлы', '*.*')],
+        )
+        if path:
+            self.settings_file_var.set(path)
+
+    def _choose_genres_file(self):
+        path = filedialog.askopenfilename(
+            title='Выбрать файл жанров',
+            filetypes=[('XML файлы', '*.xml'), ('Все файлы', '*.*')],
+        )
+        if path:
+            self.genres_file_var.set(path)
+
     def _on_list_selected(self, event=None):
         """Load the selected list items."""
         self._load_list_items()
@@ -420,10 +458,13 @@ class SettingsWindow(tk.Toplevel):
         self.settings_manager.set_library_path(self.path_var.get())
         self.settings_manager.set_folder_parse_limit(self.folder_limit_var.get())
         self.settings_manager.set_generate_csv(self.generate_csv_var.get())
-            
+        # File paths
+        self.settings_manager.set_settings_file_path(self.settings_file_var.get())
+        self.settings_manager.set_genres_file_path(self.genres_file_var.get())
+
         # Lists panel: persist current list
         self._save_current_list()
-        
+
         self.destroy()
 
     def _on_window_closing(self):

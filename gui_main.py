@@ -84,6 +84,8 @@ class MainWindow(tk.Tk):
         # Инициализация модулей
         self.logger = Logger()
         self.settings = SettingsManager('config.json')
+        # Авто-детекция путей к config.json и genres.xml при первом запуске
+        self.settings.auto_init_file_paths()
         
         # Восстановление позиции/размера окна
         restore_window_geometry(self, 'main', self.settings, 
