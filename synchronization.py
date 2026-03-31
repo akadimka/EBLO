@@ -14,6 +14,7 @@ Handles:
 """
 
 import os
+import re
 import sqlite3
 import shutil
 import hashlib
