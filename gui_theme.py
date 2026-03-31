@@ -291,11 +291,18 @@ class SmartStatusBar:
     }
 
     def __init__(self, parent: tk.Widget):
-        self._frame = tk.Frame(parent, background=BG, pady=2)
+        self._frame = tk.Frame(parent, background=BG)
+
+        # Тонкая линия-разделитель сверху (внутри фрейма)
+        tk.Frame(self._frame, background=BORDER, height=1).pack(fill="x", side="top")
+
+        # Внутренний контейнер с вертикальным padding
+        _inner = tk.Frame(self._frame, background=BG, pady=2)
+        _inner.pack(fill="x", side="top")
 
         # Цветной квадратик-индикатор
         self._dot = tk.Label(
-            self._frame,
+            _inner,
             text="●",
             font=("Segoe UI", 8),
             background=BG,
@@ -307,7 +314,7 @@ class SmartStatusBar:
         # Текст статуса
         self._var = tk.StringVar(value="Готово")
         self._label = tk.Label(
-            self._frame,
+            _inner,
             textvariable=self._var,
             font=FONT_SMALL,
             background=BG,
@@ -315,11 +322,6 @@ class SmartStatusBar:
             anchor="w",
         )
         self._label.pack(side="left", fill="x", expand=True, padx=(0, 6))
-
-        # Тонкая линия сверху
-        tk.Frame(parent, background=BORDER, height=1).pack(
-            fill="x", side="bottom", before=self._frame
-        )
 
     def pack(self, **kwargs):
         self._frame.pack(**kwargs)
