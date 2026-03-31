@@ -514,7 +514,9 @@ class CSVNormalizerApp:
         sys.stdout = redirector
         try:
             work_dir = _Path(folder_path)
-            settings = self.csv_service.settings
+            # Приоритет: settings_manager из главного окна (актуален после сохранения имён);
+            # fallback — внутренний settings csv_service (другой экземпляр, может быть устаревшим)
+            settings = self.settings_manager if self.settings_manager else self.csv_service.settings
             logger = self.csv_service.logger
             folder_parse_limit = self.csv_service.folder_parse_limit
             extractor = FB2AuthorExtractor()
