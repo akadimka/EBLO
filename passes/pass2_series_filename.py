@@ -27,6 +27,11 @@ import sys
 from pathlib import Path
 from typing import List
 
+try:
+    from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+except ImportError:
+    from ..extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+
 
 def _author_matches_folder(proposed_author: str, folder_part: str) -> bool:
     """Проверить, является ли folder_part папкой автора proposed_author.
@@ -362,6 +367,11 @@ class Pass2SeriesFilename:
                 author_name = None
             if author_name:
                 path_parts = Path(record.file_path).parts  # e.g., (TopFolder, Author, Series, File.fb2)
+                # Фильтруем папки с именами-расширениями (последний элемент = файл, не фильтруем)
+                path_parts = tuple(
+                    p for i, p in enumerate(path_parts)
+                    if i == len(path_parts) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
+                )
 
                 for i, part in enumerate(path_parts):
 
@@ -392,6 +402,12 @@ class Pass2SeriesFilename:
             # Special case: depth==4 without series subfolder
             # Pass 1 wrongly sets folder_dataset for depth==4, allowing Pass 2 to override it
             file_depth = len(Path(record.file_path).parts)
+            # Учитываём если в пути есть extension-папки (они прозрачны, не считаются как уровень)
+            raw_parts = Path(record.file_path).parts
+            file_depth = len(tuple(
+                p for i, p in enumerate(raw_parts)
+                if i == len(raw_parts) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
+            ))
             is_depth4_without_real_series = (
                 file_depth == 4 and 
                 record.series_source == "folder_dataset"

@@ -28,6 +28,7 @@ from passes import (
 from passes.pass2_series_filename import Pass2SeriesFilename
 from passes.pass3_series_normalize import Pass3SeriesNormalize
 from passes.folder_series_parser import parse_series_from_folder_name
+from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
 from pattern_converter import compile_patterns
 import re
 
@@ -351,7 +352,12 @@ class RegenCSVService:
                 # Пункт 6: use cached path parts
                 file_path_parts = _parts_cache.get(record.file_path)
                 if file_path_parts is None:
-                    file_path_parts = Path(record.file_path).parts
+                    raw_parts = Path(record.file_path).parts
+                    # Фильтруем папки с именами-расширениями (последний элемент = имя файла, не фильтруем)
+                    file_path_parts = tuple(
+                        p for i, p in enumerate(raw_parts)
+                        if i == len(raw_parts) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
+                    )
                     _parts_cache[record.file_path] = file_path_parts
 
                 # Key Strategy: Find author folder in path and skip it

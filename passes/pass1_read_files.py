@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
+try:
+    from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+except ImportError:
+    from ..extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+
 
 @dataclass
 class BookRecord:
@@ -147,6 +152,17 @@ class Pass1ReadFiles:
         while parse_levels < self.folder_parse_limit:
             if current_dir == self.work_dir:
                 break
+
+            # Прозрачно пропускаем папки-расширения (не считаем уровень)
+            if current_dir.name.lower() in FILE_EXTENSION_FOLDER_NAMES:
+                try:
+                    parent_dir = current_dir.parent
+                    if parent_dir == current_dir:
+                        break
+                    current_dir = parent_dir
+                except Exception:
+                    break
+                continue
 
             if current_dir in self.author_folder_cache:
                 author_name, confidence = self.author_folder_cache[current_dir]

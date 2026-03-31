@@ -116,6 +116,16 @@ class ConfidenceLevel:
     MIN_ACCEPTABLE = 0.50
 
 
+# Имена папок, совпадающие с расширениями файлов, которые нужно прозрачно пропускать
+# при анализе структуры пути.
+# Структура "Автор\fb2\Серия\книга.fb2" обрабатывается как "Автор\Серия\книга.fb2".
+FILE_EXTENSION_FOLDER_NAMES: frozenset = frozenset({
+    'fb2', 'rtf', 'pdf', 'doc', 'docx', 'txt', 'epub',
+    'djvu', 'djv', 'mobi', 'azw', 'azw3', 'lit', 'lrf',
+    'html', 'htm', 'odt', 'zip', 'rar', '7z',
+})
+
+
 class FilterReason:
     """Причины, по которым значение может быть отфильтровано."""
     

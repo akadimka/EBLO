@@ -5,6 +5,7 @@ PRECACHE Phase: Build author folder hierarchy before PASS 1.
 from pathlib import Path
 from typing import Dict, Tuple, Optional, Set
 from passes.folder_author_parser import parse_author_from_folder_name
+from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
 
 
 class Precache:
@@ -108,6 +109,17 @@ class Precache:
             
             folder_name = folder.name
             if not folder_name or folder_name.startswith('.'):
+                return None
+
+            # Прозрачно пропускаем папки с именами-расширениями (fb2, pdf, epub…)
+            # Структура "Автор\fb2\Серия" обрабатывается как "Автор\Серия".
+            if folder_name.lower() in FILE_EXTENSION_FOLDER_NAMES:
+                try:
+                    for subdir in folder.iterdir():
+                        if subdir.is_dir() and not subdir.name.startswith('.'):
+                            scan_folder_hierarchy(subdir, depth)  # depth не увеличивается!
+                except (PermissionError, OSError):
+                    pass
                 return None
             
             # Check cache
