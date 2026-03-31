@@ -564,6 +564,10 @@ class CSVNormalizerApp:
                     gender = "Жен."
                 else:
                     gender = ""  # неизвестно
+
+                # Показывать только тех, чьё имя ещё не в списках
+                if gender != "":
+                    continue
                 rows.append((source, author, first_name, gender))
 
             self.root.after(0, lambda: self.progress_var.set("Готово"))
