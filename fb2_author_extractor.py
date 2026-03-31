@@ -1234,26 +1234,86 @@ class FB2AuthorExtractor:
 
     def _detect_correct_encoding(self, fb2_path: Path) -> str:
         """Автоматически определить правильную кодировку FB2 файла.
-        
-        Проверяет только 2 кодировки: UTF-8 и CP1251.
-        Возвращает содержимое первой которая успешно читается без ошибок.
-        
+
+        Стратегия:
+        1. Читает BOM и объявление кодировки в XML-заголовке.
+        2. Пробует UTF-8 (если успешно — сразу возвращает: UTF-8 однозначна).
+        3. Если UTF-8 не подходит, пробует KOI8-R и CP1251 и выбирает ту,
+           которая даёт «естественную» кириллицу (слова Николай, Бахрошин),
+           а не «перевёрнутый» регистр (оЙЛПМБК) — артефакт KOI8-R, прочитанной как CP1251.
+
         Returns:
             Содержимое файла с правильной кодировкой, или '' если не удалось прочитать
         """
-        # Пробуем только 2 кодировки в порядке: UTF-8, потом CP1251
-        for encoding in ['utf-8', 'cp1251']:
+        import re as _re
+
+        # Шаг 1: читаем начало файла в бинарном режиме
+        declared_encoding = None
+        try:
+            with open(fb2_path, 'rb') as f:
+                raw_start = f.read(256)
+            if raw_start.startswith(b'\xef\xbb\xbf'):
+                declared_encoding = 'utf-8-sig'
+            elif raw_start.startswith((b'\xff\xfe', b'\xfe\xff')):
+                declared_encoding = 'utf-16'
+            else:
+                header = raw_start.decode('ascii', errors='replace')
+                m = _re.search(r'encoding\s*=\s*["\']([^"\']+)["\']', header, _re.IGNORECASE)
+                if m:
+                    declared_encoding = m.group(1)
+        except Exception:
+            pass
+
+        def _score_naturalness(text: str) -> int:
+            """Оценивает «естественность» кириллицы.
+
+            Начало слова с заглавной + строчная = норма (+1).
+            Начало слова со строчной + заглавная = артефакт KOI8-R в CP1251 (-2).
+            """
+            words = _re.findall(r'[а-яёА-ЯЁ]+', text[:4000])
+            score = 0
+            for w in words:
+                if len(w) < 2:
+                    continue
+                if w[0].isupper() and w[1].islower():
+                    score += 1
+                elif w[0].islower() and w[1].isupper():
+                    score -= 2
+            return score
+
+        # Шаг 2: сначала пробуем UTF-8 (не нуждается в эвристике — либо OK, либо нет)
+        try:
+            with open(fb2_path, 'r', encoding='utf-8', errors='strict') as f:
+                content = f.read()
+            if content:
+                return content
+        except (UnicodeDecodeError, Exception):
+            pass
+
+        # UTF-8 не подошла: файл в однобайтной кодировке.
+        # Если объявленная кодировка известна и отличается от utf-8 — пробуем её первой.
+        declared_lower = (declared_encoding or '').lower()
+        candidates = []
+        priority = []
+        if declared_encoding and declared_lower not in ('utf-8', 'utf8'):
+            priority.append(declared_encoding)
+        for enc in ['koi8-r', 'cp1251']:
+            if enc not in [e.lower() for e in priority]:
+                priority.append(enc)
+
+        for encoding in priority:
             try:
                 with open(fb2_path, 'r', encoding=encoding, errors='strict') as f:
                     content = f.read()
-                
                 if content:
-                    return content
-                    
-            except (UnicodeDecodeError, Exception):
+                    candidates.append((_score_naturalness(content), content))
+            except (UnicodeDecodeError, LookupError, Exception):
                 continue
-        
-        # Если обе не сработали со strict, берём с replace (fallback)
+
+        if candidates:
+            return max(candidates, key=lambda x: x[0])[1]
+
+        # Финальный fallback с заменой символов
         try:
             with open(fb2_path, 'r', encoding='utf-8', errors='replace') as f:
                 return f.read()
