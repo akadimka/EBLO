@@ -130,7 +130,11 @@ class Precache:
             folder_name_to_parse = conversions.get(folder_name, folder_name)
             
             # Apply PASS0+PASS1+PASS2 structural analysis
-            author_name = parse_author_from_folder_name(folder_name_to_parse)
+            author_name = parse_author_from_folder_name(
+                folder_name_to_parse,
+                male_names=self.male_names,
+                female_names=self.female_names,
+            )
             
             # Check if folder contains FB2 files
             has_fb2_files = False

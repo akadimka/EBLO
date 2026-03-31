@@ -8,17 +8,35 @@ Based on structural analysis, determines which pattern matches the folder name.
 from typing import Optional
 
 
-def select_pattern(struct_info: dict) -> Optional[str]:
+def _is_person_name(text: str, male_names: set, female_names: set) -> bool:
+    """Return True if text looks like a person name (2 words, one in name dictionaries)."""
+    if not text:
+        return False
+    words = text.split()
+    if len(words) != 2:
+        return False
+    for word in words:
+        w = word.strip('.,;').lower()
+        if w in male_names or w in female_names:
+            return True
+    return False
+
+
+def select_pattern(struct_info: dict,
+                   male_names: set = None,
+                   female_names: set = None) -> Optional[str]:
     """
     Selects appropriate pattern based on structural analysis.
-    
+
     Args:
         struct_info: Dictionary from pass0_structural_analysis.analyze_structure()
-        
+        male_names: Set of male names (lowercase) for co-author detection
+        female_names: Set of female names (lowercase) for co-author detection
+
     Returns:
         One of: "Author, Author", "(Surname) (Name)", "Series (Author, Author)",
-                "Series (Author)", "(Series) Author", "Author - Folder Name",
-                "Series", or None
+                "Author (CoAuthor)", "Series (Author)", "(Series) Author",
+                "Author - Folder Name", "Series", or None
     """
     
     paren_count = struct_info['paren_count']
@@ -71,7 +89,18 @@ def select_pattern(struct_info: dict) -> Optional[str]:
             has_comma_in_parens and
             not text_after_last):
             pattern = "Series (Author, Author)"
-    
+
+    # 3b. "Author (CoAuthor)" - text before bracket is a person name (2 words, one in dict)
+    # Example: "Орлов Алекс (Дарищев Вадим)" → Author=Орлов Алекс, CoAuthor=Дарищев Вадим
+    if pattern is None:
+        if (paren_count == 1 and
+                bracket_positioning == 'end' and
+                not has_comma_in_parens and
+                not text_after_last and
+                male_names is not None and female_names is not None and
+                _is_person_name(text_before_first, male_names, female_names)):
+            pattern = "Author (CoAuthor)"
+
     # 4. "Series (Author)" (95/90) - brackets at end WITHOUT comma WITHOUT text after
     if pattern is None:
         if (bracket_positioning in ['end', 'multiple'] and

@@ -55,6 +55,7 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
     name = struct_info['name']
     paren_contents = struct_info['paren_contents']
     text_after_last = struct_info['text_after_last']
+    text_before_first = struct_info['text_before_first']
     
     author = ""
     
@@ -91,6 +92,12 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
             # Convert ", " to "; " for unified processing in PASS 3
             author = paren_contents[0].strip().replace(', ', '; ')
     
+    elif pattern == "Author (CoAuthor)":
+        # text_before_first is Author1, paren_contents[0] is Author2
+        # Example: "Орлов Алекс (Дарищев Вадим)" → "Орлов Алекс; Дарищев Вадим"
+        if text_before_first and paren_contents:
+            author = f"{text_before_first.strip()}; {paren_contents[0].strip()}"
+
     elif pattern == "Series (Author)":
         # LAST parentheses ← KEY for МВП-2 (1) Одиссея (Чернов)
         if paren_contents:

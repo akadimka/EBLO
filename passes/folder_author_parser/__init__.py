@@ -13,7 +13,9 @@ from .pass2_author_extraction import extract_author
 # Blacklist categories загружаются из конфига в функциях
 
 
-def parse_author_from_folder_name(folder_name: str) -> str:
+def parse_author_from_folder_name(folder_name: str,
+                                   male_names: set = None,
+                                   female_names: set = None) -> str:
     """
     Parses author name from a folder name using PASS0+PASS1+PASS2 architecture.
     
@@ -67,8 +69,10 @@ def parse_author_from_folder_name(folder_name: str) -> str:
     struct_info = analyze_structure(name)
     
     # ==================== PASS1: Pattern Selection ====================
-    pattern = select_pattern(struct_info)
-    
+    pattern = select_pattern(struct_info,
+                              male_names=male_names or set(),
+                              female_names=female_names or set())
+
     # ==================== PASS2: Author Extraction ====================
     author = extract_author(struct_info, pattern)
     
