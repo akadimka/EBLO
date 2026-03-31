@@ -252,10 +252,14 @@ EBook Library Organizer — инструмент организации колл
   Ключевые методы:
     get_library_path()             — целевая папка библиотеки
     get_last_scan_path()           — последняя сканированная папка
+    get_settings_file_path()       — путь к файлу настроек (config.json)
+    get_genres_file_path()         — путь к файлу жанров (genres.xml)
     get_male_names() / get_female_names() — словари имён
     get_filename_blacklist()       — слова-исключения (Том, Часть, …)
+    get_no_series_folder_names()   — имена папок «Вне серии» / «Без серии»
     get_author_series_patterns_in_files() — паттерны для filename
     get_author_series_patterns_in_folders() — паттерны для папок
+    auto_init_file_paths()         — авто-определение путей при запуске
 """),
     ("Модули", "gui_normalizer.py", """\
 Окно нормализации (класс CSVNormalizerApp).
@@ -408,9 +412,13 @@ EBook Library Organizer — инструмент организации колл
     ("Модули", "settings_manager.py / config.json", """\
   Конфигурационный файл config.json содержит:
     library_path, last_scan_path   — папки
+    settings_file_path             — путь к файлу настроек (config.json)
+    genres_file_path               — путь к файлу жанров (genres.xml)
     male_names, female_names       — словари имён (для нормализации)
     filename_blacklist             — стоп-слова
     service_words                  — служебные слова (Том, Часть, …)
+    no_series_folder_names         — имена папок «без серии»
+                                     (Вне серии, Без серии, Standalone, …)
     author_series_patterns_in_files   — паттерны для filename
     author_series_patterns_in_folders — паттерны для папок
     generate_csv                   — флаг сохранения regen.csv
@@ -499,6 +507,14 @@ EBook Library Organizer — инструмент организации колл
   last_scan_path       — папка, которая сканируется по умолчанию
                         (обновляется автоматически)
 
+  settings_file_path   — путь к файлу настроек config.json;
+                        при изменении все последующие сохранения
+                        пишутся в новый файл.
+                        При первом запуске определяется автоматически.
+
+  genres_file_path     — путь к файлу жанров genres.xml.
+                        При первом запуске определяется автоматически.
+
   generate_csv         — true/false: сохранять regen.csv после генерации
 
   folder_parse_limit   — сколько уровней вверх просматривать
@@ -521,6 +537,13 @@ EBook Library Organizer — инструмент организации колл
 
   service_words        — служебные слова в паттернах серий
                          (Кн., Т., Ч., …)
+
+  no_series_folder_names — имена папок, которые обозначают отсутствие серии.
+                           Книга в такой папке гарантированно получает
+                           пустую серию; filename-паттерны не применяются.
+                           По умолчанию: «Вне серии», «Без серии»,
+                           «Standalone», «Отдельные произведения» и др.
+                           Редактируется через Настройки → вкладка «Списки».
 
   author_series_patterns_in_files
                        — список паттернов вида "Author - Title (Series)"
