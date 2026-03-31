@@ -84,9 +84,29 @@ class NamesDialog:
             # author_source — нередактируемое
             ttk.Label(row_frame, text=source, width=18, anchor="w",
                       relief="sunken").pack(side=tk.LEFT, padx=1)
-            # proposed_author — нередактируемое
-            ttk.Label(row_frame, text=author, width=38, anchor="w",
-                      relief="sunken").pack(side=tk.LEFT, padx=1)
+
+            # proposed_author — кликабельные блоки (разделитель — пробел, дефис не делит)
+            author_frame = tk.Frame(row_frame, relief="sunken", bd=1,
+                                    width=270, height=24)
+            author_frame.pack(side=tk.LEFT, padx=1)
+            author_frame.pack_propagate(False)
+
+            bg = author_frame.cget("bg")
+            for word in author.split():
+                w_lbl = tk.Label(author_frame, text=word, cursor="hand2",
+                                 bg=bg, padx=2)
+                w_lbl.pack(side=tk.LEFT)
+                # ЛКМ — записать слово в Name
+                w_lbl.bind("<Button-1>",
+                           lambda e, v=word, nv=name_var: nv.set(v))
+                # Подсветка при наведении
+                w_lbl.bind("<Enter>",
+                           lambda e, lbl=w_lbl: lbl.config(
+                               fg="blue", font="TkDefaultFont 9 underline"))
+                w_lbl.bind("<Leave>",
+                           lambda e, lbl=w_lbl: lbl.config(
+                               fg="black", font="TkDefaultFont 9"))
+
             # Names — редактируемое
             ttk.Entry(row_frame, textvariable=name_var, width=24).pack(
                 side=tk.LEFT, padx=1)
