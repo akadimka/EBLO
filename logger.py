@@ -5,18 +5,19 @@ Handles logging of actions and errors.
 
 / Логирование действий и ошибок.
 """
+from collections import deque
 from datetime import datetime
 
 class Logger:
     """
-    Simple in-memory logger.
+    Simple in-memory logger (capped at 10,000 entries to limit memory use).
     
     / Простой логгер в памяти.
     """
     
     def __init__(self):
         """Initialize logger / Инициализация логгера."""
-        self.entries = []
+        self.entries = deque(maxlen=10000)
 
     def log(self, message):
         """
@@ -33,7 +34,8 @@ class Logger:
         
         / Получить последние 1000 записей логов.
         """
-        return self.entries[-1000:]  # Ограничение на размер лога
+        entries_list = list(self.entries)
+        return entries_list[-1000:]
 
     def clear(self):
         """

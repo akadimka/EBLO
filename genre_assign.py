@@ -9,6 +9,7 @@
 
 import threading
 import re
+import html
 from pathlib import Path
 from typing import Optional, Callable, List
 import xml.etree.ElementTree as ET
@@ -311,7 +312,8 @@ class GenreAssignmentService:
             if title_info_close:
                 # Вставляем новый genre тег перед </title-info>
                 insert_pos = title_info_close.start()
-                new_genre_tag = f'<genre>{genre_name}</genre>\n  '
+                safe_genre = html.escape(genre_name)
+                new_genre_tag = f'<genre>{safe_genre}</genre>\n  '
                 result_text = result_text[:insert_pos] + new_genre_tag + result_text[insert_pos:]
             else:
                 self.logger.log(f"ОШИБКА: не найден </title-info> в {fb2_path}")
@@ -320,11 +322,22 @@ class GenreAssignmentService:
             # Форматировать XML для красивого отображения
             result_text = pretty_print_xml(result_text)
             
-            # Сохранить файл с правильной кодировкой
-            # utf-8-sig добавит BOM если кодировка включает sig
-            encoding_to_use = 'utf-8-sig' if has_bom else 'utf-8'
-            with open(fb2_path, 'w', encoding=encoding_to_use, errors='replace') as f:
-                f.write(result_text)
+            # Сохранить файл с ОРИГИНАЛЬНОЙ кодировкой (не меняем ео на UTF-8)
+            # Обновляем XML-декларацию если кодировка изменилась
+            if content_encoding.lower().replace('-', '').replace('_', '') in ('utf8', 'utf8sig'):
+                # Уже UTF-8: просто записываем с BOM если был
+                encoding_to_write = 'utf-8-sig' if has_bom else 'utf-8'
+                with open(fb2_path, 'w', encoding=encoding_to_write, errors='replace') as f:
+                    f.write(result_text)
+            else:
+                # Не-UTF-8 (например cp1251): обновить XML-декларацию и записать обратно
+                result_text = re.sub(
+                    r'(<\?xml[^>]*encoding\s*=\s*["\'])[^"\']+(["\'])',
+                    lambda m: m.group(1) + content_encoding + m.group(2),
+                    result_text, count=1
+                )
+                with open(fb2_path, 'w', encoding=content_encoding, errors='replace') as f:
+                    f.write(result_text)
             
             return True
         

@@ -25,18 +25,21 @@ class Pass4Consensus:
     - empty string: Only undetermined files get new consensus
     """
     
-    def __init__(self, logger):
+    def __init__(self, logger, settings=None):
         """Initialize PASS 4.
         
         Args:
             logger: Logger instance
+            settings: Optional shared SettingsManager
         """
         self.logger = logger
         try:
-            self.settings = SettingsManager('config.json')
+            self.settings = settings or SettingsManager('config.json')
         except:
             self.settings = None
         self.normalizer = AuthorNormalizer(self.settings)
+        # Cache for _normalize_series_for_consensus results
+        self._series_norm_cache: dict = {}
     
     def _normalize_series_for_consensus(self, series_candidate: str) -> str:
         """
@@ -51,9 +54,13 @@ class Pass4Consensus:
         """
         if not series_candidate:
             return ""
-        
+
+        cached = self._series_norm_cache.get(series_candidate)
+        if cached is not None:
+            return cached
+
         import re
-        
+
         text = series_candidate.strip()
         
         # Remove " N" or " N. " patterns (space + digits)
@@ -67,8 +74,10 @@ class Pass4Consensus:
         
         # Remove trailing digits after hyphen (but keep the base, e.g. "Фэндом-3" → "Фэндом")
         text = re.sub(r'[-–—]\d+\s*$', '', text).strip()
-        
-        return text if text else series_candidate
+
+        result = text if text else series_candidate
+        self._series_norm_cache[series_candidate] = result
+        return result
     
     def execute(self, records: List) -> None:
         """Execute PASS 4: Apply consensus author.

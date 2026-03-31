@@ -295,34 +295,57 @@ class FemaleAuthorsDialog:
 
 
 class StdoutRedirector:
-    """Перехватывает вывод stdout и обновляет progress_var и логи."""
+    """Перехватывает вывод stdout и обновляет progress_var и логи.
+
+    Буферизирует строки внутри потока и сбрасывает в UI-поток раз в
+    _FLUSH_INTERVAL_MS мс, чтобы не переполнять event loop при 40k+ файлах.
+    """
+    _FLUSH_INTERVAL_MS = 100
+
     def __init__(self, progress_var, root, original_stdout, log_callback=None):
         self.progress_var = progress_var
         self.root = root
         self.original_stdout = original_stdout
-        self.log_callback = log_callback  # Функция для добавления текста в логи
-        self.buffer = ""
-    
+        self.log_callback = log_callback
+        self._lock = __import__('threading').Lock()
+        self._pending_lines: list = []
+        self._last_progress: str = ""
+        self._timer_active = False
+
     def write(self, message):
-        """Перехватить вывод и обновить progress_var и логи."""
-        self.original_stdout.write(message)  # Также выводим в оригинальный stdout
-        
-        # Очищаем управляющие символы для отображения в progress
-        display_message = message.rstrip()
-        if display_message and not display_message.startswith("="):
-            # Обновляем progress_var (потокобезопасно)
+        """Buffer the message; flush to UI at most every _FLUSH_INTERVAL_MS ms."""
+        self.original_stdout.write(message)
+        with self._lock:
+            self._pending_lines.append(message)
+            display = message.rstrip()
+            if display and not display.startswith("="):
+                self._last_progress = display
+            if not self._timer_active:
+                self._timer_active = True
+                try:
+                    self.root.after(self._FLUSH_INTERVAL_MS, self._flush_to_ui)
+                except Exception:
+                    pass
+
+    def _flush_to_ui(self):
+        """Called on the UI thread; drains the pending buffer."""
+        with self._lock:
+            lines = self._pending_lines[:]
+            self._pending_lines.clear()
+            progress = self._last_progress
+            self._timer_active = False
+        if progress:
             try:
-                self.root.after(0, lambda: self.progress_var.set(display_message))
-            except:
+                self.progress_var.set(progress)
+            except Exception:
                 pass
-        
-        # Добавляем в логи окна
-        if self.log_callback:
+        if self.log_callback and lines:
+            combined = "".join(lines)
             try:
-                self.root.after(0, lambda msg=message: self.log_callback(msg))
-            except:
+                self.log_callback(combined)
+            except Exception:
                 pass
-    
+
     def flush(self):
         """Flush метод для совместимости."""
         self.original_stdout.flush()
@@ -435,7 +458,7 @@ class CSVNormalizerApp:
         ttk.Button(buttons_frame, text="Отмена", command=self.cancel).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Получить имена", command=self.get_names).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Битые файлы", command=self.show_broken_files).pack(side=tk.LEFT, padx=2)
-        ttk.Button(buttons_frame, text="Шаблоны", command=self.show_templates).pack(side=tk.LEFT, padx=2)
+        ttk.Button(buttons_frame, text="Великомученницы", command=self.show_templates).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Дубликаты", command=self.show_duplicates).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Удалить пустые папки", command=self.delete_empty_folders).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Логи", command=self.show_logs).pack(side=tk.LEFT, padx=2)
@@ -578,18 +601,58 @@ class CSVNormalizerApp:
             self.processing = False
     
     def _fill_table(self, records):
-        """Заполнить таблицу записями."""
+        """Заполнить таблицу записями (пагинация: первые PAGE_SIZE строк + кнопка 'Загрузить ещё')."""
+        PAGE_SIZE = 1000
+
         # Очистить таблицу
         for item in self.tree.get_children():
             self.tree.delete(item)
-        
-        # Добавить записи
-        for record in records:
-            self.tree.insert(
-                '',
-                tk.END,
-                values=record.to_tuple()
+
+        # Удалить старую кнопку 'Загрузить ещё', если есть
+        if hasattr(self, '_load_more_btn') and self._load_more_btn:
+            try:
+                self._load_more_btn.destroy()
+            except Exception:
+                pass
+            self._load_more_btn = None
+
+        self._all_records = records
+        self._records_offset = 0
+
+        # Вставить первую страницу
+        self._load_more_rows(PAGE_SIZE)
+
+        # Если ещё остались записи, добавить кнопку 'Загрузить ещё'
+        if self._records_offset < len(self._all_records):
+            remaining = len(self._all_records) - self._records_offset
+            btn_frame = self.tree.master  # table_frame
+            self._load_more_btn = ttk.Button(
+                self.root,
+                text=f"Загрузить ещё ({remaining} записей)",
+                command=lambda: self._load_more_rows(PAGE_SIZE)
             )
+            self._load_more_btn.pack(side=tk.BOTTOM, pady=2, before=self.tree.master)
+        else:
+            self._load_more_btn = None
+
+    def _load_more_rows(self, count: int):
+        """Insert up to *count* rows starting at self._records_offset."""
+        end = min(self._records_offset + count, len(self._all_records))
+        for record in self._all_records[self._records_offset:end]:
+            self.tree.insert('', tk.END, values=record.to_tuple())
+        self._records_offset = end
+
+        # Удалить кнопку если всё загружено
+        if self._records_offset >= len(getattr(self, '_all_records', [])):
+            if hasattr(self, '_load_more_btn') and self._load_more_btn:
+                try:
+                    self._load_more_btn.destroy()
+                except Exception:
+                    pass
+                self._load_more_btn = None
+        elif hasattr(self, '_load_more_btn') and self._load_more_btn:
+            remaining = len(self._all_records) - self._records_offset
+            self._load_more_btn.config(text=f"Загрузить ещё ({remaining} записей)")
         
     def cancel(self):
         if messagebox.askyesno("Подтверждение", "Вы уверены, что хотите отменить?"):
@@ -668,7 +731,7 @@ class CSVNormalizerApp:
             pass2.prebuild_author_cache(records)
             pass2.execute(records)
 
-            pass2_fallback = Pass2Fallback(logger)
+            pass2_fallback = Pass2Fallback(logger, settings=settings)
             pass2_fallback.execute(records)
 
             # Собрать уникальные имена (второе слово из "Фамилия Имя")
@@ -772,7 +835,7 @@ class CSVNormalizerApp:
             pass2.prebuild_author_cache(records)
             pass2.execute(records)
 
-            pass2_fallback = Pass2Fallback(logger)
+            pass2_fallback = Pass2Fallback(logger, settings=settings)
             pass2_fallback.execute(records)
 
             male_set = set(n.lower() for n in settings.get_male_names())

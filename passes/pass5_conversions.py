@@ -18,15 +18,16 @@ class Pass5Conversions:
     - "Сезин" → "Сезин" (no change, but checked)
     """
     
-    def __init__(self, logger):
+    def __init__(self, logger, settings=None):
         """Initialize PASS 5.
         
         Args:
             logger: Logger instance
+            settings: Optional shared SettingsManager
         """
         self.logger = logger
         try:
-            self.settings = SettingsManager('config.json')
+            self.settings = settings or SettingsManager('config.json')
         except:
             self.settings = None
         self.normalizer = AuthorNormalizer(self.settings)

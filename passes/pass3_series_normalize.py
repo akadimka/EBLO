@@ -29,9 +29,9 @@ from settings_manager import SettingsManager
 class Pass3SeriesNormalize:
     """Нормализация названий серий."""
     
-    def __init__(self, logger: Logger = None):
+    def __init__(self, logger: Logger = None, settings=None):
         self.logger = logger or Logger()
-        self.settings = SettingsManager('config.json')
+        self.settings = settings or SettingsManager('config.json')
         # Get series conversions from config.json if available
         try:
             # Try to access the settings directly
@@ -44,6 +44,14 @@ class Pass3SeriesNormalize:
             self.cleanup_patterns = self.settings.settings.get('series_cleanup_patterns', [])
         except (AttributeError, KeyError):
             self.cleanup_patterns = []
+
+        # Pre-compile service-word patterns once — avoids re-compiling per record
+        import re as _re
+        raw_service_words = self.settings.get_list('service_words') or []
+        self._service_word_patterns = [
+            _re.compile(r'\s*\b' + _re.escape(w) + r'\b(\s+\d+)?\s*$', _re.IGNORECASE)
+            for w in raw_service_words if w
+        ]
     
     def execute(self, records: List[BookRecord]) -> None:
         """
@@ -89,12 +97,8 @@ class Pass3SeriesNormalize:
         
         # Шаг 4: Убрать лишние служебные слова в конце
         # "Война и Мир том 1" → "Война и Мир"
-        # ВАЖНО: Использовать word boundaries \b чтобы "т" не совпадал с последней буквой слова
-        service_words = self.settings.get_list('service_words')
-        for word in service_words:
-            # Используем \b для word boundaries - требует полного слова
-            pattern = r'\s*\b' + re.escape(word) + r'\b(\s+\d+)?\s*$'
-            series = re.sub(pattern, '', series, flags=re.IGNORECASE)
+        for pat in self._service_word_patterns:
+            series = pat.sub('', series)
         
         # Шаг 5: Применить conversions из config (если настроены)
         for old_name, new_name in self.series_conversions.items():

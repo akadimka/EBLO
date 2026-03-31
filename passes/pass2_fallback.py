@@ -16,15 +16,16 @@ class Pass2Fallback:
     - filename contains collection keywords from config
     """
     
-    def __init__(self, logger):
+    def __init__(self, logger, settings=None):
         """Initialize PASS 2 Fallback.
         
         Args:
             logger: Logger instance
+            settings: Optional shared SettingsManager (avoids extra config.json read)
         """
         self.logger = logger
         try:
-            self.settings = SettingsManager('config.json')
+            self.settings = settings or SettingsManager('config.json')
             self.collection_keywords = self.settings.get_list('collection_keywords') or []
         except Exception as e:
             print(f"[PASS 2 Fallback] Warning: Could not load collection_keywords: {e}")

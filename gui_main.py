@@ -109,8 +109,8 @@ class MainWindow(tk.Tk):
         # Обработчик закрытия окна
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
-        # Очистка БД от orphaned записей при старте приложения
-        self._cleanup_database_on_startup()
+        # Очистка БД от orphaned записей при старте приложения (в фоновом потоке)
+        self.after(200, self._cleanup_database_on_startup)
 
         # Создание UI
         self._create_menu()
@@ -345,7 +345,7 @@ class MainWindow(tk.Tk):
             folder_path = tags[0]
             try:
                 import subprocess
-                subprocess.Popen(f'explorer "{folder_path}"')
+                subprocess.Popen(['explorer', folder_path])
             except Exception as e:
                 self.logger.log(f'Ошибка при открытии папки: {e}')
 
@@ -358,7 +358,15 @@ class MainWindow(tk.Tk):
             self.logger.log(f'Выбрана папка: {folder}')
 
     def _on_folder_changed(self, *args):
-        """Обработчик изменения выбранной папки."""
+        """Обработчик изменения выбранной папки (дебаунс: 400 мс)."""
+        # Отменить предыдущий отложенный вызов, если есть
+        if hasattr(self, '_folder_change_after_id') and self._folder_change_after_id:
+            self.after_cancel(self._folder_change_after_id)
+        self._folder_change_after_id = self.after(400, self._populate_folder_tree_debounced)
+
+    def _populate_folder_tree_debounced(self):
+        """Вызывается через 400 мс после последнего изменения пути."""
+        self._folder_change_after_id = None
         folder = self.selected_folder.get()
         if folder and self.view_mode == 'tree' and hasattr(self, 'folder_tree'):
             self._populate_folder_tree()

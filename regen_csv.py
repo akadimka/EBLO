@@ -322,7 +322,7 @@ class RegenCSVService:
             # ===== PASS 2 Fallback =====
             if progress_callback:
                 progress_callback(25, 100, "Pass 2 Fallback: Применение метаданных")
-            pass2_fallback = Pass2Fallback(self.logger)
+            pass2_fallback = Pass2Fallback(self.logger, settings=self.settings)
             pass2_fallback.execute(self.records)
             self.logger.log("[OK] PASS 2 Fallback: Metadata applied")
             
@@ -426,35 +426,35 @@ class RegenCSVService:
             if progress_callback:
                 progress_callback(45, 100, "Нормализация серий")
             print("[SERIES] Normalizing series names...")
-            pass3_series = Pass3SeriesNormalize(self.logger)
+            pass3_series = Pass3SeriesNormalize(self.logger, settings=self.settings)
             pass3_series.execute(self.records)
             self.logger.log("[OK] Series PASS 3: Normalized series names")
             
             # ===== PASS 3 =====
             if progress_callback:
                 progress_callback(55, 100, "Pass 3: Нормализация авторов")
-            pass3 = Pass3Normalize(self.logger)
+            pass3 = Pass3Normalize(self.logger, settings=self.settings)
             pass3.execute(self.records)
             self.logger.log("[OK] PASS 3: Authors normalized")
             
             # ===== PASS 4 =====
             if progress_callback:
                 progress_callback(65, 100, "Pass 4: Консенсус")
-            pass4 = Pass4Consensus(self.logger)
+            pass4 = Pass4Consensus(self.logger, settings=self.settings)
             pass4.execute(self.records)
             self.logger.log("[OK] PASS 4: Consensus applied")
             
             # ===== PASS 5 =====
             if progress_callback:
                 progress_callback(75, 100, "Pass 5: Преобразования")
-            pass5 = Pass5Conversions(self.logger)
+            pass5 = Pass5Conversions(self.logger, settings=self.settings)
             pass5.execute(self.records)
             self.logger.log("[OK] PASS 5: Conversions re-applied")
             
             # ===== PASS 6 =====
             if progress_callback:
                 progress_callback(85, 100, "Pass 6: Раскрытие аббревиатур")
-            pass6 = Pass6Abbreviations(self.logger)
+            pass6 = Pass6Abbreviations(self.logger, settings=self.settings)
             pass6.execute(self.records)
             self.logger.log("[OK] PASS 6: Abbreviations expanded")
             

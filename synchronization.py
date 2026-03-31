@@ -137,10 +137,7 @@ class SynchronizationService:
                 full_path = self.library_path / file_path
                 
                 if not full_path.exists():
-                    self._log(f"✗ Orphaned запись: {author} | {series} | {title}")
-                    self._log(f"  Файл не найден: {file_path}")
                     deleted_ids.append(record_id)
-                    stats['deleted'] += 1
                     stats['deleted'] += 1
             
             # Delete orphaned records
@@ -480,10 +477,18 @@ class SynchronizationService:
                     target_dir = target_dir / series
                 if subseries:
                     target_dir = target_dir / subseries
-                
+
+                # Path traversal guard: ensure target stays inside library_path
+                resolved_target = target_dir.resolve()
+                resolved_library = self.library_path.resolve()
+                if not str(resolved_target).startswith(str(resolved_library)):
+                    self._log(f"✖️ Попытка выхода за пределы библиотеки: {target_dir}")
+                    self.stats['errors'] += 1
+                    continue
+
                 # Create directories
                 target_dir.mkdir(parents=True, exist_ok=True)
-                
+
                 # Build source and target file paths
                 source_file = self.last_scan_path / record.file_path
                 target_file = target_dir / source_file.name
@@ -528,7 +533,6 @@ class SynchronizationService:
                 import traceback
                 self._log(f"Stacktrace: {traceback.format_exc()}")
                 self.stats['errors'] += 1
-                self.stats['errors'] += 1
         
         self._log(f"Перемещение завершено: {len(moved_records)} файлов переместили")
         return moved_records
@@ -556,8 +560,9 @@ class SynchronizationService:
             conn = sqlite3.connect(str(self.db_path))
             cursor = conn.cursor()
             
-            inserted_count = 0
-            
+            now = datetime.now().isoformat()
+            rows_to_insert = []
+
             for i, record in enumerate(records):
                 # Progress update
                 if progress_callback and i % 10 == 0:
@@ -565,22 +570,10 @@ class SynchronizationService:
                                     f"Запись в БД: {i+1}/{len(records)}")
                 
                 try:
-                    # Calculate file hash
                     file_hash = self._calculate_file_hash(
                         self.library_path / record.file_path
                     )
-                    
-                    now = datetime.now().isoformat()
-                    
-                    self._log(f"Запись в БД: {record.proposed_author} | {record.proposed_series} | {record.file_title}")
-                    
-                    cursor.execute("""
-                        INSERT INTO books (
-                            author, author_source, series, series_source,
-                            subseries, title, file_path, file_hash, genre,
-                            added_date, updated_date, last_sync_check
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
+                    rows_to_insert.append((
                         record.proposed_author,
                         record.author_source,
                         record.proposed_series,
@@ -590,25 +583,25 @@ class SynchronizationService:
                         record.file_path,
                         file_hash,
                         record.metadata_genre,
-                        now,
-                        now,
-                        now
+                        now, now, now,
                     ))
-                    
-                    inserted_count += 1
-                    self._log(f"  -> Успешно записано (ID: {cursor.lastrowid})")
-                    
                 except Exception as e:
-                    self._log(f"ОШИБКА при записи в БД {record.file_path}: {str(e)}")
-                    import traceback
-                    self._log(f"Stacktrace: {traceback.format_exc()}")
+                    self._log(f"ОШИБКА при подготовке записи {record.file_path}: {str(e)}")
                     self.stats['errors'] += 1
-            
+
+            if rows_to_insert:
+                cursor.executemany("""
+                    INSERT INTO books (
+                        author, author_source, series, series_source,
+                        subseries, title, file_path, file_hash, genre,
+                        added_date, updated_date, last_sync_check
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, rows_to_insert)
+
+            inserted_count = len(rows_to_insert) - self.stats.get('errors', 0)
             self._log(f"Коммит базы данных... ({inserted_count} записей)")
             conn.commit()
             self._log(f"Коммит завершён успешно")
-            conn.close()
-            
             self._log(f"Записано в БД: {inserted_count} записей")
             
         except Exception as e:
@@ -616,6 +609,11 @@ class SynchronizationService:
             import traceback
             self._log(f"Stacktrace: {traceback.format_exc()}")
             self.stats['errors'] += 1
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
     
     def _cleanup_empty_folders(self) -> None:
         """Remove empty folders from source directory, preserving root.
@@ -688,7 +686,6 @@ class SynchronizationService:
             
             for row in rows:
                 existing.add(tuple(row))
-                self._log(f"  Существующий: {row[0]} | {row[1]} | {row[2]}")
             
             conn.close()
         except Exception as e:

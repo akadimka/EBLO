@@ -69,6 +69,8 @@ class Pass2Filename:
         # Author cache: maps abbreviated/partial names to full names
         # e.g., {"А. Живой" -> "Живой Алексей", "Живой" -> "Живой Алексей"}
         self.author_cache = {}
+        # Single reusable extractor — avoids re-reading config.json per file
+        self._extractor = FB2AuthorExtractor()
     
     def _load_patterns(self) -> List[dict]:
         """Load author_series_patterns_in_files from config."""
@@ -206,8 +208,7 @@ class Pass2Filename:
                 continue
 
             try:
-                extractor = FB2AuthorExtractor()
-                fb2_authors_str = extractor._extract_all_authors_from_metadata(fb2_path)
+                fb2_authors_str = self._extractor._extract_all_authors_from_metadata(fb2_path)
 
                 if not fb2_authors_str:
                     continue
@@ -264,9 +265,8 @@ class Pass2Filename:
         # STEP 2: Try FB2 metadata if available
         if fb2_path and fb2_path.exists():
             try:
-                # Extract authors from FB2 metadata
-                extractor = FB2AuthorExtractor()
-                fb2_authors_str = extractor._extract_all_authors_from_metadata(fb2_path)
+                # Extract authors from FB2 metadata (reuse shared extractor)
+                fb2_authors_str = self._extractor._extract_all_authors_from_metadata(fb2_path)
                 
                 if fb2_authors_str:
                     # Parse FB2 authors (separated by '; ')
