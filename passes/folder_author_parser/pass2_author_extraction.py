@@ -4,6 +4,7 @@ PASS2: Author Extraction
 Extracts author name from folder name based on selected pattern and structural info.
 """
 
+import re
 from typing import Optional
 
 
@@ -103,6 +104,8 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
         # Text BEFORE dash
         if ' - ' in name:
             author = name.split(' - ')[0].strip()
+            # Strip pseudonym in parentheses: "Абрахам Дэниел (Джеймс С.А. Кори)" → "Абрахам Дэниел"
+            author = re.sub(r'\s*\([^)]*\)', '', author).strip()
     
     elif pattern == "Series":
         # Fallback: if there are NO parentheses with AUTHORS, don't extract anything

@@ -313,7 +313,10 @@ class AuthorName:
         all_text_parts = []
         if main_part:
             all_text_parts.append(main_part)
-        if paren_content:
+        # Only merge paren content if main_part is empty or single-word.
+        # Multi-word main part like "Абрахам Дэниел (Джеймс С.А. Кори)" should use only main_part
+        # (parenthesized content is a pseudonym, not part of the canonical name).
+        if paren_content and len(main_part.split()) <= 1:
             all_text_parts.append(paren_content)
         all_text = " ".join(all_text_parts)
         
