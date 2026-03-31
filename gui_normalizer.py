@@ -163,6 +163,60 @@ class NamesDialog:
         self.top.destroy()
 
 
+class FemaleAuthorsDialog:
+    """Окно 'Великомученницы': файлы, у которых все авторы — женщины."""
+
+    def __init__(self, parent, rows):
+        """
+        Args:
+            rows: список кортежей (file_path, proposed_author)
+        """
+        self.top = tk.Toplevel(parent)
+        self.top.title("Великомученницы")
+        self.top.geometry("1000x500")
+        self.top.transient(parent)
+        self.top.grab_set()
+        self._build_ui(rows)
+
+    def _build_ui(self, rows):
+        # Счётчик
+        ttk.Label(self.top, text=f"Файлов: {len(rows)}").pack(
+            side=tk.TOP, anchor="w", padx=8, pady=(5, 0))
+
+        # Таблица
+        frame = ttk.Frame(self.top)
+        frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL)
+        hsb = ttk.Scrollbar(frame, orient=tk.HORIZONTAL)
+        tree = ttk.Treeview(frame, columns=("file_path", "proposed_author"),
+                            show="headings",
+                            yscrollcommand=vsb.set,
+                            xscrollcommand=hsb.set)
+        vsb.config(command=tree.yview)
+        hsb.config(command=tree.xview)
+
+        tree.heading("file_path", text="Путь к файлу")
+        tree.heading("proposed_author", text="Автор(ы)")
+        tree.column("file_path", width=660, minwidth=200)
+        tree.column("proposed_author", width=280, minwidth=120)
+
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+
+        for file_path, author in rows:
+            tree.insert("", "end", values=(file_path, author))
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.top, padding="5")
+        btn_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Button(btn_frame, text="Закрыть",
+                   command=self.top.destroy).pack(side=tk.LEFT, padx=2)
+
+
 class StdoutRedirector:
     """Перехватывает вывод stdout и обновляет progress_var и логи."""
     def __init__(self, progress_var, root, original_stdout, log_callback=None):
@@ -594,6 +648,92 @@ class CSVNormalizerApp:
             sys.stdout = original_stdout
             self.processing = False
 
+    def _run_female_pipeline(self, folder_path: str):
+        """Найти файлы, у которых все авторы — женщины."""
+        original_stdout = sys.stdout
+        try:
+            from pathlib import Path as _Path
+            from precache import Precache
+            from passes.pass1_read_files import Pass1ReadFiles
+            from passes.pass2_filename import Pass2Filename
+            from passes.pass2_fallback import Pass2Fallback
+            from fb2_author_extractor import FB2AuthorExtractor
+            from logger import Logger
+        except ImportError:
+            from pathlib import Path as _Path
+            from .precache import Precache
+            from .passes.pass1_read_files import Pass1ReadFiles
+            from .passes.pass2_filename import Pass2Filename
+            from .passes.pass2_fallback import Pass2Fallback
+            from .fb2_author_extractor import FB2AuthorExtractor
+            from .logger import Logger
+
+        redirector = StdoutRedirector(self.progress_var, self.root, original_stdout,
+                                      log_callback=self._add_log)
+        sys.stdout = redirector
+        try:
+            import re as _re
+            work_dir = _Path(folder_path)
+            settings = self.settings_manager if self.settings_manager else self.csv_service.settings
+            logger = self.csv_service.logger
+            folder_parse_limit = self.csv_service.folder_parse_limit
+            extractor = FB2AuthorExtractor()
+
+            self.root.after(0, lambda: self.progress_var.set("Кеширование папок..."))
+            precache = Precache(work_dir, settings, logger, folder_parse_limit)
+            precache.execute()
+
+            self.root.after(0, lambda: self.progress_var.set("Чтение файлов..."))
+            pass1 = Pass1ReadFiles(work_dir, precache.author_folder_cache,
+                                   extractor, logger, folder_parse_limit)
+            records = pass1.execute()
+
+            self.root.after(0, lambda: self.progress_var.set("Извлечение авторов..."))
+            pass2 = Pass2Filename(settings, logger, work_dir,
+                                  male_names=precache.male_names,
+                                  female_names=precache.female_names)
+            pass2.prebuild_author_cache(records)
+            pass2.execute(records)
+
+            pass2_fallback = Pass2Fallback(logger)
+            pass2_fallback.execute(records)
+
+            male_set = set(n.lower() for n in settings.get_male_names())
+            female_set = set(n.lower() for n in settings.get_female_names())
+
+            def is_female_author(author_str: str) -> bool:
+                """Автор женщина: ни одно слово не мужское, хотя бы одно женское."""
+                parts = author_str.split()
+                if not parts:
+                    return False
+                for word in parts:
+                    if word.lower() in male_set:
+                        return False
+                for word in parts:
+                    if word.lower() in female_set:
+                        return True
+                return False
+
+            rows = []
+            for rec in records:
+                combined = rec.proposed_author or ""
+                if not combined or combined == "Сборник":
+                    continue
+                authors = [a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()]
+                if authors and all(is_female_author(a) for a in authors):
+                    rows.append((rec.file_path, combined))
+
+            self.root.after(0, lambda: self.progress_var.set("Готово"))
+            self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows))
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            self.root.after(0, lambda: messagebox.showerror("Ошибка", f"{e}\n\n{tb}"))
+            self.root.after(0, lambda: self.progress_var.set("ОШИБКА"))
+        finally:
+            sys.stdout = original_stdout
+            self.processing = False
+
     def apply_changes(self):
         messagebox.showinfo("Информация", "Применение изменений")
 
@@ -610,7 +750,21 @@ class CSVNormalizerApp:
         self._log("Окно 'Битые файлы' открыто")
         
     def show_templates(self):
-        messagebox.showinfo("Информация", "Показать шаблоны")
+        folder = self.folder_path.get()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showwarning("Внимание", "Укажите корректную рабочую папку")
+            return
+        if self.processing:
+            messagebox.showwarning("Внимание", "Обработка уже в процессе")
+            return
+        self.processing = True
+        self._log("Поиск файлов с авторами-женщинами...")
+        thread = threading.Thread(
+            target=self._run_female_pipeline,
+            args=(folder,),
+            daemon=True
+        )
+        thread.start()
         
     def show_duplicates(self):
         try:
