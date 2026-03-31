@@ -404,17 +404,11 @@ class RegenCSVService:
                 
                 elif len(file_path_parts) == 3:
                     # Depth 3: Coll / Series / File
-                    # Only if author_folder_index not found
-                    if author_folder_index < 0:
-                        series_folder_name = file_path_parts[-2]
-                        series_name = self._extract_series_from_folder_name(series_folder_name)
-                        if series_name:  # Only set source if we got a series
-                            # [NEW] Проверить что папка не содержит blacklist слова!
-                            # Папка типа "Боевая фантастика. Циклы" НЕ может быть series
-                            # потому что "боевая фантастика" это ЖАНР, не series
-                            if not self._contains_blacklist_word_regen(series_name):
-                                record.proposed_series = series_name
-                                record.series_source = "folder_dataset"
+                    # Правило: папка серии возможна ТОЛЬКО внутри папки автора.
+                    # Если author_folder_index < 0 — папки автора нет, middle-папка
+                    # является жанровой/издательской структурой, не серией книг.
+                    # folder_dataset для серии при отсутствии folder_dataset автора — недопустимо.
+                    pass  # Let Pass 2 (filename patterns) and metadata handle series extraction
             
             self.logger.log("[OK] Series extracted from folder structure (Variant B)")
             

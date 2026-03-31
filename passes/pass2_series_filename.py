@@ -353,10 +353,13 @@ class Pass2SeriesFilename:
         4. Fallback на metadata только если паттерны не дали
         """
         for record in records:
-            # 🔑 НОВОЕ: Железное правило иерархии папок (без проверок)
-            # Папка прямо под автором = серия
-            # Папка прямо под серией = подсерия
-            author_name = record.proposed_author or record.metadata_authors
+            # 🔑 Железное правило: серия из папки ТОЛЬКО если автор тоже из папки.
+            # Папка серии/подсерии может существовать только внутри папки автора.
+            # Если author_source != "folder_dataset" — иерархия папок не авторитетна.
+            if record.author_source == "folder_dataset":
+                author_name = record.proposed_author
+            else:
+                author_name = None
             if author_name:
                 path_parts = Path(record.file_path).parts  # e.g., (TopFolder, Author, Series, File.fb2)
 
