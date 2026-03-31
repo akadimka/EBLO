@@ -12,6 +12,137 @@ except ImportError:
     from .regen_csv import RegenCSVService
 
 
+class NamesDialog:
+    """Окно просмотра и редактирования извлечённых имён авторов."""
+
+    GENDER_OPTIONS = ("Муж.", "Жен.")
+
+    def __init__(self, parent, rows, settings_manager):
+        """
+        Args:
+            rows: список кортежей (author_source, proposed_author, first_name, gender)
+            settings_manager: экземпляр SettingsManager
+        """
+        self.settings_manager = settings_manager
+        self.top = tk.Toplevel(parent)
+        self.top.title("Имена авторов")
+        self.top.geometry("860x500")
+        self.top.transient(parent)
+        self.top.grab_set()
+
+        # Данные строк: (author_source, proposed_author, StringVar(name), StringVar(gender))
+        self._row_data = []
+        for source, author, name, gender in rows:
+            self._row_data.append((source, author, tk.StringVar(value=name),
+                                   tk.StringVar(value=gender)))
+
+        self._build_ui()
+
+    def _build_ui(self):
+        # ---- заголовок таблицы ----
+        hdr = ttk.Frame(self.top)
+        hdr.pack(fill=tk.X, padx=5, pady=(5, 0))
+        for text, w in (("author_source", 130), ("proposed_author", 280),
+                        ("Names", 180), ("Gender", 120)):
+            ttk.Label(hdr, text=text, relief="groove", width=w // 7,
+                      anchor="w").pack(side=tk.LEFT, padx=1)
+
+        # ---- прокручиваемый canvas ----
+        container = ttk.Frame(self.top)
+        container.pack(fill=tk.BOTH, expand=True, padx=5, pady=2)
+
+        canvas = tk.Canvas(container, borderwidth=0, highlightthickness=0)
+        vsb = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._inner = ttk.Frame(canvas)
+        win_id = canvas.create_window((0, 0), window=self._inner, anchor="nw")
+
+        def _on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(win_id, width=event.width)
+
+        self._inner.bind("<Configure>", _on_frame_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        # Прокрутка колесом мыши
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self.top.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        # ---- строки данных ----
+        for i, (source, author, name_var, gender_var) in enumerate(self._row_data):
+            row_frame = ttk.Frame(self._inner)
+            row_frame.pack(fill=tk.X, pady=1)
+
+            # author_source — нередактируемое
+            ttk.Label(row_frame, text=source, width=18, anchor="w",
+                      relief="sunken").pack(side=tk.LEFT, padx=1)
+            # proposed_author — нередактируемое
+            ttk.Label(row_frame, text=author, width=38, anchor="w",
+                      relief="sunken").pack(side=tk.LEFT, padx=1)
+            # Names — редактируемое
+            ttk.Entry(row_frame, textvariable=name_var, width=24).pack(
+                side=tk.LEFT, padx=1)
+            # Gender — выпадающий список
+            cb = ttk.Combobox(row_frame, textvariable=gender_var,
+                              values=self.GENDER_OPTIONS, width=10, state="readonly")
+            cb.pack(side=tk.LEFT, padx=1)
+
+        # ---- кнопки внизу ----
+        btn_frame = ttk.Frame(self.top)
+        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Button(btn_frame, text="Пополнить списки",
+                   command=self._save_names).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Отмена",
+                   command=self.top.destroy).pack(side=tk.LEFT, padx=5)
+
+    def _save_names(self):
+        """Записать имена в списки config.json и отсортировать их по алфавиту."""
+        if not self.settings_manager:
+            messagebox.showerror("Ошибка", "settings_manager не передан")
+            return
+
+        male_new = []
+        female_new = []
+        for _, _, name_var, gender_var in self._row_data:
+            name = name_var.get().strip()
+            gender = gender_var.get()
+            if not name:
+                continue
+            if gender == "Муж.":
+                male_new.append(name)
+            elif gender == "Жен.":
+                female_new.append(name)
+
+        if not male_new and not female_new:
+            messagebox.showinfo("Информация", "Нет имён для добавления")
+            return
+
+        # Добавляем к существующим, дедупликация + сортировка
+        if male_new:
+            existing = self.settings_manager.get_male_names()
+            merged = sorted(set(existing + male_new), key=lambda s: s.lower())
+            self.settings_manager.set_male_names(merged)
+
+        if female_new:
+            existing = self.settings_manager.get_female_names()
+            merged = sorted(set(existing + female_new), key=lambda s: s.lower())
+            self.settings_manager.set_female_names(merged)
+
+        added = len(male_new) + len(female_new)
+        messagebox.showinfo("Готово",
+                            f"Добавлено / обновлено: {added} имён\n"
+                            f"Мужских: {len(male_new)}, женских: {len(female_new)}")
+        self.top.destroy()
+
+
 class StdoutRedirector:
     """Перехватывает вывод stdout и обновляет progress_var и логи."""
     def __init__(self, progress_var, root, original_stdout, log_callback=None):
@@ -151,7 +282,7 @@ class CSVNormalizerApp:
         
         ttk.Button(buttons_frame, text="Создать CSV", command=self.create_csv).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Отмена", command=self.cancel).pack(side=tk.LEFT, padx=2)
-        ttk.Button(buttons_frame, text="Применить изменения", command=self.apply_changes).pack(side=tk.LEFT, padx=2)
+        ttk.Button(buttons_frame, text="Получить имена", command=self.get_names).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Битые файлы", command=self.show_broken_files).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Шаблоны", command=self.show_templates).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Дубликаты", command=self.show_duplicates).pack(side=tk.LEFT, padx=2)
@@ -320,9 +451,115 @@ class CSVNormalizerApp:
             self.log_buffer = []
             self.root.quit()
             
+    def get_names(self):
+        """Запустить только авторскую часть pipeline и показать окно имён."""
+        folder = self.folder_path.get()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror("Ошибка", "Укажите корректную папку")
+            return
+        if self.processing:
+            messagebox.showwarning("Внимание", "Обработка уже в процессе")
+            return
+        self.processing = True
+        self._log("Запуск извлечения авторов...")
+        thread = threading.Thread(
+            target=self._run_author_pipeline,
+            args=(folder,),
+            daemon=True
+        )
+        thread.start()
+
+    def _run_author_pipeline(self, folder_path: str):
+        """Запустить только Precache + Pass1 + Pass2 + Pass2Fallback."""
+        original_stdout = sys.stdout
+        try:
+            from pathlib import Path as _Path
+            from precache import Precache
+            from passes.pass1_read_files import Pass1ReadFiles
+            from passes.pass2_filename import Pass2Filename
+            from passes.pass2_fallback import Pass2Fallback
+            from fb2_author_extractor import FB2AuthorExtractor
+            from logger import Logger
+        except ImportError:
+            from pathlib import Path as _Path
+            from .precache import Precache
+            from .passes.pass1_read_files import Pass1ReadFiles
+            from .passes.pass2_filename import Pass2Filename
+            from .passes.pass2_fallback import Pass2Fallback
+            from .fb2_author_extractor import FB2AuthorExtractor
+            from .logger import Logger
+
+        redirector = StdoutRedirector(self.progress_var, self.root, original_stdout,
+                                      log_callback=self._add_log)
+        sys.stdout = redirector
+        try:
+            work_dir = _Path(folder_path)
+            settings = self.csv_service.settings
+            logger = self.csv_service.logger
+            folder_parse_limit = self.csv_service.folder_parse_limit
+            extractor = FB2AuthorExtractor()
+
+            self.root.after(0, lambda: self.progress_var.set("Кеширование папок..."))
+            precache = Precache(work_dir, settings, logger, folder_parse_limit)
+            precache.execute()
+
+            self.root.after(0, lambda: self.progress_var.set("Чтение файлов..."))
+            pass1 = Pass1ReadFiles(work_dir, precache.author_folder_cache,
+                                   extractor, logger, folder_parse_limit)
+            records = pass1.execute()
+
+            self.root.after(0, lambda: self.progress_var.set("Извлечение авторов..."))
+            pass2 = Pass2Filename(settings, logger, work_dir,
+                                  male_names=precache.male_names,
+                                  female_names=precache.female_names)
+            pass2.prebuild_author_cache(records)
+            pass2.execute(records)
+
+            pass2_fallback = Pass2Fallback(logger)
+            pass2_fallback.execute(records)
+
+            # Собрать уникальные имена (второе слово из "Фамилия Имя")
+            male_set = set(n.lower() for n in settings.get_male_names())
+            female_set = set(n.lower() for n in settings.get_female_names())
+
+            rows = []
+            seen = set()
+            for rec in records:
+                author = rec.proposed_author or ""
+                source = rec.author_source or ""
+                if not author or author == "Сборник":
+                    continue
+                # Второе слово = имя (формат "Фамилия Имя" или "Фамилия Имя Отчество")
+                parts = author.split()
+                first_name = parts[1] if len(parts) >= 2 else ""
+                key = (source, author)
+                if key in seen:
+                    continue
+                seen.add(key)
+                # Определить пол по списку
+                fn_lower = first_name.lower()
+                if fn_lower in male_set:
+                    gender = "Муж."
+                elif fn_lower in female_set:
+                    gender = "Жен."
+                else:
+                    gender = ""  # неизвестно
+                rows.append((source, author, first_name, gender))
+
+            self.root.after(0, lambda: self.progress_var.set("Готово"))
+            self.root.after(0, lambda: NamesDialog(self.root, rows, self.settings_manager))
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            self.root.after(0, lambda: messagebox.showerror("Ошибка", f"{e}\n\n{tb}"))
+            self.root.after(0, lambda: self.progress_var.set("ОШИБКА"))
+        finally:
+            sys.stdout = original_stdout
+            self.processing = False
+
     def apply_changes(self):
         messagebox.showinfo("Информация", "Применение изменений")
-        
+
     def show_broken_files(self):
         try:
             from gui_broken_files import BrokenFilesWindow
