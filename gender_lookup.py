@@ -194,11 +194,21 @@ class GenderLookupService:
             if not is_human:
                 continue
 
-            # Фильтр по label: все слова автора должны присутствовать
+            # Фильтр по label: все слова автора должны иметь близкое совпадение
+            # в лейбле кандидата. Используем нечёткое сравнение (ratio ≥ 0.8),
+            # чтобы выдерживать разные варианты транслитерации:
+            # «Олдерман» vs «Алдерман» — одна буква, ratio=0.875 → проходит.
             label_text = (labels.get('ru') or labels.get('en') or {}).get('value', '')
             if needs_label_filter:
-                label_lower = label_text.lower()
-                if not all(w in label_lower for w in author_words_lower):
+                import difflib
+                label_words = label_text.lower().split()
+                def _fuzzy_match(author_word: str) -> bool:
+                    """True если хотя бы одно слово лейбла ≥ 80% похоже."""
+                    for lw in label_words:
+                        if difflib.SequenceMatcher(None, author_word, lw).ratio() >= 0.8:
+                            return True
+                    return False
+                if not all(_fuzzy_match(w) for w in author_words_lower):
                     continue
 
             # Имя: первое слово русского (или английского) label
