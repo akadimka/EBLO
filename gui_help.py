@@ -151,7 +151,10 @@ EBook Library Organizer — инструмент организации колл
                             определяет author из кэша папок (Precache).
 
   pass2_filename.py       — извлечение автора из имени файла:
-                            блочный pattern-matching + fallback на author_processor.
+                            блочный pattern-matching (BlockLevelPatternMatcher).
+                            Защита от записи <book-title> как автора:
+                            если кандидат совпадает с FB2-заголовком книги —
+                            повторный поиск без паттернов «Title-first».
                             Если ≥ 3 авторов в метаданных → "Сборник".
 
   pass2_fallback.py       — для файлов без автора из папки/filename:
@@ -275,6 +278,18 @@ EBook Library Organizer — инструмент организации колл
       Дубликаты         — DuplicateFinderWindow
       Удалить пустые папки
       Логи
+
+NamesDialog:
+  • Открывается через «Получить имена»; запускает полный pipeline
+    (Pass1–Pass6) через csv_service.generate_csv(output_csv_path=None) —
+    результаты идентичны CSV-файлу.
+  • Показывает только авторов, у которых хотя бы одно слово имени
+    отсутствует в словарях male_names / female_names.
+  • Кликабельные блоки слов → добавить в мужской или женский список.
+  • Кнопка «Сверить онлайн» — запускает Wikidata-поиск по требованию
+    (ранее поиск запускался автоматически при открытии диалога).
+  • Цветные строки + тултипы: зелёный=найден, персиковый=неизвестен,
+    розовый=ошибка сети; тултип динамически описывает смысл цвета.
 """),
     ("Модули", "gui_dashboard.py", """\
 Окно статистики (DashboardWindow).
@@ -379,6 +394,31 @@ EBook Library Organizer — инструмент организации колл
     • Сортировка при 2 авторах
 
   Если авторов ≥ 3 → «Соавторство».
+"""),
+    ("Модули", "gender_lookup.py", """\
+Онлайн-определение пола автора (класс GenderLookupService).
+
+  Источник: Wikidata MediaWiki API (Genderize.io удалён).
+
+  Алгоритм поиска (_wikidata_lookup):
+    Стратегия 1 — wbsearchentities по полному имени автора (ru, до 5 кандидатов).
+    Стратегия 2 — list=search по самому длинному слову (фамилия) + фильтр:
+                  лейбл (ru|en) кандидата должен содержать ВСЕ слова автора.
+                  Находит авторов с отчеством в Wikidata («Жозе Агуалуза» →
+                  «Жозе Эдуардо Агуалуза»).
+    Шаг 2 — wbgetentities: P31=Q5 (человек), P21 (пол), labels (ru|en).
+
+  Throttle: ≥ 1.1 сек между запросами (_wd_lock + монотонные часы).
+  Кеш: _cache["_wd_" + author.lower()] на всю сессию.
+
+  LookupResult:
+    gender_ru   — «Мужской» / «Женский» / None
+    first_name  — первое слово ru-лейбла из Wikidata (имя, не фамилия)
+    source      — "wikidata" | ""
+    status      — found / unknown / error / pending
+
+  lookup_authors_async(items, on_result, on_done) — запускает поток,
+    не блокирует UI; on_done(False) вызывается по завершении.
 """),
     ("Модули", "author_processor.py / author_utils.py", """\
   author_processor.py  — ExtractionResult, приоритеты источников,
