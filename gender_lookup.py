@@ -27,6 +27,29 @@ WIKIDATA_API_URL  = "https://www.wikidata.org/w/api.php"
 DEFAULT_TIMEOUT   = 10      # секунд
 WIKIDATA_DELAY    = 1.1     # секунд между запросами к Wikidata
 
+# QID профессий, связанных с литературным творчеством (P106).
+# Используется для мягкого приоритета: среди нескольких кандидатов-людей
+# сначала проверяются те, чья профессия входит в этот набор.
+# НЕ является жёстким фильтром — авторы без P106=writer всё равно вернут пол.
+_WRITER_OCCUPATIONS = {
+    'Q36180',    # writer / писатель
+    'Q482980',   # author / автор
+    'Q6625963',  # novelist / романист
+    'Q49757',    # poet / поэт
+    'Q28389',    # screenwriter / сценарист
+    'Q214917',   # playwright / драматург
+    'Q11774202', # essayist / эссеист
+    'Q18844224', # fantasy writer / фантаст
+    'Q4853732',  # blogger / блогер
+    'Q6621547',  # journalist / журналист (часто пишут книги)
+    'Q1930187',  # journalist (alt QID)
+    'Q11569986', # science fiction writer / писатель-фантаст
+    'Q4263842',  # children's writer / детский писатель
+    'Q487596',   # satirist / сатирик
+    'Q58723735', # detective fiction writer
+    'Q3282637',  # film producer (часто сочетается с писательством)
+}
+
 # ── Статусы строки в NamesDialog ─────────────────────────────────────────────
 STATUS_PENDING    = 'pending'      # запрос отправлен
 STATUS_FOUND      = 'found'        # пол определён
@@ -199,6 +222,11 @@ class GenderLookupService:
             entity_data = json.loads(resp.read().decode('utf-8'))
 
         entities = entity_data.get('entities', {})
+
+        # Собираем всех подходящих людей: (is_writer, first_name, gender_id)
+        # Писатели (P106 в _WRITER_OCCUPATIONS) идут первыми при сортировке.
+        matched: list = []  # list of (is_writer: bool, first_name: str, gender_ru: str)
+
         for qid in candidates:
             entity = entities.get(qid, {})
             if not entity:
@@ -225,6 +253,13 @@ class GenderLookupService:
                 if not _label_passes(label_text.lower().split()):
                     continue
 
+            # Проверяем P106 (occupation) — писательская профессия?
+            p106_ids = {
+                c.get('mainsnak', {}).get('datavalue', {}).get('value', {}).get('id', '')
+                for c in claims.get('P106', [])
+            }
+            is_writer = bool(p106_ids & _WRITER_OCCUPATIONS)
+
             first_name = label_text.split()[0] if label_text else ''
 
             for claim in claims.get('P21', []):
@@ -235,18 +270,23 @@ class GenderLookupService:
                          .get('id', '')
                 )
                 if gender_id in male_ids:
-                    return LookupResult(
-                        gender_ru='Муж.', probability=1.0,
-                        status=STATUS_FOUND, source='wikidata',
-                        first_name=first_name,
-                    )
+                    matched.append((is_writer, first_name, 'Муж.'))
+                    break
                 if gender_id in female_ids:
-                    return LookupResult(
-                        gender_ru='Жен.', probability=1.0,
-                        status=STATUS_FOUND, source='wikidata',
-                        first_name=first_name,
-                    )
-        return None
+                    matched.append((is_writer, first_name, 'Жен.'))
+                    break
+
+        if not matched:
+            return None
+
+        # Писатели первыми, затем остальные люди с полом
+        matched.sort(key=lambda x: (not x[0],))  # is_writer=True → sort key=False → первые
+        is_writer, first_name, gender_ru = matched[0]
+        return LookupResult(
+            gender_ru=gender_ru, probability=1.0,
+            status=STATUS_FOUND, source='wikidata',
+            first_name=first_name,
+        )
 
     def _wikidata_lookup(self, author: str) -> 'LookupResult':
         """Wikidata MediaWiki API: ищем человека по имени, возвращаем пол.
