@@ -378,15 +378,14 @@ class Pass2Filename:
         text_words = text_normalized.split()
         
         if len(text_words) > 1:  # Multi-word - likely "FirstName LastName" or "Title Words"
-            # If name contains a known language particle (де, ван, фон, ди…) it's a
-            # foreign proper name — skip the first-name check entirely.
-            has_particle = bool(self.name_particles and any(
-                word in self.name_particles for word in text_words
-            ))
-            # Require at least one known first name to filter out collection titles
-            if not has_particle and (self.male_names or self.female_names):
+            # Require at least one known first name OR a known name particle (de, van, von…)
+            # to filter out collection titles like "Боевая фантастика".
+            # Particles count as valid name-components (they are part of proper names).
+            if self.male_names or self.female_names:
                 has_known_name = any(
-                    word in self.male_names or word in self.female_names
+                    word in self.male_names
+                    or word in self.female_names
+                    or word in self.name_particles
                     for word in text_words
                 )
                 if not has_known_name:
