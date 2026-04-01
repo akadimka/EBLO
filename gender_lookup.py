@@ -134,40 +134,38 @@ class GenderLookupService:
     def _wikidata_lookup(self, author: str) -> 'LookupResult':
         """Wikidata MediaWiki API: ищем человека по имени, возвращаем пол.
 
-        Шаг 1: wbsearchentities — текстовый поиск по индексу (быстро, 1 запрос)
-        Шаг 2: wbgetentities    — получить P31/P21 claims для кандидатов (1 запрос)
-
-        Только сущности типа Q5 (человек) с P21 (пол) принимаются во внимание.
-        Кандидаты проверяются в том порядке, в котором их вернул поиск.
+        Стратегия 1 (быстрая): wbsearchentities по полному имени в 'ru'
+        Стратегия 2 (fallback): полнотекстовый поиск (list=search) по самому
+            длинному слову автора (как правило фамилия) — находит даже тех,
+            у кого в Wikidata есть отчество или другие расхождения.
+            Из кандидатов оставляем тех, чей ru/en label содержит ВСЕ слова
+            исходного автора.
+        Шаг 2: wbgetentities — P31 (человек) + P21 (пол) + labels (имя)
         """
         _UA     = 'EBookLibraryOrganizer/1.0 (github.com/akadimka/EBLO)'
         _MALE   = {'Q6581097', 'Q44148', 'Q2443246'}
         _FEMALE = {'Q6581072', 'Q2449503', 'Q1052281'}
 
-        # Шаг 1: текстовый поиск сущностей по имени автора
-        params1 = urllib.parse.urlencode({
-            'action':   'wbsearchentities',
-            'search':   author,
-            'language': 'ru',
-            'type':     'item',
-            'limit':    '5',
-            'format':   'json',
-        })
-        req1 = urllib.request.Request(
-            WIKIDATA_API_URL + '?' + params1,
-            headers={'User-Agent': _UA},
-        )
-        with urllib.request.urlopen(req1, timeout=self._timeout) as resp:
-            search_data = json.loads(resp.read().decode('utf-8'))
+        # ── Стратегия 1: поиск полного имени ─────────────────────────────────
+        candidates = self._wb_search(author, 'ru', _UA, limit=5)
+        needs_label_filter = False
 
-        candidates = [r['id'] for r in search_data.get('search', [])]
+        # ── Стратегия 2: полнотекстовый поиск по наиболее уникальному слову ──
+        if not candidates:
+            # Берём самое длинное слово (чаще всего — фамилия)
+            words = [w for w in author.split() if len(w) >= 3]
+            pivot = max(words, key=len) if words else author
+            candidates = self._wb_fulltext_search(pivot, _UA, limit=10)
+            needs_label_filter = True
+
         if not candidates:
             return LookupResult(status=STATUS_UNKNOWN, source='wikidata')
 
-        # Шаг 2: получить claims P31/P21 и русский label для кандидатов
+        # ── Шаг 2: получить claims + labels для кандидатов ───────────────────
+        author_words_lower = {w.lower() for w in author.split() if len(w) >= 2}
         params2 = urllib.parse.urlencode({
             'action':    'wbgetentities',
-            'ids':       '|'.join(candidates),
+            'ids':       '|'.join(candidates[:10]),
             'props':     'claims|labels',
             'languages': 'ru|en',
             'format':    'json',
@@ -182,6 +180,8 @@ class GenderLookupService:
         entities = entity_data.get('entities', {})
         for qid in candidates:
             entity = entities.get(qid, {})
+            if not entity:
+                continue
             claims = entity.get('claims', {})
             labels = entity.get('labels', {})
 
@@ -194,10 +194,14 @@ class GenderLookupService:
             if not is_human:
                 continue
 
-            # Извлечь имя из русского (или английского) лейбла: первое слово
-            label_text = (
-                labels.get('ru') or labels.get('en') or {}
-            ).get('value', '')
+            # Фильтр по label: все слова автора должны присутствовать
+            label_text = (labels.get('ru') or labels.get('en') or {}).get('value', '')
+            if needs_label_filter:
+                label_lower = label_text.lower()
+                if not all(w in label_lower for w in author_words_lower):
+                    continue
+
+            # Имя: первое слово русского (или английского) label
             first_name = label_text.split()[0] if label_text else ''
 
             # Получить P21 (sex or gender)
@@ -222,6 +226,42 @@ class GenderLookupService:
                     )
 
         return LookupResult(status=STATUS_UNKNOWN, source='wikidata')
+
+    def _wb_search(self, query: str, lang: str, ua: str, limit: int = 5) -> List[str]:
+        """Вернуть список QID из wbsearchentities (поиск по labels/aliases)."""
+        params = urllib.parse.urlencode({
+            'action':   'wbsearchentities',
+            'search':   query,
+            'language': lang,
+            'type':     'item',
+            'limit':    str(limit),
+            'format':   'json',
+        })
+        req = urllib.request.Request(
+            WIKIDATA_API_URL + '?' + params,
+            headers={'User-Agent': ua},
+        )
+        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        return [r['id'] for r in data.get('search', [])]
+
+    def _wb_fulltext_search(self, query: str, ua: str, limit: int = 10) -> List[str]:
+        """Полнотекстовый поиск по Wikidata (действие list=search)."""
+        params = urllib.parse.urlencode({
+            'action':      'query',
+            'list':        'search',
+            'srsearch':    query,
+            'srnamespace': '0',
+            'srlimit':     str(limit),
+            'format':      'json',
+        })
+        req = urllib.request.Request(
+            WIKIDATA_API_URL + '?' + params,
+            headers={'User-Agent': ua},
+        )
+        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        return [r['title'] for r in data.get('query', {}).get('search', [])]
 
     # ── Итоговый выбор ────────────────────────────────────────────────────────
 
