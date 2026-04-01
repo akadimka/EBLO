@@ -853,5 +853,23 @@
     "Вне циклов",
     "Без цикла"
   ],
-  "settings_file_path": "C:\\Temp\\fb2parser\\config.json"
+  "settings_file_path": "C:\\Temp\\fb2parser\\config.json",
+  "writer_occupation_qids": [
+    "Q36180",
+    "Q482980",
+    "Q6625963",
+    "Q49757",
+    "Q28389",
+    "Q214917",
+    "Q11774202",
+    "Q18844224",
+    "Q4853732",
+    "Q6621547",
+    "Q1930187",
+    "Q11569986",
+    "Q4263842",
+    "Q487596",
+    "Q58723735",
+    "Q3282637"
+  ]
 }

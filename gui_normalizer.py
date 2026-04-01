@@ -116,7 +116,7 @@ class NamesDialog:
             try:
                 from gender_lookup import GenderLookupService
                 api_key = settings_manager.get_genderize_api_key()
-                self._service = GenderLookupService(api_key=api_key)
+                self._service = GenderLookupService(api_key=api_key, settings=settings_manager)
             except ImportError:
                 pass
 

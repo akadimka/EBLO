@@ -27,11 +27,10 @@ WIKIDATA_API_URL  = "https://www.wikidata.org/w/api.php"
 DEFAULT_TIMEOUT   = 10      # секунд
 WIKIDATA_DELAY    = 1.1     # секунд между запросами к Wikidata
 
-# QID профессий, связанных с литературным творчеством (P106).
-# Используется для мягкого приоритета: среди нескольких кандидатов-людей
-# сначала проверяются те, чья профессия входит в этот набор.
-# НЕ является жёстким фильтром — авторы без P106=writer всё равно вернут пол.
-_WRITER_OCCUPATIONS = {
+# QID профессий по умолчанию (fallback если config.json не загружен).
+# Основной список хранится в config.json -> writer_occupation_qids
+# и может редактироваться пользователем без изменения кода.
+_DEFAULT_WRITER_OCCUPATIONS = {
     'Q36180',    # writer / писатель
     'Q482980',   # author / автор
     'Q6625963',  # novelist / романист
@@ -90,14 +89,27 @@ class GenderLookupService:
 
     Один экземпляр на приложение — кеш общий для всех вызовов.
     Параметр api_key игнорируется (оставлен для совместимости).
+    settings — необязательный SettingsManager; если передан, список
+    QID писательских профессий загружается из config.json
+    (ключ writer_occupation_qids), иначе используется встроенный fallback.
     """
 
-    def __init__(self, api_key: str = '', timeout: int = DEFAULT_TIMEOUT):
+    def __init__(self, api_key: str = '', timeout: int = DEFAULT_TIMEOUT, settings=None):
         self._timeout    = timeout
         self._cache: Dict[str, LookupResult] = {}
         self._lock       = threading.Lock()
         self._wd_lock    = threading.Lock()  # сериализует Wikidata-запросы
         self._last_wd_ts = 0.0
+        # Список QID «писательских» профессий (P106) для мягкого приоритета
+        if settings is not None:
+            qids = settings.get_writer_occupation_qids()
+        else:
+            try:
+                from settings_manager import SettingsManager
+                qids = SettingsManager().get_writer_occupation_qids()
+            except Exception:
+                qids = None
+        self._writer_occupations: set = set(qids) if qids else _DEFAULT_WRITER_OCCUPATIONS
 
     # ── Публичный API ─────────────────────────────────────────────────────────
 
@@ -258,7 +270,7 @@ class GenderLookupService:
                 c.get('mainsnak', {}).get('datavalue', {}).get('value', {}).get('id', '')
                 for c in claims.get('P106', [])
             }
-            is_writer = bool(p106_ids & _WRITER_OCCUPATIONS)
+            is_writer = bool(p106_ids & self._writer_occupations)
 
             first_name = label_text.split()[0] if label_text else ''
 

@@ -287,6 +287,16 @@ class SettingsManager:
             return list(v)
         return None
 
+    def get_writer_occupation_qids(self) -> list:
+        """Вернуть список Wikidata QID писательских профессий (P106).
+
+        Хранится в config.json под ключом writer_occupation_qids.
+        Каждый элемент — строка вида 'Q36180'.
+        Используется GenderLookupService для мягкого приоритета:
+        среди кандидатов-людей писатели проверяются первыми.
+        """
+        return self.settings.get('writer_occupation_qids') or []
+
     def get_no_series_folder_names(self) -> frozenset:
         """Вернуть frozenset нормализованных имён папок «без серии» из конфига.
 
