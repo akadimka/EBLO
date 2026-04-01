@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Онлайн-определение пола по имени через Genderize.io.
+Онлайн-определение пола автора.
 
-Особенности:
-- Батчевые запросы (до 10 имён за раз)
-- In-memory кеш (повторные запросы ничего не стоят)
-- Полностью асинхронный: не блокирует UI
-- Работает с Кириллицей: имя берётся из исходного автора (не из ответа сервиса),
-  сервис определяет только ПОЛ, а не транслитерирует имя
+Цепочка источников (каскад):
+  1. Genderize.io  — быстро, батчами по 10 слов
+  2. Wikidata SPARQL — при 429 или unknown от Genderize.io,
+                       последовательно, 1 запрос/секунду
 
-Зеркало логики определения:
-  "Жозе Агуалуза" → запрашиваем "Жозе" → сервис отвечает gender=male
-  → в поле Name пишем "Жозе" (наш Кириллический вариант), не "José"
+Кеш:
+  Общий in-memory кеш на всю сессию. Один раз найденное слово больше не
+  запрашивается ни в одном из источников.
+
+Имя:
+  Запрашиваем слова из кириллической строки автора (все слова).
+  Возвращаем то кириллическое слово, которое было распознано как имя.
+  Сервис определяет только ПОЛ — транслитерации не происходит.
 """
 
+import time
 import urllib.request
 import urllib.parse
 import json
@@ -22,30 +26,34 @@ import threading
 from typing import Dict, List, Tuple, Callable, Optional
 
 # ── Константы ────────────────────────────────────────────────────────────────
-GENDERIZE_URL   = "https://api.genderize.io"
-BATCH_SIZE      = 10      # лимит Genderize.io за один запрос
-DEFAULT_TIMEOUT = 8       # секунд
-MIN_PROBABILITY = 0.75    # ниже — считаем ненадёжным (но всё равно заполняем)
+GENDERIZE_URL     = "https://api.genderize.io"
+WIKIDATA_API_URL  = "https://www.wikidata.org/w/api.php"
+BATCH_SIZE        = 10      # лимит Genderize.io за один запрос
+DEFAULT_TIMEOUT   = 10      # секунд
+MIN_PROBABILITY   = 0.75    # (Genderize) ниже — uncertain
+WIKIDATA_DELAY    = 1.1     # секунд между Wikidata-запросами (политика сервиса)
 
 _GENDER_RU = {'male': 'Муж.', 'female': 'Жен.'}
+
+# ── Статусы строки в NamesDialog ─────────────────────────────────────────────
+STATUS_PENDING    = 'pending'      # запрос отправлен
+STATUS_FOUND      = 'found'        # пол определён уверенно
+STATUS_UNCERTAIN  = 'uncertain'    # пол определён, вероятность < MIN_PROBABILITY
+STATUS_UNKNOWN    = 'unknown'      # все источники: имя не найдено
+STATUS_ERROR      = 'error'        # ошибка сети/парсинга
+STATUS_RATE_LIMIT = 'rate_limit'   # HTTP 429 от Genderize.io
 
 
 class RateLimitError(Exception):
     """Genderize.io вернул HTTP 429 — суточный лимит исчерпан."""
 
-# Состояния строки в NamesDialog
-STATUS_PENDING   = 'pending'     # запрос отправлен
-STATUS_FOUND     = 'found'       # ответ получен, пол определён
-STATUS_UNCERTAIN = 'uncertain'   # ответ получен, вероятность ниже порога
-STATUS_UNKNOWN   = 'unknown'     # сервис не знает этого имени
-STATUS_ERROR     = 'error'       # ошибка сети
-STATUS_RATE_LIMIT= 'rate_limit'  # превышен суточный лимит запросов (HTTP 429)
 
+# ── Результат ─────────────────────────────────────────────────────────────────
 
 class LookupResult:
-    """Результат определения пола для одного имени."""
+    """Результат определения пола для одного слова."""
 
-    __slots__ = ('gender_ru', 'probability', 'status', 'error')
+    __slots__ = ('gender_ru', 'probability', 'status', 'error', 'source')
 
     def __init__(
         self,
@@ -53,160 +61,127 @@ class LookupResult:
         probability: float = 0.0,
         status: str = STATUS_UNKNOWN,
         error: str = '',
+        source: str = '',          # 'genderize' | 'wikidata' | ''
     ):
-        self.gender_ru   = gender_ru    # 'Муж.' | 'Жен.' | None
-        self.probability = probability  # 0.0–1.0
-        self.status      = status       # одна из STATUS_* констант
-        self.error       = error        # сообщение об ошибке
+        self.gender_ru   = gender_ru
+        self.probability = probability
+        self.status      = status
+        self.error       = error
+        self.source      = source
 
+
+# ── Основной сервис ───────────────────────────────────────────────────────────
 
 class GenderLookupService:
-    """Потокобезопасный батчевый сервис определения пола через Genderize.io.
+    """Двухуровневый потокобезопасный сервис определения пола.
 
-    Один экземпляр на приложение — кеш накапливается между вызовами.
+    Уровень 1: Genderize.io  (батчи по 10, быстро)
+    Уровень 2: Wikidata SPARQL (последовательно, 1 req/sec, fallback)
+
+    Один экземпляр на приложение — кеш общий для обоих источников.
     """
 
     def __init__(self, api_key: str = '', timeout: int = DEFAULT_TIMEOUT):
-        self._api_key  = api_key.strip()
-        self._timeout  = timeout
+        self._api_key    = api_key.strip()
+        self._timeout    = timeout
         self._cache: Dict[str, LookupResult] = {}
-        self._lock = threading.Lock()
+        self._lock       = threading.Lock()
+        self._wd_lock    = threading.Lock()  # сериализует Wikidata-запросы
+        self._last_wd_ts = 0.0              # время последнего Wikidata-запроса
 
     # ── Публичный API ─────────────────────────────────────────────────────────
 
     def lookup_authors_async(
         self,
-        items: List[Tuple[int, str]],       # (row_index, author_string)
+        items: List[Tuple[int, str]],
         on_result: Callable[[int, str, 'LookupResult'], None],
-        on_done:   Callable[[], None],
+        on_done:   Callable[[bool], None],
     ) -> None:
-        """Запустить асинхронный lookup.
+        """Асинхронный lookup (не блокирует UI).
 
-        Вызывает on_result(row_idx, name_word, result) для каждого автора.
-        name_word — слово из оригинального кириллического автора, которое
-        было отправлено на проверку (его и надо писать в поле Name).
-
-        on_done() вызывается когда все запросы завершены.
+        on_result(row_idx, name_word, result) — для каждого автора.
+        on_done(rate_limited) — когда все проверки завершены.
         """
-        t = threading.Thread(
+        threading.Thread(
             target=self._worker,
             args=(items, on_result, on_done),
             daemon=True,
-        )
-        t.start()
+        ).start()
 
-    # ── Внутренние методы ────────────────────────────────────────────────────
+    # ── Рабочий поток ────────────────────────────────────────────────────────
 
-    def _worker(
-        self,
-        items: List[Tuple[int, str]],
-        on_result: Callable,
-        on_done: Callable,
-    ) -> None:
-        """Фоновый поток: для каждого автора отправляет ВСЕ его слова,
-        затем выбирает то слово, для которого сервис вернул пол.
-        """
-        # Собираем уникальные слова по всем авторам, сохраняя маппинг
-        # word_lower → список (row_idx, author)
-        word_to_rows: Dict[str, List[Tuple[int, str]]] = {}
-        all_words_order: List[str] = []  # для сохранения порядка запроса
+    def _worker(self, items, on_result, on_done):
+        """Двухфазный поиск: Genderize → Wikidata fallback."""
 
-        for row_idx, author in items:
-            parts = [w for w in author.split() if w]
-            for word in parts:
-                key = word.lower()
-                with self._lock:
-                    cached = self._cache.get(key)
-                if cached is not None:
-                    # кеш-хит — сразу возвращаем (будет обработан в _pick_best ниже)
-                    pass
-                if key not in word_to_rows:
-                    word_to_rows[key] = []
-                    all_words_order.append(key)
-                word_to_rows[key].append((row_idx, author))
+        # ── Фаза 1: Genderize.io (батчи) ────────────────────────────────────
+        rate_limited = False
 
-        # Запросить у сервиса слова, которых нет в кеше
-        words_to_fetch = [w for w in all_words_order
-                          if self._cache.get(w) is None]
+        # Собрать уникальные слова и их оригинальный регистр
+        word_orig: Dict[str, str] = {}   # lower → original
+        all_keys_ordered: List[str] = []
+        for _, author in items:
+            for w in author.split():
+                k = w.lower()
+                if k not in word_orig:
+                    word_orig[k] = w
+                    all_keys_ordered.append(k)
 
-        rate_limited = False   # при 429 прекращаем дальнейшие запросы
+        keys_to_fetch = [k for k in all_keys_ordered
+                         if not self._in_cache(k)]
 
-        for i in range(0, len(words_to_fetch), BATCH_SIZE):
+        for i in range(0, len(keys_to_fetch), BATCH_SIZE):
             if rate_limited:
-                # Помечаем оставшиеся слова как rate_limit
-                for key in words_to_fetch[i:]:
-                    with self._lock:
-                        self._cache[key] = LookupResult(
-                            status=STATUS_RATE_LIMIT,
-                            error='HTTP 429: суточный лимит запросов исчерпан',
-                        )
+                for k in keys_to_fetch[i:]:
+                    self._set_cache(k, LookupResult(
+                        status=STATUS_RATE_LIMIT,
+                        error='HTTP 429',
+                    ))
                 break
 
-            chunk_keys = words_to_fetch[i:i + BATCH_SIZE]
-            # Оригинальный регистр для запроса (берём из первого вхождения)
-            orig_words = {k: k for k in chunk_keys}  # ключ = lower
-            # Восстанавливаем оригинальный регистр
-            for row_idx, author in items:
-                for w in author.split():
-                    if w.lower() in orig_words:
-                        orig_words[w.lower()] = w
-
+            chunk = keys_to_fetch[i:i + BATCH_SIZE]
+            orig_names = [word_orig[k] for k in chunk]
             try:
-                batch_results = self._genderize_batch(list(orig_words.values()))
-            except RateLimitError as exc:
+                results = self._genderize_batch(orig_names)
+                for k, r in results.items():
+                    self._set_cache(k, r)
+            except RateLimitError:
                 rate_limited = True
-                rl_result = LookupResult(status=STATUS_RATE_LIMIT, error=str(exc))
-                for key in chunk_keys:
-                    with self._lock:
-                        self._cache[key] = rl_result
-                continue
+                rl = LookupResult(status=STATUS_RATE_LIMIT,
+                                  error='HTTP 429')
+                for k in chunk:
+                    self._set_cache(k, rl)
             except Exception as exc:
-                err_result = LookupResult(status=STATUS_ERROR, error=str(exc))
-                for key in chunk_keys:
-                    with self._lock:
-                        self._cache[key] = err_result
-                continue
+                err = LookupResult(status=STATUS_ERROR, error=str(exc))
+                for k in chunk:
+                    self._set_cache(k, err)
 
-            for key, result in batch_results.items():
-                with self._lock:
-                    self._cache[key] = result
-
-        # Теперь для каждого row_idx перебираем слова автора и выбираем
-        # лучший результат (наивысший probability с known gender)
+        # ── Фаза 2: Wikidata SPARQL (последовательно, для unknown/rate_limit) ─
+        # Проходим по авторам целиком — Wikidata ищет по полному имени,
+        # не по отдельным словам
+        wikidata_items: List[Tuple[int, str]] = []
         for row_idx, author in items:
-            parts = [w for w in author.split() if w]
-            best_word: Optional[str] = None
-            best_result: Optional['LookupResult'] = None
+            # Быстро проверяем: есть ли в кеше хороший результат?
+            best = self._pick_best_from_cache(author)
+            if best is not None and best.status in (STATUS_FOUND, STATUS_UNCERTAIN):
+                continue   # Genderize уже дал хороший ответ
+            if best is not None and best.status == STATUS_ERROR:
+                continue   # сетевая ошибка — Wikidata вряд ли поможет
+            # unknown, rate_limit, или ничего → пробуем Wikidata
+            wikidata_items.append((row_idx, author))
 
-            for word in parts:
-                key = word.lower()
-                with self._lock:
-                    r = self._cache.get(key)
-                if r is None:
-                    continue
-                if r.status == STATUS_ERROR:
-                    # Ошибка сети — запоминаем, но продолжаем искать
-                    if best_result is None:
-                        best_word, best_result = word, r
-                    continue
-                if r.status == STATUS_RATE_LIMIT:
-                    # Превышен лимит — ставим этот статус и не ищем дальше
-                    best_word, best_result = word, r
-                    break
-                if r.status == STATUS_UNKNOWN:
-                    if best_result is None:
-                        best_word, best_result = word, r
-                    continue
-                # found / uncertain: выбираем с наивысшей вероятностью
-                if (best_result is None
-                        or best_result.status not in (STATUS_FOUND, STATUS_UNCERTAIN)
-                        or r.probability > best_result.probability):
-                    best_word, best_result = word, r
+        for row_idx, author in wikidata_items:
+            wd_key = '_wd_' + author.lower()
+            if not self._in_cache(wd_key):
+                self._throttle_wikidata()
+                try:
+                    r = self._wikidata_lookup(author)
+                except Exception as exc:
+                    r = LookupResult(status=STATUS_ERROR, error=str(exc))
+                self._set_cache(wd_key, r)
 
-            if best_word is None:
-                best_word  = parts[0] if parts else ''
-                best_result = LookupResult(status=STATUS_UNKNOWN)
-
+        # ── Итоговый выбор для каждого автора ───────────────────────────────
+        for row_idx, author in items:
+            best_word, best_result = self._select_result(author)
             try:
                 on_result(row_idx, best_word, best_result)
             except Exception:
@@ -217,16 +192,17 @@ class GenderLookupService:
         except Exception:
             pass
 
+    # ── Genderize.io ─────────────────────────────────────────────────────────
+
     def _genderize_batch(self, names: List[str]) -> Dict[str, 'LookupResult']:
-        """Запрос к Genderize.io — до BATCH_SIZE имён."""
+        """Один батч-запрос к Genderize.io."""
         params = [('name[]', n) for n in names]
         if self._api_key:
             params.append(('apikey', self._api_key))
         url = GENDERIZE_URL + '?' + urllib.parse.urlencode(params)
 
         req = urllib.request.Request(
-            url,
-            headers={'User-Agent': 'EBookLibraryOrganizer/1.0'},
+            url, headers={'User-Agent': 'EBookLibraryOrganizer/1.0'},
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
@@ -234,30 +210,220 @@ class GenderLookupService:
         except urllib.error.HTTPError as exc:
             if exc.code == 429:
                 raise RateLimitError(
-                    'Суточный лимит запросов Genderize.io исчерпан. '
-                    'Добавьте бесплатный API-ключ в Настройки → Общие '
-                    '(1000 запросов/день вместо 100).'
+                    'Суточный лимит Genderize.io исчерпан. '
+                    'Добавьте API-ключ в Настройки → Общие '
+                    '(genderize.io, бесплатно, 1000 запросов/день).'
                 ) from exc
             raise
 
         if not isinstance(data, list):
             data = [data]
 
-        results: Dict[str, LookupResult] = {}
+        out: Dict[str, LookupResult] = {}
         for item in data:
-            raw_name = item.get('name', '')
-            gender   = item.get('gender')         # 'male' | 'female' | None
-            prob     = float(item.get('probability') or 0.0)
-            count    = int(item.get('count') or 0)
-            key      = raw_name.lower()
-
+            raw   = item.get('name', '')
+            gender = item.get('gender')
+            prob   = float(item.get('probability') or 0.0)
+            count  = int(item.get('count') or 0)
+            key    = raw.lower()
             if count == 0 or gender is None:
-                results[key] = LookupResult(status=STATUS_UNKNOWN)
+                out[key] = LookupResult(status=STATUS_UNKNOWN, source='genderize')
             else:
                 status = STATUS_FOUND if prob >= MIN_PROBABILITY else STATUS_UNCERTAIN
-                results[key] = LookupResult(
-                    gender_ru   = _GENDER_RU.get(gender),
-                    probability = prob,
-                    status      = status,
+                out[key] = LookupResult(
+                    gender_ru=_GENDER_RU.get(gender),
+                    probability=prob,
+                    status=status,
+                    source='genderize',
                 )
-        return results
+        return out
+
+    # ── Wikidata SPARQL ───────────────────────────────────────────────────────
+
+    def _throttle_wikidata(self) -> None:
+        """Соблюдать паузу между запросами к Wikidata (≥ WIKIDATA_DELAY сек)."""
+        with self._wd_lock:
+            elapsed = time.monotonic() - self._last_wd_ts
+            wait = WIKIDATA_DELAY - elapsed
+            if wait > 0:
+                time.sleep(wait)
+            self._last_wd_ts = time.monotonic()
+
+    def _wikidata_lookup(self, author: str) -> 'LookupResult':
+        """Wikidata MediaWiki API: ищем человека по имени, возвращаем пол.
+
+        Шаг 1: wbsearchentities — текстовый поиск по индексу (быстро, 1 запрос)
+        Шаг 2: wbgetentities    — получить P31/P21 claims для кандидатов (1 запрос)
+
+        Только сущности типа Q5 (человек) с P21 (пол) принимаются во внимание.
+        Кандидаты проверяются в том порядке, в котором их вернул поиск.
+        """
+        _UA     = 'EBookLibraryOrganizer/1.0 (github.com/akadimka/EBLO)'
+        _MALE   = {'Q6581097', 'Q44148', 'Q2443246'}
+        _FEMALE = {'Q6581072', 'Q2449503', 'Q1052281'}
+
+        # Шаг 1: текстовый поиск сущностей по имени автора
+        params1 = urllib.parse.urlencode({
+            'action':   'wbsearchentities',
+            'search':   author,
+            'language': 'ru',
+            'type':     'item',
+            'limit':    '5',
+            'format':   'json',
+        })
+        req1 = urllib.request.Request(
+            WIKIDATA_API_URL + '?' + params1,
+            headers={'User-Agent': _UA},
+        )
+        with urllib.request.urlopen(req1, timeout=self._timeout) as resp:
+            search_data = json.loads(resp.read().decode('utf-8'))
+
+        candidates = [r['id'] for r in search_data.get('search', [])]
+        if not candidates:
+            return LookupResult(status=STATUS_UNKNOWN, source='wikidata')
+
+        # Шаг 2: получить claims P31 (тип) и P21 (пол) для кандидатов
+        params2 = urllib.parse.urlencode({
+            'action': 'wbgetentities',
+            'ids':    '|'.join(candidates),
+            'props':  'claims',
+            'format': 'json',
+        })
+        req2 = urllib.request.Request(
+            WIKIDATA_API_URL + '?' + params2,
+            headers={'User-Agent': _UA},
+        )
+        with urllib.request.urlopen(req2, timeout=self._timeout) as resp:
+            entity_data = json.loads(resp.read().decode('utf-8'))
+
+        entities = entity_data.get('entities', {})
+        for qid in candidates:
+            entity = entities.get(qid, {})
+            claims = entity.get('claims', {})
+
+            # Проверить P31 (instance of) = Q5 (human)
+            p31 = claims.get('P31', [])
+            is_human = any(
+                c.get('mainsnak', {}).get('datavalue', {}).get('value', {}).get('id') == 'Q5'
+                for c in p31
+            )
+            if not is_human:
+                continue
+
+            # Получить P21 (sex or gender)
+            for claim in claims.get('P21', []):
+                gender_id = (
+                    claim.get('mainsnak', {})
+                         .get('datavalue', {})
+                         .get('value', {})
+                         .get('id', '')
+                )
+                if gender_id in _MALE:
+                    return LookupResult(
+                        gender_ru='Муж.', probability=1.0,
+                        status=STATUS_FOUND, source='wikidata',
+                    )
+                if gender_id in _FEMALE:
+                    return LookupResult(
+                        gender_ru='Жен.', probability=1.0,
+                        status=STATUS_FOUND, source='wikidata',
+                    )
+
+        return LookupResult(status=STATUS_UNKNOWN, source='wikidata')
+
+    # ── Итоговый выбор ────────────────────────────────────────────────────────
+
+    def _select_result(self, author: str) -> Tuple[str, 'LookupResult']:
+        """Выбрать лучший результат для автора из кеша.
+
+        Приоритет: Wikidata (если нашёл) > Genderize found > uncertain >
+                   unknown > rate_limit > error
+        """
+        parts = [w for w in author.split() if w]
+
+        # Проверяем Wikidata-результат по полному имени
+        wd_key = '_wd_' + author.lower()
+        with self._lock:
+            wd = self._cache.get(wd_key)
+
+        if wd and wd.status in (STATUS_FOUND, STATUS_UNCERTAIN):
+            # Имя слово: берём то из частей, которое сервис нашёл.
+            # Для Wikidata ищем по полному имени — возвращаем первое слово
+            # (чаще всего имя) как name_word, чтобы показать пользователю.
+            name_word = self._best_name_word(parts)
+            return name_word, wd
+
+        # Ищем по отдельным словам (Genderize-результаты)
+        best_word: str = parts[0] if parts else author
+        best_r: Optional['LookupResult'] = None
+
+        for word in parts:
+            key = word.lower()
+            with self._lock:
+                r = self._cache.get(key)
+            if r is None:
+                continue
+            if r.status == STATUS_RATE_LIMIT:
+                best_word, best_r = word, r
+                break
+            if r.status == STATUS_ERROR:
+                if best_r is None:
+                    best_word, best_r = word, r
+                continue
+            if r.status == STATUS_UNKNOWN:
+                if best_r is None:
+                    best_word, best_r = word, r
+                continue
+            if (best_r is None
+                    or best_r.status not in (STATUS_FOUND, STATUS_UNCERTAIN)
+                    or r.probability > best_r.probability):
+                best_word, best_r = word, r
+
+        # Если Wikidata дал unknown — не портим "лучший" Genderize-результат
+        if best_r is None:
+            best_r = LookupResult(status=STATUS_UNKNOWN)
+
+        return best_word, best_r
+
+    def _best_name_word(self, parts: List[str]) -> str:
+        """Вернуть наиболее вероятное имя из слов автора для отображения.
+
+        При ответе от Wikidata нам нужно показать слово из кириллики.
+        Берём слово с наивысшим individual вероятностью из genderize-кеша,
+        либо второе слово (классическое "Фамилия Имя[Отчество]"), либо первое.
+        """
+        best_w, best_p = None, -1.0
+        for w in parts:
+            with self._lock:
+                r = self._cache.get(w.lower())
+            if r and r.status in (STATUS_FOUND, STATUS_UNCERTAIN):
+                if r.probability > best_p:
+                    best_w, best_p = w, r.probability
+        if best_w:
+            return best_w
+        return parts[1] if len(parts) >= 2 else parts[0]
+
+    # ── Кеш-хелперы ──────────────────────────────────────────────────────────
+
+    def _in_cache(self, key: str) -> bool:
+        with self._lock:
+            return key in self._cache
+
+    def _set_cache(self, key: str, result: 'LookupResult') -> None:
+        with self._lock:
+            self._cache[key] = result
+
+    def _pick_best_from_cache(self, author: str) -> Optional['LookupResult']:
+        """Быстрая проверка: есть ли в кеше хороший результат для автора."""
+        best: Optional[LookupResult] = None
+        for w in author.split():
+            with self._lock:
+                r = self._cache.get(w.lower())
+            if r is None:
+                continue
+            if r.status in (STATUS_FOUND, STATUS_UNCERTAIN):
+                return r
+            if best is None:
+                best = r
+        return best
+
