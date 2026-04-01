@@ -92,72 +92,97 @@ class GenderLookupService:
 
     # ── Внутренние методы ────────────────────────────────────────────────────
 
-    @staticmethod
-    def pick_name_word(author: str) -> str:
-        """Выбрать слово для запроса из строки автора.
-
-        Соглашение: "Фамилия Имя" → word[1].
-        Для однословных → word[0].
-        """
-        parts = author.split()
-        if not parts:
-            return ''
-        return parts[1] if len(parts) >= 2 else parts[0]
-
     def _worker(
         self,
         items: List[Tuple[int, str]],
         on_result: Callable,
         on_done: Callable,
     ) -> None:
-        """Фоновый поток: отдаёт кеш-хиты и батчами запрашивает остальное."""
-        pending: List[Tuple[int, str, str]] = []  # (idx, author, name_word)
+        """Фоновый поток: для каждого автора отправляет ВСЕ его слова,
+        затем выбирает то слово, для которого сервис вернул пол.
+        """
+        # Собираем уникальные слова по всем авторам, сохраняя маппинг
+        # word_lower → список (row_idx, author)
+        word_to_rows: Dict[str, List[Tuple[int, str]]] = {}
+        all_words_order: List[str] = []  # для сохранения порядка запроса
 
-        # Кеш-хиты
         for row_idx, author in items:
-            name_word = self.pick_name_word(author)
-            if not name_word:
-                continue
-            key = name_word.lower()
-            with self._lock:
-                cached = self._cache.get(key)
-            if cached is not None:
-                try:
-                    on_result(row_idx, name_word, cached)
-                except Exception:
+            parts = [w for w in author.split() if w]
+            for word in parts:
+                key = word.lower()
+                with self._lock:
+                    cached = self._cache.get(key)
+                if cached is not None:
+                    # кеш-хит — сразу возвращаем (будет обработан в _pick_best ниже)
                     pass
-            else:
-                pending.append((row_idx, author, name_word))
+                if key not in word_to_rows:
+                    word_to_rows[key] = []
+                    all_words_order.append(key)
+                word_to_rows[key].append((row_idx, author))
 
-        # Батчевые запросы к Genderize.io
-        for i in range(0, len(pending), BATCH_SIZE):
-            chunk = pending[i:i + BATCH_SIZE]
-            names = [w for _, _, w in chunk]
+        # Запросить у сервиса слова, которых нет в кеше
+        words_to_fetch = [w for w in all_words_order
+                          if self._cache.get(w) is None]
+
+        for i in range(0, len(words_to_fetch), BATCH_SIZE):
+            chunk_keys = words_to_fetch[i:i + BATCH_SIZE]
+            # Оригинальный регистр для запроса (берём из первого вхождения)
+            orig_words = {k: k for k in chunk_keys}  # ключ = lower
+            # Восстанавливаем оригинальный регистр
+            for row_idx, author in items:
+                for w in author.split():
+                    if w.lower() in orig_words:
+                        orig_words[w.lower()] = w
 
             try:
-                batch_results = self._genderize_batch(names)
+                batch_results = self._genderize_batch(list(orig_words.values()))
             except Exception as exc:
                 err_result = LookupResult(status=STATUS_ERROR, error=str(exc))
-                for row_idx, _, name_word in chunk:
+                for key in chunk_keys:
                     with self._lock:
-                        self._cache[name_word.lower()] = err_result
-                    try:
-                        on_result(row_idx, name_word, err_result)
-                    except Exception:
-                        pass
+                        self._cache[key] = err_result
                 continue
 
-            for row_idx, _, name_word in chunk:
-                result = batch_results.get(
-                    name_word.lower(),
-                    LookupResult(status=STATUS_UNKNOWN),
-                )
+            for key, result in batch_results.items():
                 with self._lock:
-                    self._cache[name_word.lower()] = result
-                try:
-                    on_result(row_idx, name_word, result)
-                except Exception:
-                    pass
+                    self._cache[key] = result
+
+        # Теперь для каждого row_idx перебираем слова автора и выбираем
+        # лучший результат (наивысший probability с known gender)
+        for row_idx, author in items:
+            parts = [w for w in author.split() if w]
+            best_word: Optional[str] = None
+            best_result: Optional['LookupResult'] = None
+
+            for word in parts:
+                key = word.lower()
+                with self._lock:
+                    r = self._cache.get(key)
+                if r is None:
+                    continue
+                if r.status == STATUS_ERROR:
+                    # Если хотя бы одно слово дало ошибку сети, запомним её
+                    if best_result is None:
+                        best_word, best_result = word, r
+                    continue
+                if r.status == STATUS_UNKNOWN:
+                    if best_result is None:
+                        best_word, best_result = word, r
+                    continue
+                # found / uncertain: выбираем с наивысшей вероятностью
+                if (best_result is None
+                        or best_result.status not in (STATUS_FOUND, STATUS_UNCERTAIN)
+                        or r.probability > best_result.probability):
+                    best_word, best_result = word, r
+
+            if best_word is None:
+                best_word  = parts[0] if parts else ''
+                best_result = LookupResult(status=STATUS_UNKNOWN)
+
+            try:
+                on_result(row_idx, best_word, best_result)
+            except Exception:
+                pass
 
         try:
             on_done()
