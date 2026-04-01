@@ -855,6 +855,36 @@ class Pass2Filename:
             
             author = author.strip()
             
+            # TITLE-AS-AUTHOR GUARD: <book-title> from FB2 metadata can NEVER be an author.
+            # This catches tie-breaking mistakes: e.g. "Алдерман Наоми - Сила" scores equally
+            # for "Author - Title" and "Title - Author"; if the winning candidate equals the
+            # real book title, the pattern order chose wrong — reject it and try again
+            # without that candidate pattern.
+            if fb2_path and fb2_path.exists():
+                try:
+                    book_title = self._extractor._extract_title_from_fb2(fb2_path)
+                    if book_title and book_title.strip().lower() == author.lower():
+                        self.logger.log(
+                            f"[PASS 2] Rejected author '{author}' — matches book-title from FB2 "
+                            f"(pattern='{best_pattern}'). Retrying without Title-first patterns."
+                        )
+                        # Retry: exclude patterns whose name starts with "Title"
+                        filtered_patterns = [
+                            p for p in self.patterns
+                            if not (p.get('pattern', '') if isinstance(p, dict) else p).startswith('Title')
+                        ]
+                        best_score, best_pattern, author, series = matcher.find_best_pattern_match(
+                            cleaned_filename, filtered_patterns
+                        )
+                        if best_score < 0.6 or not author or not author.strip():
+                            return ""
+                        author = author.strip()
+                        # Sanity check: still the book title?
+                        if author.lower() == book_title.strip().lower():
+                            return ""
+                except Exception:
+                    pass
+            
             # Handle comma-separated authors (co-authorship)
             if ', ' in author:
                 authors = [a.strip() for a in author.split(', ')]
