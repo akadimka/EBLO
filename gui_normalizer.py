@@ -13,18 +13,22 @@ except ImportError:
 
 
 class _Tooltip:
-    """Всплывающая подсказка для любого виджета tkinter."""
+    """Всплывающая подсказка для любого виджета tkinter.
 
-    def __init__(self, widget: tk.Widget, text: str):
+    text — строка или callable() -> str для динамического содержимого.
+    """
+
+    def __init__(self, widget: tk.Widget, text):
         self._widget = widget
-        self._text = text
+        self._text = text   # str | Callable[[], str]
         self._win = None
         widget.bind("<Enter>", self._show, add="+")
         widget.bind("<Leave>", self._hide, add="+")
         widget.bind("<Destroy>", lambda e: self._hide(), add="+")
 
     def _show(self, event=None):
-        if self._win or not self._text:
+        text = self._text() if callable(self._text) else self._text
+        if self._win or not text:
             return
         try:
             x = self._widget.winfo_rootx() + 20
@@ -33,11 +37,11 @@ class _Tooltip:
             tw.wm_overrideredirect(True)
             tw.wm_geometry(f"+{x}+{y}")
             tk.Label(
-                tw, text=self._text,
+                tw, text=text,
                 background="#FFFFE0", foreground="#1A1A1A",
                 relief="solid", borderwidth=1,
                 font=("Segoe UI", 9), justify="left",
-                wraplength=700, padx=5, pady=3,
+                wraplength=600, padx=6, pady=4,
             ).pack()
         except Exception:
             self._win = None
@@ -66,6 +70,16 @@ class NamesDialog:
         'rate_limit': '#FFD0FF',   # сиреневый — исчерпан суточный лимит
     }
 
+    # Текст подсказки для каждого статуса (для тултипа на поле автора)
+    _STATUS_LEGEND = {
+        'pending':    'Жёлтый — запрос отправлен в онлайн-сервис, ожидание ответа',
+        'found':      'Зелёный — пол определён уверенно (вероятность ≥ 75%)',
+        'uncertain':  'Светло-зелёный — пол определён, но вероятность < 75%',
+        'unknown':    'Персиковый — сервис не смог определить пол по этому имени',
+        'error':      'Розовый — ошибка сети при обращении к онлайн-сервису',
+        'rate_limit': 'Сиреневый — превышен суточный лимит запросов (HTTP 429)',
+    }
+
     def __init__(self, parent, rows, settings_manager):
         """
         Args:
@@ -87,6 +101,8 @@ class NamesDialog:
         self._row_data = []
         # UI-ссылки для цветовой сигнализации: (author_frame, [word_labels])
         self._row_ui = []
+        # Текущий статус каждой строки (для динамического тултипа)
+        self._row_status: list = []
         # Дефолтный bg фрейма автора (определяется при первом _add_row_widget)
         self._default_author_bg: str = ''
 
@@ -239,6 +255,15 @@ class NamesDialog:
         if not self._default_author_bg:
             self._default_author_bg = author_frame.cget('bg')
 
+        # Индекс этой строки в _row_status (для тултипа)
+        self._row_status.append('')
+        status_idx = len(self._row_status) - 1
+
+        def _status_tip(idx=status_idx):
+            return self._STATUS_LEGEND.get(self._row_status[idx], '')
+
+        _Tooltip(author_frame, _status_tip)
+
         word_labels = []
         for word in author.split():
             w_lbl = tk.Label(author_frame, text=word, cursor="hand2",
@@ -252,6 +277,7 @@ class NamesDialog:
             w_lbl.bind("<Leave>",
                        lambda e, lbl=w_lbl: lbl.config(
                            fg="black", font="TkDefaultFont 9"))
+            _Tooltip(w_lbl, _status_tip)
             word_labels.append(w_lbl)
 
         self._row_ui.append((author_frame, word_labels))
@@ -273,6 +299,8 @@ class NamesDialog:
         """Подсветить поле автора в строке row_idx цветом статуса."""
         if row_idx >= len(self._row_ui):
             return
+        if row_idx < len(self._row_status):
+            self._row_status[row_idx] = status
         color = self._STATUS_COLORS.get(status, self._default_author_bg)
         author_frame, word_labels = self._row_ui[row_idx]
         try:

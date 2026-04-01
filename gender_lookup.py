@@ -53,7 +53,7 @@ class RateLimitError(Exception):
 class LookupResult:
     """Результат определения пола для одного слова."""
 
-    __slots__ = ('gender_ru', 'probability', 'status', 'error', 'source')
+    __slots__ = ('gender_ru', 'probability', 'status', 'error', 'source', 'first_name')
 
     def __init__(
         self,
@@ -62,12 +62,14 @@ class LookupResult:
         status: str = STATUS_UNKNOWN,
         error: str = '',
         source: str = '',          # 'genderize' | 'wikidata' | ''
+        first_name: str = '',      # только имя (не фамилия), из Wikidata label
     ):
         self.gender_ru   = gender_ru
         self.probability = probability
         self.status      = status
         self.error       = error
         self.source      = source
+        self.first_name  = first_name
 
 
 # ── Основной сервис ───────────────────────────────────────────────────────────
@@ -282,12 +284,13 @@ class GenderLookupService:
         if not candidates:
             return LookupResult(status=STATUS_UNKNOWN, source='wikidata')
 
-        # Шаг 2: получить claims P31 (тип) и P21 (пол) для кандидатов
+        # Шаг 2: получить claims P31/P21 и русский label для кандидатов
         params2 = urllib.parse.urlencode({
-            'action': 'wbgetentities',
-            'ids':    '|'.join(candidates),
-            'props':  'claims',
-            'format': 'json',
+            'action':    'wbgetentities',
+            'ids':       '|'.join(candidates),
+            'props':     'claims|labels',
+            'languages': 'ru|en',
+            'format':    'json',
         })
         req2 = urllib.request.Request(
             WIKIDATA_API_URL + '?' + params2,
@@ -300,6 +303,7 @@ class GenderLookupService:
         for qid in candidates:
             entity = entities.get(qid, {})
             claims = entity.get('claims', {})
+            labels = entity.get('labels', {})
 
             # Проверить P31 (instance of) = Q5 (human)
             p31 = claims.get('P31', [])
@@ -309,6 +313,12 @@ class GenderLookupService:
             )
             if not is_human:
                 continue
+
+            # Извлечь имя из русского (или английского) лейбла: первое слово
+            label_text = (
+                labels.get('ru') or labels.get('en') or {}
+            ).get('value', '')
+            first_name = label_text.split()[0] if label_text else ''
 
             # Получить P21 (sex or gender)
             for claim in claims.get('P21', []):
@@ -322,11 +332,13 @@ class GenderLookupService:
                     return LookupResult(
                         gender_ru='Муж.', probability=1.0,
                         status=STATUS_FOUND, source='wikidata',
+                        first_name=first_name,
                     )
                 if gender_id in _FEMALE:
                     return LookupResult(
                         gender_ru='Жен.', probability=1.0,
                         status=STATUS_FOUND, source='wikidata',
+                        first_name=first_name,
                     )
 
         return LookupResult(status=STATUS_UNKNOWN, source='wikidata')
@@ -347,10 +359,9 @@ class GenderLookupService:
             wd = self._cache.get(wd_key)
 
         if wd and wd.status in (STATUS_FOUND, STATUS_UNCERTAIN):
-            # Имя слово: берём то из частей, которое сервис нашёл.
-            # Для Wikidata ищем по полному имени — возвращаем первое слово
-            # (чаще всего имя) как name_word, чтобы показать пользователю.
-            name_word = self._best_name_word(parts)
+            # Если Wikidata вернул имя из label — используем его;
+            # иначе пытаемся угадать из частей оригинальной строки.
+            name_word = wd.first_name or self._best_name_word(parts)
             return name_word, wd
 
         # Ищем по отдельным словам (Genderize-результаты)
