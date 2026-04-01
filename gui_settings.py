@@ -129,7 +129,25 @@ class SettingsWindow(tk.Toplevel):
         
         # Separator
         ttk.Separator(self.tab_general, orient='horizontal').pack(fill='x', padx=10, pady=10)
-        
+
+        # --- Genderize.io API key ---
+        self.genderize_key_var = tk.StringVar(value=self.settings_manager.get_genderize_api_key())
+        ttk.Label(
+            self.tab_general,
+            text='API-ключ Genderize.io (необязательно, бесплатно: 100 запросов/день без ключа):',
+        ).pack(anchor='w', padx=10, pady=(0, 0))
+        gk_frame = ttk.Frame(self.tab_general)
+        gk_frame.pack(fill='x', padx=10, pady=(2, 0))
+        gk_frame.columnconfigure(0, weight=1)
+        ttk.Entry(gk_frame, textvariable=self.genderize_key_var).grid(
+            row=0, column=0, sticky='ew', padx=(0, 5))
+        ttk.Button(
+            gk_frame, text='Очистить',
+            command=lambda: self.genderize_key_var.set(''),
+        ).grid(row=0, column=1)
+
+        ttk.Separator(self.tab_general, orient='horizontal').pack(fill='x', padx=10, pady=10)
+
         # CSV generation setting
         self.generate_csv_var = tk.BooleanVar(value=self.settings_manager.get_generate_csv())
         csv_frame = ttk.Frame(self.tab_general)
@@ -461,6 +479,8 @@ class SettingsWindow(tk.Toplevel):
         # File paths
         self.settings_manager.set_settings_file_path(self.settings_file_var.get())
         self.settings_manager.set_genres_file_path(self.genres_file_var.get())
+        # Genderize API key
+        self.settings_manager.set_genderize_api_key(self.genderize_key_var.get())
 
         # Lists panel: persist current list
         self._save_current_list()

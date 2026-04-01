@@ -56,6 +56,15 @@ class NamesDialog:
 
     GENDER_OPTIONS = ("Муж.", "Жен.")
 
+    # Цвета подсветки строк онлайн-проверки
+    _STATUS_COLORS = {
+        'pending':   '#FFFACD',   # лимонный — запрос отправлен
+        'found':     '#C8F0C8',   # зелёный  — пол определён
+        'uncertain': '#E8FFD0',   # светло-зелёный — неуверенно, но заполнено
+        'unknown':   '#FFE4C4',   # персиковый — сервис не знает
+        'error':     '#FFCCCC',   # розово-красный — ошибка / нет ответа
+    }
+
     def __init__(self, parent, rows, settings_manager):
         """
         Args:
@@ -66,14 +75,33 @@ class NamesDialog:
             settings_manager: экземпляр SettingsManager
         """
         self.settings_manager = settings_manager
+
+        # Полноценное окно (не диалог): без transient/grab_set → все кнопки хрома
         self.top = tk.Toplevel(parent)
         self.top.title("Имена авторов")
-        self.top.geometry("900x550")
-        self.top.transient(parent)
-        self.top.grab_set()
+        self.top.geometry("960x580")
+        self.top.resizable(True, True)
 
-        # (source, author, name_var, gender_var, file_path)
+        # Данные строк: (source, author, name_var, gender_var, file_path)
         self._row_data = []
+        # UI-ссылки для цветовой сигнализации: (author_frame, [word_labels])
+        self._row_ui = []
+        # Дефолтный bg фрейма автора (определяется при первом _add_row_widget)
+        self._default_author_bg: str = ''
+
+        # Счётчики онлайн-проверки
+        self._online_total = 0
+        self._online_done  = 0
+
+        # Онлайн-сервис (None = недоступен)
+        self._service = None
+        if settings_manager:
+            try:
+                from gender_lookup import GenderLookupService
+                api_key = settings_manager.get_genderize_api_key()
+                self._service = GenderLookupService(api_key=api_key)
+            except ImportError:
+                pass
 
         self._build_ui()
 
@@ -81,7 +109,7 @@ class NamesDialog:
             self.add_rows(rows)
 
     # ------------------------------------------------------------------
-    # UI construction
+    # Построение UI
     # ------------------------------------------------------------------
 
     def _build_ui(self):
@@ -93,7 +121,7 @@ class NamesDialog:
             ttk.Label(hdr, text=text, relief="groove", width=w // 7,
                       anchor="w").pack(side=tk.LEFT, padx=1)
 
-        # ---- строка состояния загрузки ----
+        # ---- строка «обработка данных» (скрывается когда строки появились) ----
         self._loading_var = tk.StringVar(value="")
         self._loading_label = ttk.Label(
             self.top, textvariable=self._loading_var,
@@ -129,60 +157,91 @@ class NamesDialog:
         self._canvas.bind_all("<MouseWheel>", _on_mousewheel)
         self.top.bind("<Destroy>", lambda e: self._canvas.unbind_all("<MouseWheel>"))
 
-        # ---- строка с кнопками и счётчиком ----
+        # ---- статусная строка (двойная: от логики + онлайн) ----
+        status_frame = tk.Frame(self.top, bg="#F3F3F3", pady=3)
+        status_frame.pack(fill=tk.X, padx=5, pady=(0, 2))
+
+        self._count_var = tk.StringVar(value="Строк: 0")
+        tk.Label(
+            status_frame, textvariable=self._count_var,
+            bg="#F3F3F3", fg="#555555", font=("Segoe UI", 9), anchor="w",
+        ).pack(side=tk.LEFT, padx=6)
+
+        self._online_var = tk.StringVar(value="")
+        self._online_lbl = tk.Label(
+            status_frame, textvariable=self._online_var,
+            bg="#F3F3F3", fg="#0067C0", font=("Segoe UI", 9), anchor="e",
+        )
+        self._online_lbl.pack(side=tk.RIGHT, padx=6)
+
+        # ---- кнопки ----
         btn_frame = ttk.Frame(self.top)
-        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        btn_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
         ttk.Button(btn_frame, text="Пополнить списки",
                    command=self._save_names).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Отмена",
                    command=self.top.destroy).pack(side=tk.LEFT, padx=5)
-        self._count_var = tk.StringVar(value="Строк: 0")
-        ttk.Label(btn_frame, textvariable=self._count_var,
-                  foreground="gray").pack(side=tk.RIGHT, padx=10)
 
     # ------------------------------------------------------------------
-    # Dynamic row management
+    # Динамическое добавление строк
     # ------------------------------------------------------------------
 
     def add_rows(self, rows):
         """Добавить строки в диалог. Вызывать из UI-потока (через root.after)."""
+        if not self.top.winfo_exists():
+            return
+        start_idx = len(self._row_data)
+
         for row in rows:
             if len(row) >= 5:
-                source, author, name, gender, file_path = row[0], row[1], row[2], row[3], row[4]
+                source, author, name, gender, file_path = (
+                    row[0], row[1], row[2], row[3], row[4])
             else:
                 source, author, name, gender = row[0], row[1], row[2], row[3]
                 file_path = ""
-            name_var = tk.StringVar(value=name)
+            name_var   = tk.StringVar(value=name)
             gender_var = tk.StringVar(value=gender)
             self._row_data.append((source, author, name_var, gender_var, file_path))
-            self._add_row_widget(source, author, name_var, gender_var, file_path)
+            self._add_row_widget(len(self._row_data) - 1,
+                                 source, author, name_var, gender_var, file_path)
 
-        self._count_var.set(f"Строк: {len(self._row_data)}")
-        if self._row_data:
+        total = len(self._row_data)
+        self._count_var.set(f"Строк: {total}")
+        if total:
             self._loading_var.set("")
 
-    def _add_row_widget(self, source, author, name_var, gender_var, file_path):
-        """Создать виджеты для одной строки."""
+        # Запустить онлайн-проверку для новых строк
+        if self._service and rows:
+            new_items = [
+                (start_idx + i, self._row_data[start_idx + i][1])
+                for i in range(len(rows))
+            ]
+            self._start_online_check(new_items)
+
+    def _add_row_widget(self, row_idx, source, author, name_var, gender_var, file_path):
+        """Создать виджеты для одной строки; сохранить ссылки для подсветки."""
         row_frame = ttk.Frame(self._inner)
         row_frame.pack(fill=tk.X, pady=1)
 
-        # author_source — нередактируемое; tooltip с полным путём к файлу
+        # Источник — нередактируемый; tooltip с полным путём
         src_lbl = ttk.Label(row_frame, text=source, width=18, anchor="w",
                             relief="sunken")
         src_lbl.pack(side=tk.LEFT, padx=1)
         if file_path:
             _Tooltip(src_lbl, file_path)
 
-        # proposed_author — кликабельные word-блоки (слово → поле Name)
-        author_frame = tk.Frame(row_frame, relief="sunken", bd=1,
-                                width=270, height=24)
+        # Автор — кликабельные слова → поле Name
+        author_frame = tk.Frame(row_frame, relief="sunken", bd=1, width=270, height=24)
         author_frame.pack(side=tk.LEFT, padx=1)
         author_frame.pack_propagate(False)
 
-        bg = author_frame.cget("bg")
+        if not self._default_author_bg:
+            self._default_author_bg = author_frame.cget('bg')
+
+        word_labels = []
         for word in author.split():
             w_lbl = tk.Label(author_frame, text=word, cursor="hand2",
-                             bg=bg, padx=2)
+                             bg=self._default_author_bg, padx=2)
             w_lbl.pack(side=tk.LEFT)
             w_lbl.bind("<Button-1>",
                        lambda e, v=word, nv=name_var: nv.set(v))
@@ -192,18 +251,111 @@ class NamesDialog:
             w_lbl.bind("<Leave>",
                        lambda e, lbl=w_lbl: lbl.config(
                            fg="black", font="TkDefaultFont 9"))
+            word_labels.append(w_lbl)
 
-        # Names — редактируемое поле
+        self._row_ui.append((author_frame, word_labels))
+
+        # Имя — редактируемое поле
         ttk.Entry(row_frame, textvariable=name_var, width=24).pack(
             side=tk.LEFT, padx=1)
 
-        # Gender — выпадающий список
-        cb = ttk.Combobox(row_frame, textvariable=gender_var,
-                          values=self.GENDER_OPTIONS, width=10, state="readonly")
-        cb.pack(side=tk.LEFT, padx=1)
+        # Пол — выпадающий список
+        ttk.Combobox(row_frame, textvariable=gender_var,
+                     values=self.GENDER_OPTIONS, width=10,
+                     state="readonly").pack(side=tk.LEFT, padx=1)
 
     # ------------------------------------------------------------------
-    # Save
+    # Цветовая сигнализация
+    # ------------------------------------------------------------------
+
+    def _set_row_status(self, row_idx: int, status: str) -> None:
+        """Подсветить поле автора в строке row_idx цветом статуса."""
+        if row_idx >= len(self._row_ui):
+            return
+        color = self._STATUS_COLORS.get(status, self._default_author_bg)
+        author_frame, word_labels = self._row_ui[row_idx]
+        try:
+            author_frame.configure(bg=color)
+            for lbl in word_labels:
+                lbl.configure(bg=color)
+        except tk.TclError:
+            pass  # виджет уже уничтожен
+
+    # ------------------------------------------------------------------
+    # Онлайн-проверка
+    # ------------------------------------------------------------------
+
+    def _start_online_check(self, new_items):
+        """Запустить асинхронный lookup для new_items (из UI-потока)."""
+        self._online_total += len(new_items)
+        self._update_online_status()
+
+        # Немедленно подсветить жёлтым (pending)
+        for idx, _ in new_items:
+            self._set_row_status(idx, 'pending')
+
+        def on_result(row_idx, name_word, result):
+            try:
+                self.top.after(
+                    0,
+                    lambda: self._on_lookup_result(row_idx, name_word, result),
+                )
+            except Exception:
+                pass
+
+        def on_done():
+            try:
+                self.top.after(0, self._update_online_status)
+            except Exception:
+                pass
+
+        self._service.lookup_authors_async(new_items, on_result, on_done)
+
+    def _on_lookup_result(self, row_idx: int, name_word: str, result) -> None:
+        """Обработать результат из Genderize.io (вызывается в UI-потоке)."""
+        from gender_lookup import STATUS_FOUND, STATUS_UNCERTAIN, STATUS_UNKNOWN, STATUS_ERROR
+
+        self._online_done += 1
+        self._update_online_status()
+
+        if not self.top.winfo_exists():
+            return
+        if row_idx >= len(self._row_data):
+            return
+
+        _, _, name_var, gender_var, *_ = self._row_data[row_idx]
+
+        if result.status in (STATUS_FOUND, STATUS_UNCERTAIN):
+            # Имя — кириллическое слово из нашего автора (не от сервиса!)
+            name_var.set(name_word)
+            if result.gender_ru:
+                gender_var.set(result.gender_ru)
+            self._set_row_status(row_idx, result.status)
+        elif result.status == STATUS_UNKNOWN:
+            self._set_row_status(row_idx, 'unknown')
+        else:  # STATUS_ERROR
+            self._set_row_status(row_idx, 'error')
+
+    def _update_online_status(self) -> None:
+        """Обновить строку прогресса онлайн-проверки."""
+        if not self.top.winfo_exists():
+            return
+        if self._online_total == 0:
+            self._online_var.set("")
+            return
+        done  = self._online_done
+        total = self._online_total
+        if done < total:
+            self._online_var.set(
+                f"Онлайн-проверка: {done}/{total}  …"
+            )
+        else:
+            self._online_var.set(
+                f"Онлайн-проверка: завершена ({total})"
+            )
+
+    # ------------------------------------------------------------------
+    # Сохранение
     # ------------------------------------------------------------------
 
     def _save_names(self):
@@ -215,7 +367,7 @@ class NamesDialog:
         male_new = []
         female_new = []
         for _, _, name_var, gender_var, *_ in self._row_data:
-            name = name_var.get().strip()
+            name   = name_var.get().strip()
             gender = gender_var.get().strip()
             if not name or gender not in self.GENDER_OPTIONS:
                 continue
@@ -236,7 +388,7 @@ class NamesDialog:
             unique_new = set(male_new)
             actual_new = unique_new - existing
             male_skipped = len(unique_new) - len(actual_new)
-            male_added = len(actual_new)
+            male_added   = len(actual_new)
             if actual_new:
                 merged = sorted(existing | actual_new, key=lambda s: s.lower())
                 self.settings_manager.set_male_names(merged)
@@ -246,12 +398,12 @@ class NamesDialog:
             unique_new = set(female_new)
             actual_new = unique_new - existing
             female_skipped = len(unique_new) - len(actual_new)
-            female_added = len(actual_new)
+            female_added   = len(actual_new)
             if actual_new:
                 merged = sorted(existing | actual_new, key=lambda s: s.lower())
                 self.settings_manager.set_female_names(merged)
 
-        total_added = male_added + female_added
+        total_added   = male_added   + female_added
         total_skipped = male_skipped + female_skipped
 
         msg = (

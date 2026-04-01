@@ -383,6 +383,16 @@ class SettingsManager:
             names.append(name)
             self.set_male_names(names)
 
+    # --- Genderize.io API key ---
+    def get_genderize_api_key(self) -> str:
+        """Вернуть API-ключ Genderize.io (пустая строка = бесплатный лимит)."""
+        return str(self.settings.get('genderize_api_key', ''))
+
+    def set_genderize_api_key(self, key: str) -> None:
+        """Сохранить API-ключ Genderize.io."""
+        self.settings['genderize_api_key'] = key.strip()
+        self.save()
+
     # --- Service words helpers ---
     def get_service_words(self):
         """Возвращает список служебных слов."""

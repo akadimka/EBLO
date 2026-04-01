@@ -601,9 +601,9 @@ class MainWindow(tk.Tk):
         current_folder = self.selected_folder.get()
         
         # Создаем новое окно для нормализации
+        # Полноценное окно (не диалог) — все кнопки хрома: свернуть/развернуть/закрыть
         normalizer_root = tk.Toplevel(self)
-        normalizer_root.transient(self)  # Сделать окно зависимым от главного
-        normalizer_root.grab_set()  # Перехватить фокус - окно модальное
+        normalizer_root.resizable(True, True)
         
         # Инициализируем app (геометрия будет восстановлена автоматически)
         app = CSVNormalizerApp(normalizer_root, current_folder, self.logger, self.settings)
