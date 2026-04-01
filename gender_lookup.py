@@ -14,6 +14,7 @@
   WIKIDATA_DELAY секунд между последовательными запросами (politeness policy).
 """
 
+import difflib
 import time
 import urllib.request
 import urllib.parse
@@ -131,38 +132,58 @@ class GenderLookupService:
                 time.sleep(wait)
             self._last_wd_ts = time.monotonic()
 
-    def _wikidata_lookup(self, author: str) -> 'LookupResult':
-        """Wikidata MediaWiki API: ищем человека по имени, возвращаем пол.
+    def _transliterate_cyr_to_lat(self, text: str) -> str:
+        """Простая побуквенная транслитерация кириллицы в латиницу.
 
-        Стратегия 1 (быстрая): wbsearchentities по полному имени в 'ru'
-        Стратегия 2 (fallback): полнотекстовый поиск (list=search) по самому
-            длинному слову автора (как правило фамилия) — находит даже тех,
-            у кого в Wikidata есть отчество или другие расхождения.
-            Из кандидатов оставляем тех, чей ru/en label содержит ВСЕ слова
-            исходного автора.
-        Шаг 2: wbgetentities — P31 (человек) + P21 (пол) + labels (имя)
+        Используется для поиска авторов, у которых в Wikidata нет русского
+        лейбла (например, британские авторы с именем только на английском).
         """
-        _UA     = 'EBookLibraryOrganizer/1.0 (github.com/akadimka/EBLO)'
-        _MALE   = {'Q6581097', 'Q44148', 'Q2443246'}
-        _FEMALE = {'Q6581072', 'Q2449503', 'Q1052281'}
+        _MAP = {
+            'а': 'a',  'б': 'b',  'в': 'v',  'г': 'g',  'д': 'd',
+            'е': 'e',  'ё': 'yo', 'ж': 'zh', 'з': 'z',  'и': 'i',
+            'й': 'y',  'к': 'k',  'л': 'l',  'м': 'm',  'н': 'n',
+            'о': 'o',  'п': 'p',  'р': 'r',  'с': 's',  'т': 't',
+            'у': 'u',  'ф': 'f',  'х': 'kh', 'ц': 'ts', 'ч': 'ch',
+            'ш': 'sh', 'щ': 'sch','ъ': '',   'ы': 'y',  'ь': '',
+            'э': 'e',  'ю': 'yu', 'я': 'ya',
+        }
+        return ''.join(_MAP.get(ch, ch) for ch in text.lower())
 
-        # ── Стратегия 1: поиск полного имени ─────────────────────────────────
-        candidates = self._wb_search(author, 'ru', _UA, limit=5)
-        needs_label_filter = False
+    def _check_candidates(
+        self,
+        candidates: List[str],
+        author: str,
+        filter_mode: str,
+        ua: str,
+        male_ids: set,
+        female_ids: set,
+    ) -> Optional['LookupResult']:
+        """Загрузить claims+labels для кандидатов, применить фильтр, вернуть пол или None.
 
-        # ── Стратегия 2: полнотекстовый поиск по наиболее уникальному слову ──
-        if not candidates:
-            # Берём самое длинное слово (чаще всего — фамилия)
-            words = [w for w in author.split() if len(w) >= 3]
-            pivot = max(words, key=len) if words else author
-            candidates = self._wb_fulltext_search(pivot, _UA, limit=10)
-            needs_label_filter = True
+        filter_mode:
+          'none'           — фильтр по лейблу не применяется (Strategy 1)
+          'cyrillic_fuzzy' — нечёткое сравнение кириллических слов с ru/en label (≥ 0.8)
+          'translit_fuzzy' — транслитерированные слова vs en label (≥ 0.75)
+        """
+        if filter_mode == 'translit_fuzzy':
+            filter_words = {
+                self._transliterate_cyr_to_lat(w)
+                for w in author.split() if len(w) >= 2
+            }
+            fuzzy_threshold = 0.75
+        else:
+            filter_words = {w.lower() for w in author.split() if len(w) >= 2}
+            fuzzy_threshold = 0.8
 
-        if not candidates:
-            return LookupResult(status=STATUS_UNKNOWN, source='wikidata')
+        def _label_passes(label_words: list) -> bool:
+            for w in filter_words:
+                if not any(
+                    difflib.SequenceMatcher(None, w, lw).ratio() >= fuzzy_threshold
+                    for lw in label_words
+                ):
+                    return False
+            return True
 
-        # ── Шаг 2: получить claims + labels для кандидатов ───────────────────
-        author_words_lower = {w.lower() for w in author.split() if len(w) >= 2}
         params2 = urllib.parse.urlencode({
             'action':    'wbgetentities',
             'ids':       '|'.join(candidates[:10]),
@@ -172,7 +193,7 @@ class GenderLookupService:
         })
         req2 = urllib.request.Request(
             WIKIDATA_API_URL + '?' + params2,
-            headers={'User-Agent': _UA},
+            headers={'User-Agent': ua},
         )
         with urllib.request.urlopen(req2, timeout=self._timeout) as resp:
             entity_data = json.loads(resp.read().decode('utf-8'))
@@ -185,7 +206,7 @@ class GenderLookupService:
             claims = entity.get('claims', {})
             labels = entity.get('labels', {})
 
-            # Проверить P31 (instance of) = Q5 (human)
+            # P31 = Q5 (human)
             p31 = claims.get('P31', [])
             is_human = any(
                 c.get('mainsnak', {}).get('datavalue', {}).get('value', {}).get('id') == 'Q5'
@@ -194,27 +215,18 @@ class GenderLookupService:
             if not is_human:
                 continue
 
-            # Фильтр по label: все слова автора должны иметь близкое совпадение
-            # в лейбле кандидата. Используем нечёткое сравнение (ratio ≥ 0.8),
-            # чтобы выдерживать разные варианты транслитерации:
-            # «Олдерман» vs «Алдерман» — одна буква, ratio=0.875 → проходит.
-            label_text = (labels.get('ru') or labels.get('en') or {}).get('value', '')
-            if needs_label_filter:
-                import difflib
-                label_words = label_text.lower().split()
-                def _fuzzy_match(author_word: str) -> bool:
-                    """True если хотя бы одно слово лейбла ≥ 80% похоже."""
-                    for lw in label_words:
-                        if difflib.SequenceMatcher(None, author_word, lw).ratio() >= 0.8:
-                            return True
-                    return False
-                if not all(_fuzzy_match(w) for w in author_words_lower):
+            # translit_fuzzy → предпочитаем en label; иначе — ru
+            if filter_mode == 'translit_fuzzy':
+                label_text = (labels.get('en') or labels.get('ru') or {}).get('value', '')
+            else:
+                label_text = (labels.get('ru') or labels.get('en') or {}).get('value', '')
+
+            if filter_mode != 'none':
+                if not _label_passes(label_text.lower().split()):
                     continue
 
-            # Имя: первое слово русского (или английского) label
             first_name = label_text.split()[0] if label_text else ''
 
-            # Получить P21 (sex or gender)
             for claim in claims.get('P21', []):
                 gender_id = (
                     claim.get('mainsnak', {})
@@ -222,18 +234,76 @@ class GenderLookupService:
                          .get('value', {})
                          .get('id', '')
                 )
-                if gender_id in _MALE:
+                if gender_id in male_ids:
                     return LookupResult(
                         gender_ru='Муж.', probability=1.0,
                         status=STATUS_FOUND, source='wikidata',
                         first_name=first_name,
                     )
-                if gender_id in _FEMALE:
+                if gender_id in female_ids:
                     return LookupResult(
                         gender_ru='Жен.', probability=1.0,
                         status=STATUS_FOUND, source='wikidata',
                         first_name=first_name,
                     )
+        return None
+
+    def _wikidata_lookup(self, author: str) -> 'LookupResult':
+        """Wikidata MediaWiki API: ищем человека по имени, возвращаем пол.
+
+        Стратегия 1: wbsearchentities по полному имени на русском.
+        Стратегия 2: fulltext (list=search) по самому длинному слову (русский).
+            Фильтр: ru/en label кандидата нечётко совпадает со всеми словами
+            автора (SequenceMatcher ≥ 0.8 на каждое слово).
+            Позволяет найти «Наоми Олдерман» → «Наоми Алдерман».
+        Стратегия 3: транслитерация кириллицы → поиск на английском.
+            Используется когда у автора в Wikidata нет русского лейбла.
+            Пример: «Миллингтон Мил» → «Mil Millington» / «Millington Mil».
+            Пробуются оба порядка слов (в рус. форматировании фамилия идёт
+            первой, в английском — имя первым); если нет попадания —
+            fulltext по самому длинному транслитерированному слову.
+            Фильтр: английский label нечётко совпадает с транслитерацией (≥ 0.75).
+        Каждая стратегия немедленно проверяет своих кандидатов через _check_candidates.
+        Если матч найден — возврат, иначе запускается следующая стратегия.
+        """
+        _UA     = 'EBookLibraryOrganizer/1.0 (github.com/akadimka/EBLO)'
+        _MALE   = {'Q6581097', 'Q44148', 'Q2443246'}
+        _FEMALE = {'Q6581072', 'Q2449503', 'Q1052281'}
+
+        # ── Стратегия 1: wbsearchentities, полное имя, язык ru ───────────────
+        cands = self._wb_search(author, 'ru', _UA, limit=5)
+        if cands:
+            result = self._check_candidates(cands, author, 'none', _UA, _MALE, _FEMALE)
+            if result:
+                return result
+
+        # ── Стратегия 2: fulltext по самому длинному слову (кириллица) ───────
+        words = [w for w in author.split() if len(w) >= 3]
+        pivot = max(words, key=len) if words else author
+        cands = self._wb_fulltext_search(pivot, _UA, limit=10)
+        if cands:
+            result = self._check_candidates(cands, author, 'cyrillic_fuzzy', _UA, _MALE, _FEMALE)
+            if result:
+                return result
+
+        # ── Стратегия 3: транслитерация → поиск на английском ────────────────
+        t_words = [self._transliterate_cyr_to_lat(w) for w in author.split()]
+        t_fwd = ' '.join(t_words)           # «millington mil»
+        t_rev = ' '.join(reversed(t_words)) # «mil millington»
+        for t_query in [t_fwd, t_rev]:
+            cands = self._wb_search(t_query, 'en', _UA, limit=5)
+            if cands:
+                result = self._check_candidates(cands, author, 'translit_fuzzy', _UA, _MALE, _FEMALE)
+                if result:
+                    return result
+        # Также пробуем fulltext по самому длинному транслитерированному слову
+        pivot_t = max(t_words, key=len) if t_words else ''
+        if pivot_t:
+            cands = self._wb_fulltext_search(pivot_t, _UA, limit=10)
+            if cands:
+                result = self._check_candidates(cands, author, 'translit_fuzzy', _UA, _MALE, _FEMALE)
+                if result:
+                    return result
 
         return LookupResult(status=STATUS_UNKNOWN, source='wikidata')
 
