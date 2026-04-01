@@ -832,6 +832,7 @@ class Pass2Filename:
                 from block_level_pattern_matcher import BlockLevelPatternMatcher
             except ImportError:
                 from ..block_level_pattern_matcher import BlockLevelPatternMatcher
+            import re
             
             # CRITICAL: Remove blacklist markers from filename BEFORE pattern matching
             # "(СИ)" at the end creates an extra block that breaks pattern matching!
@@ -867,7 +868,9 @@ class Pass2Filename:
             if fb2_path and fb2_path.exists():
                 try:
                     book_title = self._extractor._extract_title_from_fb2(fb2_path)
-                    if book_title and book_title.strip().lower() == author.lower():
+                    # Strip trailing [...] noise (e.g. "[litres]", "[СИ]") before comparing.
+                    _book_title_clean = re.sub(r'\s*\[.*?\]\s*$', '', book_title.strip()) if book_title else ''
+                    if _book_title_clean and _book_title_clean.lower() == author.lower():
                         self.logger.log(
                             f"[PASS 2] Rejected author '{author}' — matches book-title from FB2 "
                             f"(pattern='{best_pattern}'). Retrying without Title-first patterns."
@@ -884,7 +887,7 @@ class Pass2Filename:
                             return ""
                         author = author.strip()
                         # Sanity check: still the book title?
-                        if author.lower() == book_title.strip().lower():
+                        if author.lower() == _book_title_clean.lower():
                             return ""
                 except Exception:
                     pass
