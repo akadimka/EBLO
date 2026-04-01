@@ -297,6 +297,17 @@ class SettingsManager:
         """
         return self.settings.get('writer_occupation_qids') or []
 
+    def get_name_particles(self) -> frozenset:
+        """Вернуть frozenset частиц иностранных имён (де, ван, фон, ди…).
+
+        Хранится в config.json под ключом name_particles.
+        Используется в pass2_filename для валидации имён с частицами
+        (напр. «Жиро де л Эн», «ван дер Берг»): если хотя бы одно слово
+        имени является частицей — проверка наличия известного имени пропускается.
+        """
+        lst = self.settings.get('name_particles') or []
+        return frozenset(p.lower() for p in lst)
+
     def get_no_series_folder_names(self) -> frozenset:
         """Вернуть frozenset нормализованных имён папок «без серии» из конфига.
 

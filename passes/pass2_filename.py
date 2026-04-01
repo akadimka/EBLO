@@ -65,6 +65,13 @@ class Pass2Filename:
         self.collection_keywords = settings.get_list('collection_keywords') or []  # Load from config
         self.male_names = male_names or set()
         self.female_names = female_names or set()
+        self.name_particles = (
+            settings.get_name_particles()
+            if hasattr(settings, 'get_name_particles')
+            else frozenset({'де', 'ди', 'дю', 'ду', 'да', 'дер', 'ден', 'дель', 'дела',
+                            'делла', 'дэлла', 'дос', 'дас', 'дэ', 'ван', 'фон',
+                            'ля', 'ле', 'ла', 'мак', 'о'})
+        )
         self.patterns = self._load_patterns()
         # Author cache: maps abbreviated/partial names to full names
         # e.g., {"А. Живой" -> "Живой Алексей", "Живой" -> "Живой Алексей"}
@@ -371,8 +378,13 @@ class Pass2Filename:
         text_words = text_normalized.split()
         
         if len(text_words) > 1:  # Multi-word - likely "FirstName LastName" or "Title Words"
+            # If name contains a known language particle (де, ван, фон, ди…) it's a
+            # foreign proper name — skip the first-name check entirely.
+            has_particle = bool(self.name_particles and any(
+                word in self.name_particles for word in text_words
+            ))
             # Require at least one known first name to filter out collection titles
-            if self.male_names or self.female_names:
+            if not has_particle and (self.male_names or self.female_names):
                 has_known_name = any(
                     word in self.male_names or word in self.female_names
                     for word in text_words
