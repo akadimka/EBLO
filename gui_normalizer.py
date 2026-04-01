@@ -196,6 +196,11 @@ class NamesDialog:
         btn_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
         ttk.Button(btn_frame, text="Пополнить списки",
                    command=self._save_names).pack(side=tk.LEFT, padx=5)
+        self._online_btn = ttk.Button(
+            btn_frame, text="Сверить онлайн",
+            command=self._run_online_check,
+        )
+        self._online_btn.pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Отмена",
                    command=self.top.destroy).pack(side=tk.LEFT, padx=5)
 
@@ -226,14 +231,6 @@ class NamesDialog:
         self._count_var.set(f"Строк: {total}")
         if total:
             self._loading_var.set("")
-
-        # Запустить онлайн-проверку для новых строк
-        if self._service and rows:
-            new_items = [
-                (start_idx + i, self._row_data[start_idx + i][1])
-                for i in range(len(rows))
-            ]
-            self._start_online_check(new_items)
 
     def _add_row_widget(self, row_idx, source, author, name_var, gender_var, file_path):
         """Создать виджеты для одной строки; сохранить ссылки для подсветки."""
@@ -314,6 +311,22 @@ class NamesDialog:
     # Онлайн-проверка
     # ------------------------------------------------------------------
 
+    def _run_online_check(self):
+        """Запустить онлайн-проверку для всех строк (по кнопке)."""
+        if not self._service:
+            messagebox.showinfo(
+                "Онлайн-проверка",
+                "Сервис недоступен: не удалось загрузить gender_lookup.",
+            )
+            return
+        if not self._row_data:
+            return
+        self._online_btn.configure(state='disabled')
+        self._online_total = 0
+        self._online_done  = 0
+        all_items = [(i, self._row_data[i][1]) for i in range(len(self._row_data))]
+        self._start_online_check(all_items)
+
     def _start_online_check(self, new_items):
         """Запустить асинхронный lookup для new_items (из UI-потока)."""
         self._online_total += len(new_items)
@@ -335,6 +348,7 @@ class NamesDialog:
         def on_done(rate_limited=False):
             try:
                 self.top.after(0, lambda: self._update_online_status(rate_limited))
+                self.top.after(0, lambda: self._online_btn.configure(state='normal'))
             except Exception:
                 pass
 
