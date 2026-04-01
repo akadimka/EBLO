@@ -29,12 +29,17 @@ MIN_PROBABILITY = 0.75    # ниже — считаем ненадёжным (н
 
 _GENDER_RU = {'male': 'Муж.', 'female': 'Жен.'}
 
+
+class RateLimitError(Exception):
+    """Genderize.io вернул HTTP 429 — суточный лимит исчерпан."""
+
 # Состояния строки в NamesDialog
-STATUS_PENDING  = 'pending'   # запрос отправлен
-STATUS_FOUND    = 'found'     # ответ получен, пол определён
-STATUS_UNCERTAIN= 'uncertain' # ответ получен, вероятность ниже порога
-STATUS_UNKNOWN  = 'unknown'   # сервис не знает этого имени
-STATUS_ERROR    = 'error'     # ошибка сети / исчерпан лимит
+STATUS_PENDING   = 'pending'     # запрос отправлен
+STATUS_FOUND     = 'found'       # ответ получен, пол определён
+STATUS_UNCERTAIN = 'uncertain'   # ответ получен, вероятность ниже порога
+STATUS_UNKNOWN   = 'unknown'     # сервис не знает этого имени
+STATUS_ERROR     = 'error'       # ошибка сети
+STATUS_RATE_LIMIT= 'rate_limit'  # превышен суточный лимит запросов (HTTP 429)
 
 
 class LookupResult:
@@ -124,7 +129,19 @@ class GenderLookupService:
         words_to_fetch = [w for w in all_words_order
                           if self._cache.get(w) is None]
 
+        rate_limited = False   # при 429 прекращаем дальнейшие запросы
+
         for i in range(0, len(words_to_fetch), BATCH_SIZE):
+            if rate_limited:
+                # Помечаем оставшиеся слова как rate_limit
+                for key in words_to_fetch[i:]:
+                    with self._lock:
+                        self._cache[key] = LookupResult(
+                            status=STATUS_RATE_LIMIT,
+                            error='HTTP 429: суточный лимит запросов исчерпан',
+                        )
+                break
+
             chunk_keys = words_to_fetch[i:i + BATCH_SIZE]
             # Оригинальный регистр для запроса (берём из первого вхождения)
             orig_words = {k: k for k in chunk_keys}  # ключ = lower
@@ -136,6 +153,13 @@ class GenderLookupService:
 
             try:
                 batch_results = self._genderize_batch(list(orig_words.values()))
+            except RateLimitError as exc:
+                rate_limited = True
+                rl_result = LookupResult(status=STATUS_RATE_LIMIT, error=str(exc))
+                for key in chunk_keys:
+                    with self._lock:
+                        self._cache[key] = rl_result
+                continue
             except Exception as exc:
                 err_result = LookupResult(status=STATUS_ERROR, error=str(exc))
                 for key in chunk_keys:
@@ -161,10 +185,14 @@ class GenderLookupService:
                 if r is None:
                     continue
                 if r.status == STATUS_ERROR:
-                    # Если хотя бы одно слово дало ошибку сети, запомним её
+                    # Ошибка сети — запоминаем, но продолжаем искать
                     if best_result is None:
                         best_word, best_result = word, r
                     continue
+                if r.status == STATUS_RATE_LIMIT:
+                    # Превышен лимит — ставим этот статус и не ищем дальше
+                    best_word, best_result = word, r
+                    break
                 if r.status == STATUS_UNKNOWN:
                     if best_result is None:
                         best_word, best_result = word, r
@@ -185,7 +213,7 @@ class GenderLookupService:
                 pass
 
         try:
-            on_done()
+            on_done(rate_limited)
         except Exception:
             pass
 
@@ -200,8 +228,17 @@ class GenderLookupService:
             url,
             headers={'User-Agent': 'EBookLibraryOrganizer/1.0'},
         )
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                raise RateLimitError(
+                    'Суточный лимит запросов Genderize.io исчерпан. '
+                    'Добавьте бесплатный API-ключ в Настройки → Общие '
+                    '(1000 запросов/день вместо 100).'
+                ) from exc
+            raise
 
         if not isinstance(data, list):
             data = [data]

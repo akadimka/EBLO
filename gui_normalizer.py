@@ -58,11 +58,12 @@ class NamesDialog:
 
     # Цвета подсветки строк онлайн-проверки
     _STATUS_COLORS = {
-        'pending':   '#FFFACD',   # лимонный — запрос отправлен
-        'found':     '#C8F0C8',   # зелёный  — пол определён
-        'uncertain': '#E8FFD0',   # светло-зелёный — неуверенно, но заполнено
-        'unknown':   '#FFE4C4',   # персиковый — сервис не знает
-        'error':     '#FFCCCC',   # розово-красный — ошибка / нет ответа
+        'pending':    '#FFFACD',   # лимонный — запрос отправлен
+        'found':      '#C8F0C8',   # зелёный  — пол определён
+        'uncertain':  '#E8FFD0',   # светло-зелёный — неуверенно, но заполнено
+        'unknown':    '#FFE4C4',   # персиковый — сервис не знает
+        'error':      '#FFCCCC',   # розово-красный — ошибка сети
+        'rate_limit': '#FFD0FF',   # сиреневый — исчерпан суточный лимит
     }
 
     def __init__(self, parent, rows, settings_manager):
@@ -303,9 +304,9 @@ class NamesDialog:
             except Exception:
                 pass
 
-        def on_done():
+        def on_done(rate_limited=False):
             try:
-                self.top.after(0, self._update_online_status)
+                self.top.after(0, lambda: self._update_online_status(rate_limited))
             except Exception:
                 pass
 
@@ -313,7 +314,7 @@ class NamesDialog:
 
     def _on_lookup_result(self, row_idx: int, name_word: str, result) -> None:
         """Обработать результат из Genderize.io (вызывается в UI-потоке)."""
-        from gender_lookup import STATUS_FOUND, STATUS_UNCERTAIN, STATUS_UNKNOWN, STATUS_ERROR
+        from gender_lookup import STATUS_FOUND, STATUS_UNCERTAIN, STATUS_UNKNOWN, STATUS_ERROR, STATUS_RATE_LIMIT
 
         self._online_done += 1
         self._update_online_status()
@@ -331,12 +332,14 @@ class NamesDialog:
             if result.gender_ru:
                 gender_var.set(result.gender_ru)
             self._set_row_status(row_idx, result.status)
+        elif result.status == STATUS_RATE_LIMIT:
+            self._set_row_status(row_idx, 'rate_limit')
         elif result.status == STATUS_UNKNOWN:
             self._set_row_status(row_idx, 'unknown')
         else:  # STATUS_ERROR
             self._set_row_status(row_idx, 'error')
 
-    def _update_online_status(self) -> None:
+    def _update_online_status(self, rate_limited: bool = False) -> None:
         """Обновить строку прогресса онлайн-проверки."""
         if not self.top.winfo_exists():
             return
@@ -345,7 +348,13 @@ class NamesDialog:
             return
         done  = self._online_done
         total = self._online_total
-        if done < total:
+        if rate_limited:
+            self._online_var.set(
+                f"Онлайн-проверка: ⚠ лимит запросов исчерпан "
+                f"(выполнено {done}/{total}). Добавьте API-ключ в Настройки → Общие"
+            )
+            self._online_lbl.configure(fg='#990000')
+        elif done < total:
             self._online_var.set(
                 f"Онлайн-проверка: {done}/{total}  …"
             )
