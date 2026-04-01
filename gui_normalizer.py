@@ -12,6 +12,45 @@ except ImportError:
     from .regen_csv import RegenCSVService
 
 
+class _Tooltip:
+    """Всплывающая подсказка для любого виджета tkinter."""
+
+    def __init__(self, widget: tk.Widget, text: str):
+        self._widget = widget
+        self._text = text
+        self._win = None
+        widget.bind("<Enter>", self._show, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<Destroy>", lambda e: self._hide(), add="+")
+
+    def _show(self, event=None):
+        if self._win or not self._text:
+            return
+        try:
+            x = self._widget.winfo_rootx() + 20
+            y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
+            self._win = tw = tk.Toplevel(self._widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            tk.Label(
+                tw, text=self._text,
+                background="#FFFFE0", foreground="#1A1A1A",
+                relief="solid", borderwidth=1,
+                font=("Segoe UI", 9), justify="left",
+                wraplength=700, padx=5, pady=3,
+            ).pack()
+        except Exception:
+            self._win = None
+
+    def _hide(self, event=None):
+        if self._win:
+            try:
+                self._win.destroy()
+            except Exception:
+                pass
+            self._win = None
+
+
 class NamesDialog:
     """Окно просмотра и редактирования извлечённых имён авторов."""
 
@@ -20,121 +59,164 @@ class NamesDialog:
     def __init__(self, parent, rows, settings_manager):
         """
         Args:
-            rows: список кортежей (author_source, proposed_author, first_name, gender)
+            rows: список кортежей:
+                  (author_source, proposed_author, first_name, gender)
+                  или (author_source, proposed_author, first_name, gender, file_path)
+                  Может быть пустым — строки добавляются позже через add_rows().
             settings_manager: экземпляр SettingsManager
         """
         self.settings_manager = settings_manager
         self.top = tk.Toplevel(parent)
         self.top.title("Имена авторов")
-        self.top.geometry("860x500")
+        self.top.geometry("900x550")
         self.top.transient(parent)
         self.top.grab_set()
 
-        # Данные строк: (author_source, proposed_author, StringVar(name), StringVar(gender))
+        # (source, author, name_var, gender_var, file_path)
         self._row_data = []
-        for source, author, name, gender in rows:
-            self._row_data.append((source, author, tk.StringVar(value=name),
-                                   tk.StringVar(value=gender)))
 
         self._build_ui()
+
+        if rows:
+            self.add_rows(rows)
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
 
     def _build_ui(self):
         # ---- заголовок таблицы ----
         hdr = ttk.Frame(self.top)
         hdr.pack(fill=tk.X, padx=5, pady=(5, 0))
-        for text, w in (("author_source", 130), ("proposed_author", 280),
-                        ("Names", 180), ("Gender", 120)):
+        for text, w in (("Источник", 130), ("Автор (из данных)", 280),
+                        ("Имя", 180), ("Пол", 120)):
             ttk.Label(hdr, text=text, relief="groove", width=w // 7,
                       anchor="w").pack(side=tk.LEFT, padx=1)
+
+        # ---- строка состояния загрузки ----
+        self._loading_var = tk.StringVar(value="")
+        self._loading_label = ttk.Label(
+            self.top, textvariable=self._loading_var,
+            foreground="gray", font=("Segoe UI", 9),
+        )
+        self._loading_label.pack(anchor="w", padx=10, pady=(2, 0))
 
         # ---- прокручиваемый canvas ----
         container = ttk.Frame(self.top)
         container.pack(fill=tk.BOTH, expand=True, padx=5, pady=2)
 
-        canvas = tk.Canvas(container, borderwidth=0, highlightthickness=0)
-        vsb = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview)
-        canvas.configure(yscrollcommand=vsb.set)
+        self._canvas = tk.Canvas(container, borderwidth=0, highlightthickness=0)
+        vsb = ttk.Scrollbar(container, orient=tk.VERTICAL, command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=vsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self._inner = ttk.Frame(canvas)
-        win_id = canvas.create_window((0, 0), window=self._inner, anchor="nw")
+        self._inner = ttk.Frame(self._canvas)
+        self._win_id = self._canvas.create_window((0, 0), window=self._inner, anchor="nw")
 
         def _on_frame_configure(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
+            self._canvas.configure(scrollregion=self._canvas.bbox("all"))
 
         def _on_canvas_configure(event):
-            canvas.itemconfig(win_id, width=event.width)
+            self._canvas.itemconfig(self._win_id, width=event.width)
 
         self._inner.bind("<Configure>", _on_frame_configure)
-        canvas.bind("<Configure>", _on_canvas_configure)
+        self._canvas.bind("<Configure>", _on_canvas_configure)
 
-        # Прокрутка колесом мыши
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        self.top.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        self._canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self.top.bind("<Destroy>", lambda e: self._canvas.unbind_all("<MouseWheel>"))
 
-        # ---- строки данных ----
-        for i, (source, author, name_var, gender_var) in enumerate(self._row_data):
-            row_frame = ttk.Frame(self._inner)
-            row_frame.pack(fill=tk.X, pady=1)
-
-            # author_source — нередактируемое
-            ttk.Label(row_frame, text=source, width=18, anchor="w",
-                      relief="sunken").pack(side=tk.LEFT, padx=1)
-
-            # proposed_author — кликабельные блоки (разделитель — пробел, дефис не делит)
-            author_frame = tk.Frame(row_frame, relief="sunken", bd=1,
-                                    width=270, height=24)
-            author_frame.pack(side=tk.LEFT, padx=1)
-            author_frame.pack_propagate(False)
-
-            bg = author_frame.cget("bg")
-            for word in author.split():
-                w_lbl = tk.Label(author_frame, text=word, cursor="hand2",
-                                 bg=bg, padx=2)
-                w_lbl.pack(side=tk.LEFT)
-                # ЛКМ — записать слово в Name
-                w_lbl.bind("<Button-1>",
-                           lambda e, v=word, nv=name_var: nv.set(v))
-                # Подсветка при наведении
-                w_lbl.bind("<Enter>",
-                           lambda e, lbl=w_lbl: lbl.config(
-                               fg="blue", font="TkDefaultFont 9 underline"))
-                w_lbl.bind("<Leave>",
-                           lambda e, lbl=w_lbl: lbl.config(
-                               fg="black", font="TkDefaultFont 9"))
-
-            # Names — редактируемое
-            ttk.Entry(row_frame, textvariable=name_var, width=24).pack(
-                side=tk.LEFT, padx=1)
-            # Gender — выпадающий список
-            cb = ttk.Combobox(row_frame, textvariable=gender_var,
-                              values=self.GENDER_OPTIONS, width=10, state="readonly")
-            cb.pack(side=tk.LEFT, padx=1)
-
-        # ---- кнопки внизу ----
+        # ---- строка с кнопками и счётчиком ----
         btn_frame = ttk.Frame(self.top)
         btn_frame.pack(fill=tk.X, padx=5, pady=5)
         ttk.Button(btn_frame, text="Пополнить списки",
                    command=self._save_names).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Отмена",
                    command=self.top.destroy).pack(side=tk.LEFT, padx=5)
+        self._count_var = tk.StringVar(value="Строк: 0")
+        ttk.Label(btn_frame, textvariable=self._count_var,
+                  foreground="gray").pack(side=tk.RIGHT, padx=10)
+
+    # ------------------------------------------------------------------
+    # Dynamic row management
+    # ------------------------------------------------------------------
+
+    def add_rows(self, rows):
+        """Добавить строки в диалог. Вызывать из UI-потока (через root.after)."""
+        for row in rows:
+            if len(row) >= 5:
+                source, author, name, gender, file_path = row[0], row[1], row[2], row[3], row[4]
+            else:
+                source, author, name, gender = row[0], row[1], row[2], row[3]
+                file_path = ""
+            name_var = tk.StringVar(value=name)
+            gender_var = tk.StringVar(value=gender)
+            self._row_data.append((source, author, name_var, gender_var, file_path))
+            self._add_row_widget(source, author, name_var, gender_var, file_path)
+
+        self._count_var.set(f"Строк: {len(self._row_data)}")
+        if self._row_data:
+            self._loading_var.set("")
+
+    def _add_row_widget(self, source, author, name_var, gender_var, file_path):
+        """Создать виджеты для одной строки."""
+        row_frame = ttk.Frame(self._inner)
+        row_frame.pack(fill=tk.X, pady=1)
+
+        # author_source — нередактируемое; tooltip с полным путём к файлу
+        src_lbl = ttk.Label(row_frame, text=source, width=18, anchor="w",
+                            relief="sunken")
+        src_lbl.pack(side=tk.LEFT, padx=1)
+        if file_path:
+            _Tooltip(src_lbl, file_path)
+
+        # proposed_author — кликабельные word-блоки (слово → поле Name)
+        author_frame = tk.Frame(row_frame, relief="sunken", bd=1,
+                                width=270, height=24)
+        author_frame.pack(side=tk.LEFT, padx=1)
+        author_frame.pack_propagate(False)
+
+        bg = author_frame.cget("bg")
+        for word in author.split():
+            w_lbl = tk.Label(author_frame, text=word, cursor="hand2",
+                             bg=bg, padx=2)
+            w_lbl.pack(side=tk.LEFT)
+            w_lbl.bind("<Button-1>",
+                       lambda e, v=word, nv=name_var: nv.set(v))
+            w_lbl.bind("<Enter>",
+                       lambda e, lbl=w_lbl: lbl.config(
+                           fg="blue", font="TkDefaultFont 9 underline"))
+            w_lbl.bind("<Leave>",
+                       lambda e, lbl=w_lbl: lbl.config(
+                           fg="black", font="TkDefaultFont 9"))
+
+        # Names — редактируемое поле
+        ttk.Entry(row_frame, textvariable=name_var, width=24).pack(
+            side=tk.LEFT, padx=1)
+
+        # Gender — выпадающий список
+        cb = ttk.Combobox(row_frame, textvariable=gender_var,
+                          values=self.GENDER_OPTIONS, width=10, state="readonly")
+        cb.pack(side=tk.LEFT, padx=1)
+
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
 
     def _save_names(self):
-        """Записать имена в списки config.json и отсортировать их по алфавиту."""
+        """Записать имена в списки config.json (с дедупликацией и отчётом)."""
         if not self.settings_manager:
             messagebox.showerror("Ошибка", "settings_manager не передан")
             return
 
         male_new = []
         female_new = []
-        for _, _, name_var, gender_var in self._row_data:
+        for _, _, name_var, gender_var, *_ in self._row_data:
             name = name_var.get().strip()
             gender = gender_var.get().strip()
-            # Пропускаем строку, если хоть одно из полей не заполнено
             if not name or gender not in self.GENDER_OPTIONS:
                 continue
             if gender == "Муж.":
@@ -146,21 +228,40 @@ class NamesDialog:
             messagebox.showinfo("Информация", "Нет имён для добавления")
             return
 
-        # Добавляем к существующим, дедупликация + сортировка
+        male_added = male_skipped = 0
+        female_added = female_skipped = 0
+
         if male_new:
-            existing = self.settings_manager.get_male_names()
-            merged = sorted(set(existing + male_new), key=lambda s: s.lower())
-            self.settings_manager.set_male_names(merged)
+            existing = set(self.settings_manager.get_male_names())
+            unique_new = set(male_new)
+            actual_new = unique_new - existing
+            male_skipped = len(unique_new) - len(actual_new)
+            male_added = len(actual_new)
+            if actual_new:
+                merged = sorted(existing | actual_new, key=lambda s: s.lower())
+                self.settings_manager.set_male_names(merged)
 
         if female_new:
-            existing = self.settings_manager.get_female_names()
-            merged = sorted(set(existing + female_new), key=lambda s: s.lower())
-            self.settings_manager.set_female_names(merged)
+            existing = set(self.settings_manager.get_female_names())
+            unique_new = set(female_new)
+            actual_new = unique_new - existing
+            female_skipped = len(unique_new) - len(actual_new)
+            female_added = len(actual_new)
+            if actual_new:
+                merged = sorted(existing | actual_new, key=lambda s: s.lower())
+                self.settings_manager.set_female_names(merged)
 
-        added = len(male_new) + len(female_new)
-        messagebox.showinfo("Готово",
-                            f"Добавлено / обновлено: {added} имён\n"
-                            f"Мужских: {len(male_new)}, женских: {len(female_new)}")
+        total_added = male_added + female_added
+        total_skipped = male_skipped + female_skipped
+
+        msg = (
+            f"Добавлено новых: {total_added} имён\n"
+            f"  Мужских: {male_added},  женских: {female_added}"
+        )
+        if total_skipped:
+            msg += f"\n\nПропущено (уже в списках): {total_skipped}"
+
+        messagebox.showinfo("Готово", msg)
         self.top.destroy()
 
 
@@ -733,7 +834,11 @@ class CSVNormalizerApp:
         thread.start()
 
     def _run_author_pipeline(self, folder_path: str):
-        """Запустить только Precache + Pass1 + Pass2 + Pass2Fallback."""
+        """Запустить только Precache + Pass1 + Pass2 + Pass2Fallback.
+
+        Диалог открывается немедленно (пустым).
+        Строки добавляются батчами по мере фильтрации записей.
+        """
         original_stdout = sys.stdout
         try:
             from pathlib import Path as _Path
@@ -755,10 +860,22 @@ class CSVNormalizerApp:
         redirector = StdoutRedirector(self.progress_var, self.root, original_stdout,
                                       log_callback=self._add_log)
         sys.stdout = redirector
+
+        # ── Открыть диалог немедленно (пустым) на UI-потоке ─────────────────
+        dialog_ref = [None]
+        ready_event = threading.Event()
+
+        def _open_dialog():
+            d = NamesDialog(self.root, [], self.settings_manager)
+            d._loading_var.set("Обработка данных…")
+            dialog_ref[0] = d
+            ready_event.set()
+
+        self.root.after(0, _open_dialog)
+        ready_event.wait()   # ждём, пока UI-поток создаст окно
+
         try:
             work_dir = _Path(folder_path)
-            # Приоритет: settings_manager из главного окна (актуален после сохранения имён);
-            # fallback — внутренний settings csv_service (другой экземпляр, может быть устаревшим)
             settings = self.settings_manager if self.settings_manager else self.csv_service.settings
             logger = self.csv_service.logger
             folder_parse_limit = self.csv_service.folder_parse_limit
@@ -783,34 +900,39 @@ class CSVNormalizerApp:
             pass2_fallback = Pass2Fallback(logger, settings=settings)
             pass2_fallback.execute(records)
 
-            # Собрать уникальные имена (второе слово из "Фамилия Имя")
+            # ── Фильтрация + стриминг строк в диалог ─────────────────────────
+            import re as _re
+
             male_set = set(n.lower() for n in settings.get_male_names())
             female_set = set(n.lower() for n in settings.get_female_names())
 
-            rows = []
-            seen = set()  # деdup по одному автору
+            BATCH_SIZE = 25   # строк за одно обновление UI
+            batch = []
+            seen = set()
+
+            def _flush(b):
+                """Отправить батч в диалог (выполняется в UI-потоке)."""
+                d = dialog_ref[0]
+                if d and d.top.winfo_exists():
+                    d.add_rows(b)
+
             for rec in records:
                 combined = rec.proposed_author or ""
                 source = rec.author_source or ""
+                file_path = rec.file_path or ""
                 if not combined or combined == "Сборник":
                     continue
 
-                # Разбить на отдельных авторов (разделители: ", " или "; ")
-                import re as _re
                 authors = [a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()]
-
                 for author in authors:
                     key = author
                     if key in seen:
                         continue
                     seen.add(key)
 
-                    # Второе слово = имя по умолчанию для отображения
                     parts = author.split()
                     first_name = parts[1] if len(parts) >= 2 else ""
 
-                    # Проверяем ВСЕ слова автора — формат может быть как
-                    # "Фамилия Имя", так и "Имя Фамилия" (до нормализации Pass3)
                     gender = ""
                     for word in parts:
                         w_lower = word.lower()
@@ -824,10 +946,24 @@ class CSVNormalizerApp:
                     # Показывать только тех, чьё имя ещё не в списках
                     if gender != "":
                         continue
-                    rows.append((source, author, first_name, gender))
 
-            self.root.after(0, lambda: self.progress_var.set("Готово"))
-            self.root.after(0, lambda: NamesDialog(self.root, rows, self.settings_manager))
+                    batch.append((source, author, first_name, gender, file_path))
+
+                    if len(batch) >= BATCH_SIZE:
+                        chunk = batch[:]
+                        self.root.after(0, lambda c=chunk: _flush(c))
+                        batch = []
+
+            # финальный батч
+            if batch:
+                chunk = batch[:]
+                self.root.after(0, lambda c=chunk: _flush(c))
+
+            total_sent = len(seen)
+            self.root.after(0, lambda: self.progress_var.set(
+                f"Готово — найдено {total_sent} уникальных авторов"
+            ))
+
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
