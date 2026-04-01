@@ -803,18 +803,22 @@ class Pass2Filename:
     def _extract_author_from_filename(self, filename: str, fb2_path: Optional[Path] = None) -> str:
         """Extract author name from filename using BLOCK-LEVEL pattern matching.
         
-        New algorithm:
+        Algorithm:
         1. CLEAN filename from blacklist markers (like "(СИ)") to preserve block count
         2. Tokenize cleaned filename into blocks (delimited by ' - ', '. ', parens)
-        3. Tokenize patterns into block types
-        4. Match filename blocks against pattern block types
-        5. Extract block marked as "Author" type
-        6. VALIDATE extracted name
-        7. Return or fall through to metadata
+        3. Score each pattern against blocks via BlockLevelPatternMatcher
+        4. Take best-score match (threshold 0.6)
+        5. TITLE-AS-AUTHOR GUARD: compare extracted candidate against FB2 <book-title>.
+           When two patterns tie (e.g. "Author - Title" vs "Title - Author" both score 0.73
+           for a two-block filename), the first pattern in config.json wins by default.
+           If that first-winner extracts the book title as "author", retry without
+           patterns whose name starts with "Title" → correct pattern wins the retry.
+        6. VALIDATE extracted name (_looks_like_author_name + validate_author_name)
+        7. EXPAND abbreviated/incomplete names via FB2 metadata and author cache
         
         Args:
             filename: Filename without extension
-            fb2_path: Path to FB2 file for metadata validation/expansion (optional)
+            fb2_path: Path to FB2 file for book-title guard + metadata expansion (optional)
         
         Returns:
             Author name or empty string
