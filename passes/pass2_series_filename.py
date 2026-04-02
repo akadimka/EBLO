@@ -38,6 +38,7 @@ def _author_matches_folder(proposed_author: str, folder_part: str) -> bool:
 
     Обрабатывает:
     - Вхождение строки (быстрый путь)
+    - Любое значимое слово автора как подстрока папки (для "Питер Ф. Гамильтон" в "...Гамильтон)")
     - Форму множественного числа фамилии: "Живовы" ↔ "Живов" (startswith)
     - Несколько авторов с союзом "и": "Живовы Георгий и Геннадий" ↔
       "Живов Геннадий, Живов Георгий" (все уникальные фамилии есть в папке)
@@ -52,6 +53,15 @@ def _author_matches_folder(proposed_author: str, folder_part: str) -> bool:
     if proposed_lower in folder_lower or folder_lower in proposed_lower:
         return True
 
+    # Дополнительный быстрый путь: любое значимое слово автора (≥4 букв)
+    # присутствует как подстрока в имени папки.
+    # Это покрывает случай когда автор ещё не нормализован (формат "Имя Фамилия"),
+    # а папка содержит "(Питер Гамильтон)" — "гамильтон" найдётся как подстрока.
+    for word in proposed_lower.split():
+        word = word.strip('.').strip(',')
+        if len(word) >= 4 and word in folder_lower:
+            return True
+
     # Извлечь уникальные фамилии (первое слово каждого автора после split по , ;)
     surnames = []
     for author in re.split(r'[,;]', proposed_author):
@@ -62,7 +72,7 @@ def _author_matches_folder(proposed_author: str, folder_part: str) -> bool:
     if not unique_surnames:
         return False
 
-    folder_words = [w for w in re.split(r'[\s,;\-]+', folder_lower) if w]
+    folder_words = [w for w in re.split(r'[\s,;\-\(\)]+', folder_lower) if w]
 
     # Каждая уникальная фамилия должна совпадать с хотя бы одним словом папки
     # (startswith для формы мн. числа: живов → живовы)
@@ -360,13 +370,11 @@ class Pass2SeriesFilename:
         4. Fallback на metadata только если паттерны не дали
         """
         for record in records:
-            # 🔑 Железное правило: серия из папки ТОЛЬКО если автор тоже из папки.
-            # Папка серии/подсерии может существовать только внутри папки автора.
-            # Если author_source != "folder_dataset" — иерархия папок не авторитетна.
-            if record.author_source == "folder_dataset":
-                author_name = record.proposed_author
-            else:
-                author_name = None
+            # Приоритет из config.json: FOLDER_STRUCTURE=3 > FILENAME=2 > FB2_METADATA=1
+            # Поиск по папкам применяется всегда, используя любой известный автор:
+            # proposed_author (из папки или файла) или metadata_authors (из FB2).
+            # Это гарантирует соблюдение приоритета независимо от author_source.
+            author_name = record.proposed_author or record.metadata_authors or None
             if author_name:
                 path_parts = Path(record.file_path).parts  # e.g., (TopFolder, Author, Series, File.fb2)
                 # Фильтруем папки с именами-расширениями (последний элемент = файл, не фильтруем)
@@ -375,10 +383,14 @@ class Pass2SeriesFilename:
                     if i == len(path_parts) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
                 )
 
-                for i, part in enumerate(path_parts):
+                for i, part in enumerate(path_parts[:-1]):  # ← исключаем сам файл из поиска
 
                     # Ищем папку автора с учётом формы мн. числа и нескольких авторов
                     if _author_matches_folder(author_name, part):
+                        # Папка подтвердила автора — если источник был только мета, обновляем
+                        if record.author_source == "metadata":
+                            record.author_source = "metadata_folder_confirmed"
+
                         # Найдена папка автора на позиции i
                         # Следующая папка (i+1) это серия (если это не файл)
                         if i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
@@ -406,6 +418,32 @@ class Pass2SeriesFilename:
                                 record.series_source = "folder_hierarchy"
                                 
                                 break  # Нашли серию - выходим из поиска папки автора
+                        else:
+                            # Папка i содержит автора И является папкой серии одновременно
+                            # (формат: "Сборник\Серия (Автор)\Файл.fb2" — нет подпапки серии)
+                            # Папка имеет ВЫСШИЙ приоритет. Но если metadata_series — вариация
+                            # того же названия (напр. "Барраярский цикл" и "Барраяр"), то
+                            # сохраняем более точное название из FB2 тегов.
+                            series_name = self._extract_series_from_folder_name(part)
+                            if series_name:
+                                if record.metadata_series:
+                                    meta_l = record.metadata_series.lower().replace('ё', 'е')
+                                    folder_l = series_name.lower().replace('ё', 'е')
+                                    # Если одно является префиксом другого — это одна серия,
+                                    # просто разные формы названия → оставляем более точную мету.
+                                    if not (folder_l.startswith(meta_l) or meta_l.startswith(folder_l)):
+                                        # Разные названия → папка имеет высший приоритет
+                                        record.proposed_series = series_name
+                                        record.series_source = "folder_hierarchy"
+                                    else:
+                                        # Та же серия, разная форма ("Барраярский цикл" / "Барраяр")
+                                        # → оставляем точное название из меты, но фиксируем подтверждение папкой
+                                        record.proposed_series = record.metadata_series
+                                        record.series_source = "metadata_folder_confirmed"
+                                else:
+                                    record.proposed_series = series_name
+                                    record.series_source = "folder_hierarchy"
+                            break
             
             # Special case: depth==4 without series subfolder
             # Pass 1 wrongly sets folder_dataset for depth==4, allowing Pass 2 to override it
@@ -455,7 +493,18 @@ class Pass2SeriesFilename:
                     # Очищаем file_title от мусора [litres] и сравниваем.
                     import re as _re
                     _title_clean = _re.sub(r'\s*\[.*?\]\s*$', '', record.file_title.strip())
-                    if _title_clean and _title_clean.lower() == series_candidate.lower():
+                    # Также убрать (ЛП), (альт. перевод) и т.п. скобочные суффиксы
+                    _title_no_parens = _re.sub(r'\s*\([^)]*\)\s*$', '', _title_clean).strip()
+                    _cand_lower = series_candidate.lower()
+                    _title_lower = _title_clean.lower()
+                    _title_np_lower = _title_no_parens.lower()
+                    # Прямое совпадение ИЛИ кандидат является началом названия книги
+                    # (ловит обрезанные кандидаты типа "Спасение (альт" от "Спасение (альт. перевод)")
+                    # ИЛИ кандидат начинается с базового названия (без скобок) — "спасение (альт" startswith "спасение"
+                    if (_title_lower and _cand_lower == _title_lower) or \
+                       (_title_np_lower and _cand_lower == _title_np_lower) or \
+                       (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
+                       (_title_np_lower and len(_title_np_lower) >= 4 and _cand_lower.startswith(_title_np_lower)):
                         series_candidate = None  # Название книги ≠ серия
                 
                 # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)

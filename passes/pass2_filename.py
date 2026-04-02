@@ -902,7 +902,14 @@ class Pass2Filename:
                     book_title = self._extractor._extract_title_from_fb2(fb2_path)
                     # Strip trailing [...] noise (e.g. "[litres]", "[СИ]") before comparing.
                     _book_title_clean = re.sub(r'\s*\[.*?\]\s*$', '', book_title.strip()) if book_title else ''
-                    if _book_title_clean and _book_title_clean.lower() == author.lower():
+                    # Also strip trailing (...) noise (e.g. "(ЛП)", "(СИ)", "(альт. перевод)")
+                    # so "Спасение (ЛП)" → "Спасение" can be matched against extracted author.
+                    _book_title_no_parens = re.sub(r'\s*\([^)]*\)\s*$', '', _book_title_clean).strip()
+                    _title_matches_author = (
+                        (_book_title_clean and _book_title_clean.lower() == author.lower()) or
+                        (_book_title_no_parens and _book_title_no_parens.lower() == author.lower())
+                    )
+                    if _title_matches_author:
                         self.logger.log(
                             f"[PASS 2] Rejected author '{author}' — matches book-title from FB2 "
                             f"(pattern='{best_pattern}'). Retrying without Title-first patterns."
@@ -919,7 +926,7 @@ class Pass2Filename:
                             return ""
                         author = author.strip()
                         # Sanity check: still the book title?
-                        if author.lower() == _book_title_clean.lower():
+                        if author.lower() in (_book_title_clean.lower(), _book_title_no_parens.lower()):
                             return ""
                 except Exception:
                     pass
