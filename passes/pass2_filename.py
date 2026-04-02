@@ -322,6 +322,27 @@ class Pass2Filename:
                             self._add_to_author_cache(extracted_author, fb2_author)
                             return fb2_author
                         # Otherwise: different number of words OR reversed order → skip (don't match)
+                    
+                    # PARTICLE MATCHING: if extracted contains a name particle (де, ван, фон…),
+                    # check if the "particle tail" (from first particle onwards) appears verbatim in
+                    # any metadata author. This catches compound surnames like:
+                    #   "Жиро де л Эн" (filename) vs "Аликс де л'Эн" (metadata)
+                    # Both share the tail "делэн" after apostrophe+space normalization.
+                    if self.name_particles:
+                        _apo = str.maketrans({"'": "", "\u2019": "", "\u02bc": ""})
+                        for fb2_author in fb2_authors:
+                            fb2_norm = fb2_author.lower().translate(_apo).replace(' ', '')
+                            for i, w in enumerate(extracted_lower.split()):
+                                if w in self.name_particles:
+                                    tail = ' '.join(extracted_lower.split()[i:]).translate(_apo).replace(' ', '')
+                                    if tail and tail in fb2_norm:
+                                        self.logger.log(
+                                            f"[PASS 2] Particle-tail match: '{extracted_author}' → "
+                                            f"'{fb2_author}' (tail='{tail}')"
+                                        )
+                                        self._add_to_author_cache(extracted_author, fb2_author)
+                                        return fb2_author
+                                    break  # only check from the FIRST particle
             
             except Exception as e:
                 self.logger.log(f"[PASS 2] WARNING: Failed to validate author against FB2: {e}")

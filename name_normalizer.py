@@ -63,6 +63,7 @@ class AuthorName:
     _known_initials_and_suffixes = None
     _known_names_cache = None  # Cache for known male and female names
     _filename_blacklist_cache = None
+    _name_particles_cache = None  # Cache for name particles (де, ван, фон…)
     _config_path = None  # Allow custom config path
     
     def __init__(self, raw_name: str):
@@ -270,6 +271,23 @@ class AuthorName:
         
         return cls._known_names_cache
     
+    @classmethod
+    def _get_name_particles(cls) -> frozenset:
+        """Load name particles from config.json (де, ван, фон, ди…)."""
+        if cls._name_particles_cache is None:
+            try:
+                config_path = cls._get_config_path()
+                if config_path and config_path.exists():
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                        lst = config.get('name_particles', [])
+                        cls._name_particles_cache = frozenset(p.lower() for p in lst)
+                else:
+                    cls._name_particles_cache = frozenset()
+            except Exception:
+                cls._name_particles_cache = frozenset()
+        return cls._name_particles_cache
+
     def _extract_parts(self) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Extract lastname, firstname, patronymic from raw name.
         
@@ -344,7 +362,20 @@ class AuthorName:
             return (None, None, patronymic)
         elif len(remaining_words) == 1:
             return (remaining_words[0], None, patronymic)
-        elif len(remaining_words) == 2:
+
+        # PARTICLE CHECK: если в имени есть частица (де, ван, фон, ди…),
+        # всё начиная с первой частицы — составная фамилия («де л'Эн», «ван дер Берг»).
+        # Предшествующие слова — имя/имена.
+        # Пример: «Аликс де л'Эн» → lastname='де л\'Эн', firstname='Аликс'
+        _particles = self._get_name_particles()
+        if _particles:
+            for _pi, _pw in enumerate(remaining_words):
+                if _pw.lower() in _particles:
+                    compound_surname = ' '.join(remaining_words[_pi:])
+                    firstname_part = ' '.join(remaining_words[:_pi]) or None
+                    return (compound_surname, firstname_part, patronymic)
+
+        if len(remaining_words) == 2:
             known_names = self._get_known_names()
             word0_lower = remaining_words[0].lower()
             word1_lower = remaining_words[1].lower()
