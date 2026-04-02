@@ -449,6 +449,14 @@ class Pass2SeriesFilename:
                     series_candidate = None  # Список авторов
                 elif self._is_author_surname(series_candidate, record.proposed_author):
                     series_candidate = None  # Фамилия или полное имя автора
+                elif record.file_title:
+                    # TITLE-AS-SERIES GUARD: если кандидат совпадает с названием книги,
+                    # это ложный матч (например "Книга" в service_words увела нас не туда).
+                    # Очищаем file_title от мусора [litres] и сравниваем.
+                    import re as _re
+                    _title_clean = _re.sub(r'\s*\[.*?\]\s*$', '', record.file_title.strip())
+                    if _title_clean and _title_clean.lower() == series_candidate.lower():
+                        series_candidate = None  # Название книги ≠ серия
                 
                 # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)
                 if series_candidate:
