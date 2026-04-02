@@ -1872,8 +1872,18 @@ class Pass2SeriesFilename:
             # Ищем это слово как целое слово (не substring)
             # Паттерн: слово с границами (пробелы, скобки, пунктуация)
             import re
-            pattern = r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$|[,\.\-\!?])'
-            
+            pattern = r'(?:^|\s|\(|-)' + re.escape(bl_word_lower) + r'(?:\s|\)|$|[,.\-\!?])'
+
+            # Перед удалением: если blacklist-слово стоит перед именами собственными
+            # (все слова после него с заглавной буквы), это профессиональный префикс —
+            # не удаляем. Пример: «Детектив Джейкоб Лев» — не трогаем.
+            _m = re.search(pattern, original_text, flags=re.IGNORECASE)
+            if _m:
+                _after = original_text[_m.end():].strip()
+                _alpha_after = [w for w in _after.split() if w and w[0].isalpha()]
+                if _alpha_after and all(w[0].isupper() for w in _alpha_after):
+                    continue  # Не удаляем: профессиональный префикс перед именами
+
             # Заменяем найденные вхождения на пробел (или пусто)
             original_text = re.sub(
                 pattern,
@@ -1999,7 +2009,17 @@ class Pass2SeriesFilename:
                     # Пример: "СССР"
                     return False
                 else:
-                    # В других случаях (blacklist-word в середине или начале) отвергаем
+                    # В других случаях (blacklist-word в середине или начале):
+                    # Проверяем паттерн «Профессия/Звание + Имя собственное».
+                    # Если после blacklist-слова идут слова с заглавной буквы (имена),
+                    # это название серии с профессией персонажа, а не жанровый тег.
+                    # Пример: «Детектив Джейкоб Лев» → «Джейкоб», «Лев» — заглавные → допускаем.
+                    # Пример: «детективный роман» → следующее слово строчное → отвергаем.
+                    _bl_idx = bl_word_index if bl_word_index is not None else 0
+                    _orig_words = text.split()
+                    _words_after = [w for w in _orig_words[_bl_idx + 1:] if w and w[0].isalpha()]
+                    if _words_after and all(w[0].isupper() for w in _words_after):
+                        continue  # «Профессия + Имя» — допускаем как название серии
                     return False
         
         # ПРОВЕРКА 2: Исключить очевидные сборники/антологии
