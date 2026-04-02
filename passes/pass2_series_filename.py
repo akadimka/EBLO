@@ -644,6 +644,12 @@ class Pass2SeriesFilename:
         # то ВСЕ файлы в этой папке должны получить одинаковую серию из папки
         self._apply_folder_consensus(records)
         
+        # 🔑 УНИФИКАЦИЯ источника серии внутри папки
+        # Если хотя бы один файл в папке получил folder_hierarchy — значит папка
+        # является авторитетом для всей папки. Все metadata_folder_confirmed файлы
+        # в той же папке должны получить folder_hierarchy с той же серией.
+        self._unify_folder_series_source(records)
+        
         # ✅ ФИНАЛЬНОЕ: Восстановить парные кавычки во всех series
         # Если в series_кандидате есть открывающиеся кавычки без закрывающихся,
         # автоматически добавляем закрывающиеся
@@ -662,6 +668,40 @@ class Pass2SeriesFilename:
         # Commented out: consensus logic was overwriting properly extracted series
         # TODO: Review and fix consensus logic before re-enabling
         # self._apply_cross_file_consensus(records)
+
+    def _unify_folder_series_source(self, records: List[BookRecord]) -> None:
+        """
+        Унификация series_source внутри одной папки.
+
+        Правило: папка — единица доверия. Если хотя бы один файл в папке получил
+        series_source='folder_hierarchy', значит именно папка является источником
+        серии для ВСЕЙ папки. Все файлы с series_source='metadata_folder_confirmed'
+        в той же папке повышаются до 'folder_hierarchy', и их proposed_series
+        унифицируется до значения из folder_hierarchy-файла.
+        """
+        from collections import defaultdict
+
+        folder_groups = defaultdict(list)
+        for record in records:
+            folder_groups[str(Path(record.file_path).parent)].append(record)
+
+        for folder, group in folder_groups.items():
+            # Ищем файлы, у которых папка переопределила мету
+            folder_hierarchy_records = [
+                r for r in group
+                if r.series_source == "folder_hierarchy" and r.proposed_series
+            ]
+            if not folder_hierarchy_records:
+                continue
+
+            # Канонична серия — из folder_hierarchy файлов (они должны совпадать)
+            canonical_series = folder_hierarchy_records[0].proposed_series
+
+            # Обновляем metadata_folder_confirmed файлы в той же папке
+            for record in group:
+                if record.series_source == "metadata_folder_confirmed":
+                    record.proposed_series = canonical_series
+                    record.series_source = "folder_hierarchy"
 
     def _apply_folder_consensus(self, records: List[BookRecord]) -> None:
         """

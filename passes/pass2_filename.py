@@ -458,6 +458,59 @@ class Pass2Filename:
         # All words are full words → complete
         return False
     
+    def _expand_initial_surnames(self, author_str: str, metadata_authors: str) -> tuple:
+        """Expand 'Initial.Surname' tokens (like 'Г.Диксон') using metadata authors.
+
+        Handles multi-author strings like "Гаррисон Гарри, Г.Диксон" — expands any
+        token that matches the pattern Letter.Surname against the metadata author list.
+
+        Args:
+            author_str: Author string, possibly multi-author like "Гаррисон Гарри, Г.Диксон"
+            metadata_authors: Raw metadata authors string ("Гордон Диксон; Гарри Гаррисон")
+
+        Returns:
+            Tuple (expanded_str, was_expanded)
+        """
+        if not metadata_authors:
+            return author_str, False
+
+        # Parse metadata authors (separated by "; " or ";")
+        meta_list = [a.strip() for a in metadata_authors.replace('; ', ';').split(';') if a.strip()]
+
+        # Split input by ", " to handle each author token separately
+        parts = [p.strip() for p in author_str.split(',')]
+        expanded_parts = []
+        was_expanded = False
+
+        for part in parts:
+            if not part:
+                continue
+
+            # Detect "X.Surname" pattern (single uppercase letter + dot + surname)
+            # e.g., "Г.Диксон", "H.Harrison"
+            dot_idx = part.find('.')
+            if (dot_idx == 1 and part[0].isupper() and
+                    len(part) > 2 and part[2:3].isupper()):
+                initial = part[0].lower()
+                surname = part[dot_idx + 1:].lower()
+                # Find metadata author with this surname AND a name starting with initial
+                found = None
+                for meta_author in meta_list:
+                    meta_words = meta_author.lower().split()
+                    if (any(w == surname for w in meta_words) and
+                            any(w.startswith(initial) and w != surname for w in meta_words)):
+                        found = meta_author
+                        break
+                if found:
+                    expanded_parts.append(found)
+                    was_expanded = True
+                    continue
+
+            expanded_parts.append(part)
+
+        result = ', '.join(expanded_parts)
+        return result, was_expanded
+
     def _try_expand_from_metadata(self, incomplete_author: str, metadata_authors: str) -> str:
         """Try to expand incomplete author name from metadata.
         
@@ -610,18 +663,25 @@ class Pass2Filename:
                     expanded_author = author
                     use_hybrid_source = False
                     
-                    if self._is_incomplete_name(author):
-                        # Try to expand from metadata_authors
+                    # STEP 1: Expand "Initial.Surname" tokens (e.g., "Г.Диксон" → "Гордон Диксон")
+                    if record.metadata_authors:
+                        new_author, was_init_expanded = self._expand_initial_surnames(author, record.metadata_authors)
+                        if was_init_expanded:
+                            expanded_author = new_author
+                            use_hybrid_source = True
+
+                    # STEP 2: Traditional incomplete name expansion (single word, pure initial, etc.)
+                    if not use_hybrid_source and self._is_incomplete_name(expanded_author):
                         if record.metadata_authors:
-                            expanded = self._try_expand_from_metadata(author, record.metadata_authors)
-                            if expanded and expanded != author:
+                            expanded = self._try_expand_from_metadata(expanded_author, record.metadata_authors)
+                            if expanded and expanded != expanded_author:
                                 expanded_author = expanded
                                 use_hybrid_source = True  # Mark as hybrid source
-                    
+
                     # No folder_dataset - use filename extraction
                     # This OVERRIDES metadata (FILE -> METADATA priority)
                     record.proposed_author = expanded_author
-                    record.author_source = "filename+metadata" if use_hybrid_source else "filename"
+                    record.author_source = "filename_meta_confirmed" if use_hybrid_source else "filename"
                     record.needs_filename_fallback = False  # Clear the fallback flag since we found something
                     processed_count += 1
                     

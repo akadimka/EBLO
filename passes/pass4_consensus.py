@@ -249,7 +249,7 @@ class Pass4Consensus:
             # DETERMINED: files with ANY successful source (folder_dataset, metadata, consensus, filename)
             # UNDETERMINED: files with empty source only
             determined = [r for r in group_records 
-                         if r.author_source in ["folder_dataset", "metadata", "metadata_folder_confirmed", "consensus", "filename"]]
+                         if r.author_source in ["folder_dataset", "metadata", "metadata_folder_confirmed", "consensus", "filename", "filename_meta_confirmed"]]
             undetermined = [r for r in group_records 
                            if r.author_source == ""]
             
@@ -567,11 +567,11 @@ class Pass4Consensus:
                 is_subset = is_author_subset(record.proposed_author, consensus_author)
                 
                 # For filename source
-                if record.author_source == "filename":
+                if record.author_source in ("filename", "filename_meta_confirmed"):
                     if is_subset:
                         # Current author is incomplete version of consensus → DEFINITELY apply
                         record.proposed_author = consensus_author
-                        record.author_source = "filename+series-consensus"
+                        record.author_source = f"{record.author_source}+series-consensus"
                         series_author_consensus_count += 1
                     else:
                         # Current author is DIFFERENT, not subset → DON'T apply (might be co-author)
