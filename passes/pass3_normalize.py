@@ -180,5 +180,19 @@ class Pass3Normalize:
             if normalized and normalized != record.proposed_author:
                 record.proposed_author = normalized
                 normalized_count += 1
-        
+
+        # Капитализация: каждое слово в proposed_author начинается с заглавной буквы.
+        # Исключение: "Соавторство", "Сборник" — уже корректны.
+        for record in records:
+            if not record.proposed_author:
+                continue
+            if record.proposed_author in ("Сборник", "Соавторство", "[unknown]"):
+                continue
+            capitalized = ' '.join(
+                w[0].upper() + w[1:] if w else w
+                for w in record.proposed_author.split(' ')
+            )
+            if capitalized != record.proposed_author:
+                record.proposed_author = capitalized
+
         self.logger.log(f"[PASS 3] Normalized {normalized_count} author names")

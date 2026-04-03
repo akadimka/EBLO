@@ -655,10 +655,12 @@ class Pass2SeriesFilename:
         # в той же папке должны получить folder_hierarchy с той же серией.
         self._unify_folder_series_source(records)
 
-        # 🔑 УНИФИКАЦИЯ автора внутри папки
-        # Если хотя бы один файл в папке получил metadata_folder_confirmed для автора,
-        # все файлы с author_source='metadata' в той же папке получают того же автора.
-        self._unify_folder_author_source(records)
+        # 🔑 РАСПРОСТРАНЕНИЕ АВТОРА ИЗ ПАПКИ-ПРЕДКА
+        # Если имя любой папки-предка (от корня вглубь) может быть распознано
+        # как папка автора — все файлы под ней получают этого автора с
+        # источником 'folder_dataset'. Это "100% датасет": папка сама по себе
+        # является авторитетным источником, независимо от метаданных файлов.
+        self._propagate_ancestor_folder_authors(records)
         
         # ✅ ФИНАЛЬНОЕ: Восстановить парные кавычки во всех series
         # Если в series_кандидате есть открывающиеся кавычки без закрывающихся,
@@ -688,6 +690,68 @@ class Pass2SeriesFilename:
         """
         folder_lower = folder_name.lower().replace('ё', 'е')
         return any(kw in folder_lower for kw in self.variant_folder_keywords)
+
+    def _propagate_ancestor_folder_authors(self, records: List[BookRecord]) -> None:
+        """
+        Распространение автора из папки-предка на все файлы под ней.
+
+        Принцип: папка — самый надёжный источник автора (100% датасет).
+        Если имя любой папки-предка файла парсится как имя автора
+        (через folder_author_parser), то все файлы под этой папкой
+        получают этого автора с source='folder_dataset'.
+
+        Правила:
+        - Используем ВЫСШУЮ (ближе к корню) папку, которая парсится как автор.
+        - Файлы с уже установленным author_source='folder_dataset' НЕ трогаем
+          (они уже получили правильного автора из Pass 1 или более точного подпути).
+        - "и др", "et al." и подобные суффиксы из имени автора убираются.
+        - Работает для любых вложенных структур (Коллекция / СерияАвтор / Подсерия / Файл).
+        """
+        from passes.folder_author_parser import parse_author_from_folder_name
+
+        # Список суффиксов-заменителей соавторов, которые нужно убирать
+        _ET_AL_PATTERN = re.compile(
+            r'\s*(и\s+др\.?|и\s+другие|et\s+al\.?|and\s+others)\s*$',
+            re.IGNORECASE
+        )
+
+        def _parse_folder_author(folder_name: str) -> str:
+            """Попытаться распознать автора из имени папки, вернуть '' если не удалось."""
+            author = parse_author_from_folder_name(
+                folder_name,
+                male_names=self.male_names,
+                female_names=self.female_names,
+            )
+            if not author:
+                return ''
+            # Убираем "и др", "et al." в конце
+            author = _ET_AL_PATTERN.sub('', author).strip()
+            return author
+
+        propagated = 0
+        for record in records:
+            if record.author_source == "folder_dataset":
+                continue  # Уже точно определён — не трогаем
+
+            path_parts = Path(record.file_path).parts[:-1]  # все папки без самого файла
+            # Прозрачно исключаем технические папки (fb2, epub и т.п.)
+            path_parts = tuple(
+                p for p in path_parts
+                if p.lower() not in FILE_EXTENSION_FOLDER_NAMES
+            )
+
+            # Идём от корня (самая высокая папка) к файлу, останавливаемся на первом совпадении
+            for part in path_parts:
+                parsed_author = _parse_folder_author(part)
+                if parsed_author:
+                    if parsed_author != record.proposed_author or record.author_source != "folder_dataset":
+                        record.proposed_author = parsed_author
+                        record.author_source = "folder_dataset"
+                        propagated += 1
+                    break  # Высшая папка найдена — дальше не ищем
+
+        if propagated:
+            self.logger.log(f"[PASS 2 Series] Propagated ancestor folder author to {propagated} records")
 
     def _unify_folder_author_source(self, records: List[BookRecord]) -> None:
         """
