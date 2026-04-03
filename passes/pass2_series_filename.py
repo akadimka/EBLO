@@ -370,6 +370,11 @@ class Pass2SeriesFilename:
         3. ВСЕГДА пробовать паттерны (неважно file_depth!)
         4. Fallback на metadata только если паттерны не дали
         """
+        # 🔑 СНАЧАЛА: Распространяем автора из папки-предка ДО основного цикла серий.
+        # Это необходимо чтобы основной цикл мог корректно сопоставить папку автора
+        # даже для файлов у которых proposed_author был "Соавторство"/"Сборник".
+        self._propagate_ancestor_folder_authors(records)
+
         for record in records:
             # Приоритет из config.json: FOLDER_STRUCTURE=3 > FILENAME=2 > FB2_METADATA=1
             # Поиск по папкам применяется всегда, используя любой известный автор:
@@ -412,16 +417,27 @@ class Pass2SeriesFilename:
                                         record.series_source = "folder_hierarchy"
                                     break
 
-                                subseries_name = self._extract_series_from_folder_name(series_folder)
-                                
-                                if subseries_name:
-                                    record.proposed_series = subseries_name
+                                # Проверяем: папка-автор сама является циклом?
+                                # Признак: "Серия (Автор)" — _extract_series_from_folder_name вернёт
+                                # что-то отличное от исходного имени папки.
+                                author_folder_series = self._extract_series_from_folder_name(part)
+                                has_parent_series = (
+                                    bool(author_folder_series) and
+                                    author_folder_series.strip().lower() != part.strip().lower()
+                                )
+
+                                if has_parent_series:
+                                    # Б) Иерархия: {цикл}\{N. Подсерия} (без пробелов вокруг разделителя)
+                                    # Убираем только суффикс "(Автор)" из подпапки, но СОХРАНЯЕМ
+                                    # ведущий номер ("1. ", "2. " и т.д.) для очерёдности чтения.
+                                    subfolder_display = re.sub(r'\s*\([^)]*\)\s*$', '', series_folder).strip()
+                                    record.proposed_series = f"{author_folder_series}\\{subfolder_display}"
                                 else:
-                                    # Fallback на исходное поведение если extraction не сработал
-                                    record.proposed_series = series_folder
-                                
+                                    # Обычная папка автора → только подсерия (старое поведение)
+                                    subseries_name = self._extract_series_from_folder_name(series_folder)
+                                    record.proposed_series = subseries_name or series_folder
+
                                 record.series_source = "folder_hierarchy"
-                                
                                 break  # Нашли серию - выходим из поиска папки автора
                         else:
                             # Папка i содержит автора И является папкой серии одновременно
@@ -655,13 +671,8 @@ class Pass2SeriesFilename:
         # в той же папке должны получить folder_hierarchy с той же серией.
         self._unify_folder_series_source(records)
 
-        # 🔑 РАСПРОСТРАНЕНИЕ АВТОРА ИЗ ПАПКИ-ПРЕДКА
-        # Если имя любой папки-предка (от корня вглубь) может быть распознано
-        # как папка автора — все файлы под ней получают этого автора с
-        # источником 'folder_dataset'. Это "100% датасет": папка сама по себе
-        # является авторитетным источником, независимо от метаданных файлов.
-        self._propagate_ancestor_folder_authors(records)
-        
+        # (автор из папки уже распространён в начале execute(), до основного цикла)
+
         # ✅ ФИНАЛЬНОЕ: Восстановить парные кавычки во всех series
         # Если в series_кандидате есть открывающиеся кавычки без закрывающихся,
         # автоматически добавляем закрывающиеся
@@ -807,20 +818,24 @@ class Pass2SeriesFilename:
             folder_groups[str(Path(record.file_path).parent)].append(record)
 
         for folder, group in folder_groups.items():
-            # Ищем файлы, у которых папка переопределила мету
+            # Ищем файлы, у которых папка переопределила мету (авторитетные источники)
             folder_hierarchy_records = [
                 r for r in group
-                if r.series_source == "folder_hierarchy" and r.proposed_series
+                if r.series_source in ("folder_hierarchy", "folder_dataset") and r.proposed_series
             ]
             if not folder_hierarchy_records:
                 continue
 
-            # Канонична серия — из folder_hierarchy файлов (они должны совпадать)
-            canonical_series = folder_hierarchy_records[0].proposed_series
+            # Каноническая серия — из folder_hierarchy/folder_dataset файлов (мажоритарное голосование)
+            series_counts: dict = {}
+            for r in folder_hierarchy_records:
+                series_counts[r.proposed_series] = series_counts.get(r.proposed_series, 0) + 1
+            canonical_series = max(series_counts, key=series_counts.get)
 
-            # Обновляем metadata_folder_confirmed файлы в той же папке
+            # Применяем ко ВСЕМ файлам в папке с более слабым источником серии
+            WEAK_SOURCES = {"metadata_folder_confirmed", "metadata", "consensus", "", "filename"}
             for record in group:
-                if record.series_source == "metadata_folder_confirmed":
+                if record.series_source in WEAK_SOURCES:
                     record.proposed_series = canonical_series
                     record.series_source = "folder_hierarchy"
 
