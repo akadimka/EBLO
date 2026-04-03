@@ -552,6 +552,36 @@ class Pass2Filename:
         # No clear match found - return original
         return incomplete_author
     
+    def _is_collection(self, file_path: str, file_title: str) -> bool:
+        """Return True when the file is a true anthology/collection.
+
+        Criterion: the filename (without extension) OR the book title contains
+        at least one of the collection_keywords from config.json.
+        Co-authored books with 3+ authors but without those keywords are NOT
+        considered collections — they are 'Соавторство'.
+
+        Args:
+            file_path: Relative file path (may contain directory separators)
+            file_title: Book title extracted from FB2 metadata (may be empty)
+
+        Returns:
+            True  → assign "Сборник"
+            False → assign "Соавторство"
+        """
+        if not self.collection_keywords:
+            return False
+
+        # Check in filename (basename, no extension) and in book title
+        filename_noext = file_path.replace('\\', '/').split('/')[-1].rsplit('.', 1)[0].lower()
+        title_lower = (file_title or '').lower()
+
+        for kw in self.collection_keywords:
+            kw_l = kw.lower()
+            if kw_l in filename_noext or kw_l in title_lower:
+                return True
+
+        return False
+
     def _count_authors(self, authors_str: str) -> int:
         """Count number of authors in metadata authors string.
         
@@ -631,16 +661,19 @@ class Pass2Filename:
                 skipped_count += 1
                 continue
             
-            # CHECK: Is this file a collection/anthology?
-            # Rule: if metadata contains 3+ authors → always "Сборник"
-            # (keyword check is secondary, count alone is sufficient)
+            # CHECK: Is this file a collection/anthology or co-authored book?
+            # Rule: 3+ authors in metadata → either "Сборник" (if keywords in filename/title)
+            #                               or "Соавторство" (regular multi-author book)
             author_count = self._count_authors(record.metadata_authors)
             if author_count >= 3:
-                record.proposed_author = "Сборник"
+                if self._is_collection(record.file_path, getattr(record, 'file_title', '')):
+                    record.proposed_author = "Сборник"
+                else:
+                    record.proposed_author = "Соавторство"
                 record.author_source = "collection"
                 record.needs_filename_fallback = False
                 processed_count += 1
-                continue  # Skip regular filename parsing for collections
+                continue  # Skip regular filename parsing for collections/co-authored
             
             # Try to extract from filename (NOT full path!)
             # Handle both Windows (\) and Unix (/) path separators
@@ -698,7 +731,10 @@ class Pass2Filename:
                     not record.proposed_author):  # Only if not already set
                     # Use metadata as fallback, mark as hybrid (filename attempt + metadata fallback)
                     if self._count_authors(record.metadata_authors) >= 3:
-                        record.proposed_author = "Сборник"
+                        if self._is_collection(record.file_path, getattr(record, 'file_title', '')):
+                            record.proposed_author = "Сборник"
+                        else:
+                            record.proposed_author = "Соавторство"
                         record.author_source = "collection"
                     else:
                         record.proposed_author = record.metadata_authors
