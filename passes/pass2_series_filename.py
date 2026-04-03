@@ -649,6 +649,11 @@ class Pass2SeriesFilename:
         # является авторитетом для всей папки. Все metadata_folder_confirmed файлы
         # в той же папке должны получить folder_hierarchy с той же серией.
         self._unify_folder_series_source(records)
+
+        # 🔑 УНИФИКАЦИЯ автора внутри папки
+        # Если хотя бы один файл в папке получил metadata_folder_confirmed для автора,
+        # все файлы с author_source='metadata' в той же папке получают того же автора.
+        self._unify_folder_author_source(records)
         
         # ✅ ФИНАЛЬНОЕ: Восстановить парные кавычки во всех series
         # Если в series_кандидате есть открывающиеся кавычки без закрывающихся,
@@ -668,6 +673,43 @@ class Pass2SeriesFilename:
         # Commented out: consensus logic was overwriting properly extracted series
         # TODO: Review and fix consensus logic before re-enabling
         # self._apply_cross_file_consensus(records)
+
+    def _unify_folder_author_source(self, records: List[BookRecord]) -> None:
+        """
+        Унификация автора внутри одной папки по аналогии с _unify_folder_series_source.
+
+        Правило: если хотя бы один файл в папке получил author_source='metadata_folder_confirmed',
+        значит папка подтвердила автора. Все остальные файлы в той же папке, у которых
+        author_source='metadata' (но ещё не подтверждён папкой), получают того же автора
+        с source='metadata_folder_confirmed'.
+        """
+        from collections import defaultdict
+
+        folder_groups = defaultdict(list)
+        for record in records:
+            folder_groups[str(Path(record.file_path).parent)].append(record)
+
+        for folder, group in folder_groups.items():
+            # Ищем файлы, подтверждённые папкой
+            confirmed_records = [
+                r for r in group
+                if r.author_source == "metadata_folder_confirmed" and r.proposed_author
+            ]
+            if not confirmed_records:
+                continue
+
+            # Берём канонического автора из подтверждённых записей (режим большинства)
+            author_counts: dict = {}
+            for r in confirmed_records:
+                author_counts[r.proposed_author] = author_counts.get(r.proposed_author, 0) + 1
+            canonical_author = max(author_counts, key=author_counts.get)
+
+            # Применяем ко всем файлам в папке с source='metadata' или 'metadata_folder_confirmed'
+            # (чтобы выровнять и уже подтверждённые папкой, но с разными формами имени)
+            for record in group:
+                if record.author_source in ("metadata", "metadata_folder_confirmed") and record.proposed_author:
+                    record.proposed_author = canonical_author
+                    record.author_source = "metadata_folder_confirmed"
 
     def _unify_folder_series_source(self, records: List[BookRecord]) -> None:
         """

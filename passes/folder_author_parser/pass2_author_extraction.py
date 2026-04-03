@@ -58,7 +58,13 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
     text_before_first = struct_info['text_before_first']
     
     author = ""
-    
+
+    # Strip square-bracket aliases/pseudonyms from paren content before any processing.
+    # Example: "Высоченко [Иринин, Ватный] Александр" → "Высоченко  Александр" → "Высоченко Александр"
+    paren_contents = [re.sub(r'\s*\[[^\]]*\]\s*', ' ', c).strip() for c in paren_contents]
+    # Also strip from name itself (handles "Author, Author" patterns with brackets in name)
+    name = re.sub(r'\s*\[[^\]]*\]\s*', ' ', name).strip()
+
     if pattern == "SurnamePlural FirstName и SecondName":
         # Format: "Живовы Георгий и Геннадий"
         # Extract and construct: "Живов Георгий; Живов Геннадий"
