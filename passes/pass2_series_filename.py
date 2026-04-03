@@ -314,6 +314,7 @@ class Pass2SeriesFilename:
         )  # NEW: для точного извлечения серий
         # Получить списки из config.json
         self.collection_keywords = self.settings.get_list('collection_keywords')
+        self.variant_folder_keywords = [kw.lower() for kw in (self.settings.get_list('variant_folder_keywords') or [])]
         self.service_words = self.settings.get_list('service_words')
         self.filename_blacklist = self.settings.get_list('filename_blacklist')
         # Пользовательский список папок «без серии» (дополняет встроенный NO_SERIES_FOLDER_NAMES)
@@ -402,11 +403,15 @@ class Pass2SeriesFilename:
                                     record.series_source = "no_series_folder"
                                     break
 
-                                # Это серия - ВКЛЮЧАЕМ И ПАПКУ АВТОРА И ПАПКУ СЕРИИ в иерархию
-                                # "Суворовы (...)" + "1. Истребители" → "Суворовы\Истребители"
-                                author_folder = path_parts[i]
-                                
-                                # Очищаем названия серии только (папка автора НЕ включается)
+                                # Если подпапка — это "вариант" / "альт. перевод" / "СИ" и т.п.,
+                                # она НЕ является названием серии — серия берётся из папки автора.
+                                if self._is_variant_folder(series_folder):
+                                    series_name = self._extract_series_from_folder_name(part)
+                                    if series_name:
+                                        record.proposed_series = series_name
+                                        record.series_source = "folder_hierarchy"
+                                    break
+
                                 subseries_name = self._extract_series_from_folder_name(series_folder)
                                 
                                 if subseries_name:
@@ -673,6 +678,16 @@ class Pass2SeriesFilename:
         # Commented out: consensus logic was overwriting properly extracted series
         # TODO: Review and fix consensus logic before re-enabling
         # self._apply_cross_file_consensus(records)
+
+    def _is_variant_folder(self, folder_name: str) -> bool:
+        """Вернуть True если имя подпапки указывает на альтернативную версию текста.
+
+        Примеры: "Вариант с СИ (Ватный Василий)", "Альтернативный перевод",
+                 "Черновик (автор)", "ЛП", "СИ" и т.п.
+        В таких случаях серия наследуется от родительской папки.
+        """
+        folder_lower = folder_name.lower().replace('ё', 'е')
+        return any(kw in folder_lower for kw in self.variant_folder_keywords)
 
     def _unify_folder_author_source(self, records: List[BookRecord]) -> None:
         """
