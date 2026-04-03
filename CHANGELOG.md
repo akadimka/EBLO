@@ -6,6 +6,21 @@
 
 ## История версий
 
+### v4.1 - Апрель 2–3, 2026
+- 🆕 Новые источники `author_source` / `series_source`:
+  - `metadata_folder_confirmed` — метаданные подтверждены совпадением папки
+  - `filename_meta_confirmed` — инициалы из имени файла раскрыты через метаданные
+- 🐛 Исправление: расширение инициалов «Г.Диксон» → «Гордон Диксон» при совпадении с метаданными (`passes/pass2_filename.py`, метод `_expand_initial_surnames`)
+- 🐛 Исправление: суффикс «(...)» в названии книги больше не мешает защите TITLE-AS-AUTHOR (`passes/pass2_filename.py`)
+- 🆕 Различение `Сборник` (ключевые слова в имени файла или заголовке) и `Соавторство` (просто 3+ авторов) (`passes/pass2_filename.py`, метод `_is_collection`; `config.json`, ключ `collection_keywords`)
+- 🆕 Папочное единство автора: все файлы папки с хотя бы одним `metadata_folder_confirmed` получают того же автора (`passes/pass2_series_filename.py`, метод `_unify_folder_author_source`)
+- 🆕 Папочное единство серии расширено: `folder_dataset` и `folder_hierarchy` перекрывают все слабые источники (`metadata`, `filename`, `consensus`, `""`) для всех файлов той же папки (`passes/pass2_series_filename.py`, метод `_unify_folder_series_source`)
+- 🆕 Распространение автора из папки-предка: первая папка-предок, распознанная как имя автора, становится `proposed_author` со статусом `folder_dataset` для всех файлов под ней (`passes/pass2_series_filename.py`, метод `_propagate_ancestor_folder_authors`); запускается ДО основного цикла серий
+- 🆕 Иерархическая серия с разделителем `\`: если папка автора имеет вид «Цикл (Автор)», подпапки образуют `Цикл\N. Подсерия` (`passes/pass2_series_filename.py`)
+- 🐛 Исправление: квадратные скобки с псевдонимами «Высоченко [Иринин, Ватный] Александр» больше не ломают парсинг автора из папки (`passes/folder_author_parser/pass2_author_extraction.py`)
+- 🆕 Вариантные подпапки («Вариант с СИ», «Альт. перевод», «ЛП» и др.) наследуют серию родительской папки вместо использования своего имени как серии (`passes/pass2_series_filename.py`, метод `_is_variant_folder`; `config.json`, ключ `variant_folder_keywords`)
+- 🆕 Капитализация: в Pass 3 каждое слово `proposed_author` принудительно начинается с заглавной буквы (`passes/pass3_normalize.py`)
+
 ### v4.0 - Апрель 1, 2026
 - 🐛 Исправление: `<book-title>` из FB2-метаданных больше никогда не может стать значением автора (`passes/pass2_filename.py`):
   - При ничье паттернов «Title - Author» и «Author - Title» (одинаковый score) из имени файла извлекалось название книги вместо автора
