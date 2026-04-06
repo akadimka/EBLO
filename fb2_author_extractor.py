@@ -1228,6 +1228,12 @@ class FB2AuthorExtractor:
             if genres:
                 result['genre'] = ', '.join(g.strip() for g in genres if g.strip())
 
+            # Раскрываем HTML-сущности во всех строковых полях
+            import html as _html
+            for key in ('title', 'authors', 'series', 'genre'):
+                if result[key]:
+                    result[key] = _html.unescape(result[key])
+
         except Exception:
             pass
         return result
