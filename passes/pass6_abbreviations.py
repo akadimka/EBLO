@@ -81,7 +81,20 @@ class Pass6Abbreviations:
                 expanded_count += 1
         
         self.logger.log(f"[PASS 6] Expanded {expanded_count} author names")
-    
+
+        # Финальная проверка: серия не может совпадать с автором
+        cleared_count = 0
+        for record in records:
+            if record.proposed_series and record.proposed_author:
+                series_norm = record.proposed_series.strip().lower().replace('ё', 'е')
+                author_norm = record.proposed_author.strip().lower().replace('ё', 'е')
+                if series_norm == author_norm:
+                    record.proposed_series = ""
+                    record.series_source = ""
+                    cleared_count += 1
+        if cleared_count:
+            self.logger.log(f"[PASS 6] Cleared {cleared_count} series values that matched author name")
+
     def _expand_author(self, author: str, authors_map: Dict[str, List[str]]) -> str:
         """Expand a single author name using authors_map.
         
