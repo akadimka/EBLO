@@ -195,9 +195,15 @@ class Pass3Normalize:
             if capitalized != record.proposed_author:
                 record.proposed_author = capitalized
 
-        # Удалить двоеточия из имён авторов
+        # Удалить двоеточия из имён авторов (в т.ч. китайское «：» U+FF1A).
+        # Формат «作者：牛顿不秃顶» содержит метку «Автор:»; берём часть ПОСЛЕ двоеточия.
+        import re as _re_colon
         for record in records:
-            if record.proposed_author and ':' in record.proposed_author:
-                record.proposed_author = record.proposed_author.replace(':', '')
+            if not record.proposed_author:
+                continue
+            for colon_char in ('：', ':'):
+                if colon_char in record.proposed_author:
+                    record.proposed_author = record.proposed_author.split(colon_char, 1)[1].strip()
+                    break
 
         self.logger.log(f"[PASS 3] Normalized {normalized_count} author names")

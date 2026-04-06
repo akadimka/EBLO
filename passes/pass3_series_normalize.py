@@ -75,8 +75,26 @@ class Pass3SeriesNormalize:
         # Шаг 1: Убрать лишние пробелы
         series = ' '.join(series.split())
         
-        # Шаг 1.1: Убрать двоеточия
-        series = series.replace(':', '')
+        # Шаг 1.1: Обработать двоеточия (в т.ч. китайское «：» U+FF1A).
+        # Если перед двоеточием стоит имя из 1–2 слов (напр. «Байши Сюсянь: Название»),
+        # берём часть ПОСЛЕ двоеточия — это и есть реальное название серии.
+        # Иначе просто убираем двоеточие (чтобы не ломать «Война: год первый»).
+        for colon_char in ('：', ':'):
+            if colon_char in series:
+                before, after = series.split(colon_char, 1)
+                before = before.strip()
+                after = after.strip()
+                # Считаем «before» именем-префиксом если это 1–2 слова с заглавной буквы
+                _words = before.split()
+                _is_name_prefix = (
+                    len(_words) in (1, 2) and
+                    all(w and w[0].isupper() for w in _words)
+                )
+                if _is_name_prefix and after:
+                    series = after
+                else:
+                    series = series.replace(colon_char, '')
+                break
         
         # Шаг 1.5: Заменить ё на е для унификации
         # "Тёмный век" → "Темный век"
