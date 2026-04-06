@@ -842,6 +842,9 @@ class Pass2SeriesFilename:
         серии для ВСЕЙ папки. Все файлы с series_source='metadata_folder_confirmed'
         в той же папке повышаются до 'folder_hierarchy', и их proposed_series
         унифицируется до значения из folder_hierarchy-файла.
+
+        ИСКЛЮЧЕНИЕ: если в папке файлы от НЕСКОЛЬКИХ авторов — это коллекция,
+        унификация не применяется (иначе имя коллекции становится «серией»).
         """
         from collections import defaultdict
 
@@ -850,6 +853,11 @@ class Pass2SeriesFilename:
             folder_groups[str(Path(record.file_path).parent)].append(record)
 
         for folder, group in folder_groups.items():
+            # Если в папке файлы от нескольких авторов → коллекция, пропускаем
+            authors_in_folder = {r.proposed_author.strip() for r in group if r.proposed_author}
+            if len(authors_in_folder) > 1:
+                continue
+
             # Ищем файлы, у которых папка переопределила мету (авторитетные источники)
             folder_hierarchy_records = [
                 r for r in group
