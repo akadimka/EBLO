@@ -389,34 +389,55 @@ class Pass2SeriesFilename:
                     if i == len(path_parts) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
                 )
 
-                for i, part in enumerate(path_parts[:-1]):  # ← исключаем сам файл из поиска
+                # Двухпроходный поиск папки автора:
+                # Проход 1: точное/строгое совпадение (proposed_author содержится в папке
+                #            или папка содержится в proposed_author).
+                # Проход 2: слабое совпадение по отдельному слову (_author_matches_folder).
+                # Это предотвращает ложные срабатывания на коллекционные папки вида
+                # «Сборник Дамиров и компания», которые содержат фамилию автора,
+                # но не являются его персональной папкой.
+                def _is_strong_match(author: str, folder: str) -> bool:
+                    a = author.lower().replace('ё', 'е')
+                    f = folder.lower().replace('ё', 'е')
+                    return a in f or f in a
 
-                    # Ищем папку автора с учётом формы мн. числа и нескольких авторов
-                    if _author_matches_folder(author_name, part):
-                        # Папка подтвердила автора — если источник был только мета, обновляем
-                        if record.author_source == "metadata":
-                            record.author_source = "metadata_folder_confirmed"
+                author_folder_idx = None
+                for i, part in enumerate(path_parts[:-1]):
+                    if _is_strong_match(author_name, part):
+                        author_folder_idx = i
+                        break
+                if author_folder_idx is None:
+                    for i, part in enumerate(path_parts[:-1]):
+                        if _author_matches_folder(author_name, part):
+                            author_folder_idx = i
+                            break
 
-                        # Найдена папка автора на позиции i
-                        # Следующая папка (i+1) это серия (если это не файл)
-                        if i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
-                            series_folder = path_parts[i + 1]
-                            if not series_folder.endswith('.fb2'):
-                                # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии
-                                if is_no_series_folder(series_folder, self.no_series_names):
-                                    record.proposed_series = ""
-                                    record.series_source = "no_series_folder"
-                                    break
+                if author_folder_idx is not None:
+                    i = author_folder_idx
+                    part = path_parts[i]
+                    # Папка подтвердила автора — если источник был только мета, обновляем
+                    if record.author_source == "metadata":
+                        record.author_source = "metadata_folder_confirmed"
 
-                                # Если подпапка — это "вариант" / "альт. перевод" / "СИ" и т.п.,
-                                # она НЕ является названием серии — серия берётся из папки автора.
-                                if self._is_variant_folder(series_folder):
-                                    series_name = self._extract_series_from_folder_name(part)
-                                    if series_name:
-                                        record.proposed_series = series_name
-                                        record.series_source = "folder_hierarchy"
-                                    break
+                    # Найдена папка автора на позиции i
+                    # Следующая папка (i+1) это серия (если это не файл)
+                    if i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
+                        series_folder = path_parts[i + 1]
+                        if not series_folder.endswith('.fb2'):
+                            # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии
+                            if is_no_series_folder(series_folder, self.no_series_names):
+                                record.proposed_series = ""
+                                record.series_source = "no_series_folder"
 
+                            # Если подпапка — это "вариант" / "альт. перевод" / "СИ" и т.п.,
+                            # она НЕ является названием серии — серия берётся из папки автора.
+                            elif self._is_variant_folder(series_folder):
+                                series_name = self._extract_series_from_folder_name(part)
+                                if series_name:
+                                    record.proposed_series = series_name
+                                    record.series_source = "folder_hierarchy"
+
+                            else:
                                 # Проверяем: папка-автор сама является циклом?
                                 # Признак: "Серия (Автор)" — _extract_series_from_folder_name вернёт
                                 # что-то отличное от исходного имени папки.
@@ -438,33 +459,31 @@ class Pass2SeriesFilename:
                                     record.proposed_series = subseries_name or series_folder
 
                                 record.series_source = "folder_hierarchy"
-                                break  # Нашли серию - выходим из поиска папки автора
-                        else:
-                            # Папка i содержит автора И является папкой серии одновременно
-                            # (формат: "Сборник\Серия (Автор)\Файл.fb2" — нет подпапки серии)
-                            # Папка имеет ВЫСШИЙ приоритет. Но если metadata_series — вариация
-                            # того же названия (напр. "Барраярский цикл" и "Барраяр"), то
-                            # сохраняем более точное название из FB2 тегов.
-                            series_name = self._extract_series_from_folder_name(part)
-                            if series_name:
-                                if record.metadata_series:
-                                    meta_l = record.metadata_series.lower().replace('ё', 'е')
-                                    folder_l = series_name.lower().replace('ё', 'е')
-                                    # Если одно является префиксом другого — это одна серия,
-                                    # просто разные формы названия → оставляем более точную мету.
-                                    if not (folder_l.startswith(meta_l) or meta_l.startswith(folder_l)):
-                                        # Разные названия → папка имеет высший приоритет
-                                        record.proposed_series = series_name
-                                        record.series_source = "folder_hierarchy"
-                                    else:
-                                        # Та же серия, разная форма ("Барраярский цикл" / "Барраяр")
-                                        # → оставляем точное название из меты, но фиксируем подтверждение папкой
-                                        record.proposed_series = record.metadata_series
-                                        record.series_source = "metadata_folder_confirmed"
-                                else:
+                    else:
+                        # Папка i содержит автора И является папкой серии одновременно
+                        # (формат: "Сборник\Серия (Автор)\Файл.fb2" — нет подпапки серии)
+                        # Папка имеет ВЫСШИЙ приоритет. Но если metadata_series — вариация
+                        # того же названия (напр. "Барраярский цикл" и "Барраяр"), то
+                        # сохраняем более точное название из FB2 тегов.
+                        series_name = self._extract_series_from_folder_name(part)
+                        if series_name:
+                            if record.metadata_series:
+                                meta_l = record.metadata_series.lower().replace('ё', 'е')
+                                folder_l = series_name.lower().replace('ё', 'е')
+                                # Если одно является префиксом другого — это одна серия,
+                                # просто разные формы названия → оставляем более точную мету.
+                                if not (folder_l.startswith(meta_l) or meta_l.startswith(folder_l)):
+                                    # Разные названия → папка имеет высший приоритет
                                     record.proposed_series = series_name
                                     record.series_source = "folder_hierarchy"
-                            break
+                                else:
+                                    # Та же серия, разная форма ("Барраярский цикл" / "Барраяр")
+                                    # → оставляем точное название из меты, но фиксируем подтверждение папкой
+                                    record.proposed_series = record.metadata_series
+                                    record.series_source = "metadata_folder_confirmed"
+                            else:
+                                record.proposed_series = series_name
+                                record.series_source = "folder_hierarchy"
             
             # Special case: depth==4 without series subfolder
             # Pass 1 wrongly sets folder_dataset for depth==4, allowing Pass 2 to override it
