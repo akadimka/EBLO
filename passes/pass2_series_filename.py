@@ -2125,10 +2125,14 @@ class Pass2SeriesFilename:
                 flags=re.IGNORECASE
             )
         
-        # Очищаем множественные пробелы и скобки
+        # Очищаем множественные пробелы и пустые скобки
         cleaned = re.sub(r'\s+', ' ', original_text).strip()
         cleaned = re.sub(r'\(\s*\)', '', cleaned).strip()
-        cleaned = re.sub(r'\s*[\(\)]\s*$', '', cleaned).strip()
+        # Убираем висячие (несбалансированные) скобки в конце строки.
+        # Пример: "Серия (СИ" → "Серия" (открытая скобка без закрытой)
+        # НЕ трогаем: "Серия (Крылов)" — скобки сбалансированы
+        if cleaned.count('(') != cleaned.count(')'):
+            cleaned = re.sub(r'\s*[\(\)]\s*$', '', cleaned).strip()
         
         return cleaned if cleaned else ""
 
