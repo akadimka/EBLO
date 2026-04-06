@@ -142,7 +142,7 @@ class Pass4Consensus:
                 # Also recognizes "(Novels/Romany из цикла «Series»)" patterns like "(Романы из цикла «Артуа»)"
                 # This indicates the original filename HAD a service word or multi-file pattern before extraction
                 has_pattern_evidence = False
-                if record.file_path and record.series_source == "filename":
+                if record.file_path and record.series_source in ("filename", "filename+meta_confirmed"):
                     filename = Path(record.file_path).name
                     filename_no_ext = filename.rsplit('.', 1)[0]
 

@@ -195,4 +195,9 @@ class Pass3Normalize:
             if capitalized != record.proposed_author:
                 record.proposed_author = capitalized
 
+        # Удалить двоеточия из имён авторов
+        for record in records:
+            if record.proposed_author and ':' in record.proposed_author:
+                record.proposed_author = record.proposed_author.replace(':', '')
+
         self.logger.log(f"[PASS 3] Normalized {normalized_count} author names")

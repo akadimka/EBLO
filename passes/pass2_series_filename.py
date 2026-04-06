@@ -580,6 +580,9 @@ class Pass2SeriesFilename:
                         clean = self._fix_russian_grammar(clean)
                         record.proposed_series = clean
                         record.series_source = "filename"
+                        if (record.metadata_series and
+                                record.metadata_series.strip().lower() == clean.lower()):
+                            record.series_source = "filename+meta_confirmed"
                         continue
             
             # Fallback: metadata ТОЛЬКО если паттерны не дали
@@ -655,6 +658,9 @@ class Pass2SeriesFilename:
                         clean = self._fix_russian_grammar(clean)
                         record.proposed_series = clean
                         record.series_source = "filename"
+                        if (record.metadata_series and
+                                record.metadata_series.strip().lower() == clean.lower()):
+                            record.series_source = "filename+meta_confirmed"
             elif record.metadata_series:
                 # ✅ ЗАЩИТА: Перед использованием metadata - проверяем наличие слов из blacklist
                 # ТРЕБОВАНИЕ: "если мета содержит слово или слова из BL, полностью ее игнорируем в качестве значения"
