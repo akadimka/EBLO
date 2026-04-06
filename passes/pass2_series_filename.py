@@ -700,7 +700,20 @@ class Pass2SeriesFilename:
         В таких случаях серия наследуется от родительской папки.
         """
         folder_lower = folder_name.lower().replace('ё', 'е')
-        return any(kw in folder_lower for kw in self.variant_folder_keywords)
+        for kw in self.variant_folder_keywords:
+            kw_lower = kw.lower()
+            # Для коротких ключевых слов (≤3 символа, напр. "ЛП", "СИ", "alt")
+            # используем word-boundary, чтобы не срабатывать на подстроки
+            # ("си" в "псионик" не должно давать True).
+            # Для длинных — простое вхождение достаточно.
+            if len(kw_lower) <= 3:
+                if re.search(r'(?<![а-яёa-z])' + re.escape(kw_lower) + r'(?![а-яёa-z])',
+                             folder_lower):
+                    return True
+            else:
+                if kw_lower in folder_lower:
+                    return True
+        return False
 
     def _propagate_ancestor_folder_authors(self, records: List[BookRecord]) -> None:
         """
