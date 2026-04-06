@@ -471,15 +471,21 @@ class Pass2SeriesFilename:
                                 meta_l = record.metadata_series.lower().replace('ё', 'е')
                                 folder_l = series_name.lower().replace('ё', 'е')
                                 # Если одно является префиксом другого — это одна серия,
-                                # просто разные формы названия → оставляем более точную мету.
+                                # просто разные формы названия → оставляем более точную.
                                 if not (folder_l.startswith(meta_l) or meta_l.startswith(folder_l)):
                                     # Разные названия → папка имеет высший приоритет
                                     record.proposed_series = series_name
                                     record.series_source = "folder_hierarchy"
                                 else:
-                                    # Та же серия, разная форма ("Барраярский цикл" / "Барраяр")
-                                    # → оставляем точное название из меты, но фиксируем подтверждение папкой
-                                    record.proposed_series = record.metadata_series
+                                    # Та же серия, разная форма.
+                                    # Если meta_l начинается с folder_l → мета добавляет лишнее
+                                    # (напр. "Ацтек (RedDetonator)" vs "Ацтек") → берём folder_name.
+                                    # Если folder_l начинается с meta_l → папка добавляет описание
+                                    # (напр. "Барраярский цикл" vs "Барраяр") → берём мету.
+                                    if meta_l.startswith(folder_l) and len(meta_l) > len(folder_l):
+                                        record.proposed_series = series_name
+                                    else:
+                                        record.proposed_series = record.metadata_series
                                     record.series_source = "folder_metadata_confirmed"
                             else:
                                 record.proposed_series = series_name
@@ -734,12 +740,30 @@ class Pass2SeriesFilename:
             # Пропускаем если значение совпадает с именем автора
             if record.proposed_author and meta.lower() == record.proposed_author.lower():
                 continue
-            # Пропускаем если вся строка целиком есть в blacklist (точное совпадение)
+            # Word-boundary blacklist check (как в основном блоке)
             meta_lower = meta.lower()
-            if any(meta_lower == bl.lower() for bl in self.filename_blacklist):
+            _has_bl = False
+            for bl in self.filename_blacklist:
+                bl_lower = bl.lower().strip()
+                if not bl_lower:
+                    continue
+                pat = r'(?<![а-яёa-z])' + re.escape(bl_lower) + r'(?![а-яёa-z])'
+                if re.search(pat, meta_lower):
+                    _has_bl = True
+                    break
+            if _has_bl:
                 continue
+            # Применяем те же серийные паттерны и валидацию что и в основном блоке
+            series = self._extract_series_from_metadata(meta)
+            series = self._remove_blacklist_words(series)
+            if not series:
+                continue
+            author_for_validation = record.proposed_author or None
+            if not self._is_valid_series(series, extracted_author=author_for_validation):
+                continue
+            series = self._fix_russian_grammar(series)
             # Используем как серию с источником "metadata"
-            record.proposed_series = meta
+            record.proposed_series = series
             record.series_source = "metadata"
 
         # ✅ ФИНАЛЬНОЕ: Восстановить парные кавычки во всех series
@@ -2061,6 +2085,11 @@ class Pass2SeriesFilename:
             # Дополнительно удаляем "№ N" или одиночный "№" в конце
             series_name = re.sub(r'\s*№\s*\d*\s*$', '', series_name).strip()
             
+            # Однобуквенные компоненты — это части аббревиатуры (напр. «О. Р. З.»), а не уровни серии.
+            # Сбрасываем всю иерархию, чтобы не собирать мусор вида «Р\или Сказ...»
+            if len(series_name) <= 1:
+                return ""  # Аббревиатура обнаружена, серия не выделена
+
             if series_name:  # Добавляем только непустые части
                 hierarchy.append(series_name)
         
@@ -2295,11 +2324,27 @@ class Pass2SeriesFilename:
         
         text_lower = text.lower()
         
+        # ПРОВЕРКА -1: Исключить названия литературных премий
+        # Признаки: содержит слово "премия"/"award"/"prize" ИЛИ заканчивается на "– YYYY" / "- YYYY"
+        # Пример: "Литературная премия «Электронная буква – 2019»"
+        _award_keywords = ('премия', 'award', 'prize', 'лауреат', 'номинант')
+        if any(kw in text_lower for kw in _award_keywords):
+            return False
+        # Год со знаком тире в конце (после снятия кавычек) — тоже признак номинации/премии
+        if re.search(r'[–—\-]\s*\d{4}\s*[»"\']*\s*$', text):
+            return False
+
+        # ПРОВЕРКА -0.5: Исключить иерархические серии где любой сегмент — одна буква.
+        # Пример: "Р\или Сказ о том..." — это аббревиатура О. Р. З., а не иерархия серий.
+        if '\\' in text:
+            _segments = [s.strip() for s in text.split('\\')]
+            if any(len(s) <= 1 for s in _segments):
+                return False
+
         # ПРОВЕРКА 0: Исключить технические фрагменты (калибры, характеристики)
         # Примеры: ".45", ".357", ",45caliber", "9mm" - это не названия серий
         # Паттерн: начинается с точки/запятой И это только цифры + буквы для единиц
         # Или: это только цифры + буквы без полноценного названия (< 3 букв)
-        import re
         
         # Случай 1: ".NN" или ",NN" (калибр оружия)
         if re.match(r'^[.,]\d+$', text_lower):
@@ -2323,6 +2368,18 @@ class Pass2SeriesFilename:
         # ЭКСПЦИЯ: если blacklist-word это последнее слово И перед ним есть другие слова,
         # это вероятно часть series name, а не сама папка. Пример: "Последний солдат СССР"
         # где "СССР" в blacklist, но это реальная series потому что есть реальные слова перед ней
+
+        # ПЕРЕПРОВЕРКА ПЕРЕД ЦИКЛОМ: перечень жанров через запятую
+        # Пример: "Путешествия, приключения, фантастика" — каждая часть одно слово,
+        # хотя бы одна часть в blacklist → это издательская рубрика, не серия.
+        if ',' in text_lower:
+            _comma_parts = [p.strip() for p in text_lower.split(',')]
+            # Применяем только когда каждая часть — ≤2 слова (перечень, не «X, или Y»)
+            if _comma_parts and all(len(p.split()) <= 2 for p in _comma_parts if p):
+                _bl_lower_set = {bl.lower() for bl in self.filename_blacklist}
+                if any(p in _bl_lower_set for p in _comma_parts if p):
+                    return False
+
         for bl_word in self.filename_blacklist:
             bl_word_lower = bl_word.lower()
             # Match bl_word as a whole word or at word boundary
@@ -2340,8 +2397,10 @@ class Pass2SeriesFilename:
                         bl_word_index = i
                         break
                 
-                # Если blacklist-word в КОНЦЕ и есть другие слова перед ним
-                if bl_word_index is not None and bl_word_index > 0 and bl_word_index == len(words) - 1:
+                # Если blacklist-word в КОНЦЕ и есть ≥2 слова перед ним
+                # (≥2, а не просто >0, чтобы исключить формат «Категория. Жанр»,
+                # например «Современность. Фантастика» — только 1 слово перед blacklist-словом)
+                if bl_word_index is not None and bl_word_index >= 2 and bl_word_index == len(words) - 1:
                     # Это вероятно series (реальные слова + blacklist-word в конце)
                     # Пример: "Последний солдат" + "СССР" = "Последний солдат СССР"
                     continue  # Не отвергаем
@@ -2381,7 +2440,6 @@ class Pass2SeriesFilename:
         # 
         # Примеры что отвергаем ("том 1", "выпуск", "книга 3", "цикл")
         # Примеры что СОХРАНЯЕМ ("Цикл Скорпиона", "Том Риддл", "Серия Огня")
-        import re
         for service_word in self.service_words:
             service_word_lower = service_word.lower()
             words = text_lower.split()
