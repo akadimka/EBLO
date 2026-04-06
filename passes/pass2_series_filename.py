@@ -596,17 +596,23 @@ class Pass2SeriesFilename:
                         )
                         
                         if looks_like_author:
-                            # Ищем римские цифры в конце: "Бесноватый Цесаревич I"
-                            match = re.search(r'^(.+?)\s+[IVX]+\s*$', second_part)
+                            # Диапазон N-M: "Совок 1-5", "Попаданец в Дракона 1-8"
+                            match = re.search(r'^(.+?)\s+\d+[-\u2013\u2014]\d+\s*$', second_part)
+                            if not match:
+                                # Одиночное арабское число: "Охотник 1"
+                                match = re.search(r'^(.+?)\s+\d+\s*$', second_part)
+                            if not match:
+                                # Римские цифры: "Бесноватый Цесаревич I"
+                                match = re.search(r'^(.+?)\s+[IVX]+\s*$', second_part)
                             if match:
                                 simple_series = match.group(1).strip()
                                 if self._is_valid_series(simple_series, extracted_author=record.proposed_author):
                                     series_candidate = simple_series
                 
-                # ✅ НОВОЕ: Попробуем "Author - Series NUM" паттерн
+                # ✅ НОВОЕ: Попробуем "Author - Series NUM или N-M" паттерн
                 # "Шалашов Евгений - Господин следователь 2" → "Господин следователь"
                 if not series_candidate and ' - ' in file_name_for_fallback:
-                    match = re.match(r'^(.+?)\s*-\s*(.+?)\s+(\d+|[IVX]+)\s*$', file_name_for_fallback)
+                    match = re.match(r'^(.+?)\s*-\s*(.+?)\s+(?:\d+[-\u2013\u2014]\d+|\d+|[IVX]+)\s*$', file_name_for_fallback)
                     if match:
                         first_part = match.group(1).strip()
                         series_part = match.group(2).strip()
@@ -643,10 +649,19 @@ class Pass2SeriesFilename:
                 # ✅ ЗАЩИТА: Перед использованием metadata - проверяем наличие слов из blacklist
                 # ТРЕБОВАНИЕ: "если мета содержит слово или слова из BL, полностью ее игнорируем в качестве значения"
                 # Пример: "Шедевры фантастики (продолжатели)" содержит "фантастики" → отклоняем целиком
-                has_blacklist_word = any(
-                    bl.lower() in record.metadata_series.lower()
-                    for bl in self.filename_blacklist
-                )
+                # ВАЖНО: word-boundary matching, не substring — "попаданец" не должен блокировать
+                # легитимное "Попаданец в Дракона" является реальной серией
+                meta_lower = record.metadata_series.lower()
+                has_blacklist_word = False
+                for bl in self.filename_blacklist:
+                    bl_lower = bl.lower().strip()
+                    if not bl_lower:
+                        continue
+                    # Для коротких слов (≤3 символа) — word-boundary; для длинных — word-boundary тоже
+                    pat = r'(?<![а-яёa-z])' + re.escape(bl_lower) + r'(?![а-яёa-z])'
+                    if re.search(pat, meta_lower):
+                        has_blacklist_word = True
+                        break
                 
                 if has_blacklist_word:
                     # metadata содержит слова из blacklist → игнорируем целиком, не используем как series
@@ -691,6 +706,25 @@ class Pass2SeriesFilename:
         self._unify_folder_series_source(records)
 
         # (автор из папки уже распространён в начале execute(), до основного цикла)
+
+        # ✅ ПОСЛЕДНИЙ ШАНС: если proposed_series пусто, metadata_series задана,
+        # не совпадает с автором и не содержит чисто blacklist-слов — использовать напрямую.
+        # Покрывает случаи, когда валидация отвергла серию из-за отсутствия контекста автора
+        # или когда имя серии выглядит как формат "(Фамилия (Имя))", но НЕ является автором.
+        for record in records:
+            if record.proposed_series or not record.metadata_series:
+                continue
+            meta = record.metadata_series.strip()
+            # Пропускаем если значение совпадает с именем автора
+            if record.proposed_author and meta.lower() == record.proposed_author.lower():
+                continue
+            # Пропускаем если вся строка целиком есть в blacklist (точное совпадение)
+            meta_lower = meta.lower()
+            if any(meta_lower == bl.lower() for bl in self.filename_blacklist):
+                continue
+            # Используем как серию с источником "metadata"
+            record.proposed_series = meta
+            record.series_source = "metadata"
 
         # ✅ ФИНАЛЬНОЕ: Восстановить парные кавычки во всех series
         # Если в series_кандидате есть открывающиеся кавычки без закрывающихся,
@@ -1639,11 +1673,12 @@ class Pass2SeriesFilename:
                 else:
                     return best_series
         
-        # 🔑 ВАЖНО: Если паттерн явно БЕЗ Series - не применяем fallback правила!
-        # Если паттерн "Title (Author)", то в нём НЕТ информации о серии
-        # Fallback правила (скобки, точка, и т.д.) не должны использоваться
-        if pattern_found_without_series:
-            # Паттерн явно БЕЗ серии - возвращаем пусто или metadata (если есть)
+        # 🔑 ВАЖНО: Если паттерн явно БЕЗ Series - не применяем fallback правила скобок/точки!
+        # НО: если в конце имени файла явный числовой суффикс (N или N-M), это признак серии —
+        # Rule 3B/4 должны попробовать его найти независимо от паттерна.
+        _has_numeric_suffix = bool(re.search(r'\s+\d+(?:[-–—]\d+)?\s*$', name_for_parsing))
+        if pattern_found_without_series and not _has_numeric_suffix:
+            # Паттерн явно БЕЗ серии и нет числового суффикса — возвращаем пусто или metadata
             if metadata_series:
                 return metadata_series if validate else ""
             return ""
@@ -1703,19 +1738,17 @@ class Pass2SeriesFilename:
             potential_series = name_for_parsing.split('. ')[0].strip()
             
             # Если содержит " - ", это скорее всего "Author - Series" паттерн
-            # Нужно пропустить и дать обработаться config pattern
-            # КЛЮЧЕВОЙ МОМЕНТ: мы уже ПЫТАЛИСЬ с config pattern! 
-            # Если config pattern не вернул результат (best_series = None), 
-            # то это не работает для этого файла - не нужно возвращать неправильный результат!
-            # Лучше вернуть пусто чем неправильно
             if ' - ' in potential_series:
                 pass  # Skip: config pattern was first priority, don't fall back to Rule 3
-            # Если это просто одно слово без пробелов и без  специальных символов
+            # Если это просто одно слово без пробелов и без специальных символов
             # то это скорее всего фамилия автора, а не название серии
             elif ' ' not in potential_series and len(potential_series) < 50:
-                # Single word - likely an author surname, skip it
-                # Series names usually have multiple words или специальные символы
-                pass
+                pass  # Single word - likely an author surname, skip it
+            # Если в имени файла есть числовой суффикс (N или N-M) — Rule 3B справится точнее:
+            # она возьмёт часть ПОСЛЕ точки (серию), а не ДО (автора).
+            # Rule 3 возвращает всё ДО точки — т.е. автора, а не серию.
+            elif _has_numeric_suffix:
+                pass  # Пропускаем, Rule 3B обработает корректнее
             elif not validate or self._is_valid_series(potential_series):
                 return potential_series
         
@@ -1737,8 +1770,11 @@ class Pass2SeriesFilename:
                 )
                 
                 if looks_like_author:
+                    # Проверяем диапазоны: "Совок 1-5", "Попаданец в Дракона 1-8" → True
+                    series_match = re.match(r'^(.+?)\s+\d+[-–—]\d+\s*$', second_part)
                     # Проверяем арабские цифры: "Охотник 1" → True
-                    series_match = re.match(r'^(.+?)\s+\d+\s*$', second_part)
+                    if not series_match:
+                        series_match = re.match(r'^(.+?)\s+\d+\s*$', second_part)
                     # Если нет арабских, проверяем римские цифры: "Бесноватый Цесаревич I" → True
                     if not series_match:
                         series_match = re.match(r'^(.+?)\s+[IVX]+\s*$', second_part)
@@ -1748,11 +1784,11 @@ class Pass2SeriesFilename:
                         if not validate or self._is_valid_series(potential_series):
                             return potential_series
         
-        # Правило 4: Author - Series N (без точки после номера)
+        # Правило 4: Author - Series N или Author - Series N-M (без точки после номера)
         # "Атаманов Михаил - Задача выжить 1" → "Задача выжить"
-        # Паттерн: Author - Серия N где N это одна или две цифры в конце
+        # "Земляной Андрей - Один на миллион 1-3" → "Один на миллион"
         if ' - ' in name_for_parsing:
-            match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d{1,2}\s*$', name_for_parsing)
+            match = re.match(r'^(.+?)\s*-\s*(.+?)\s+(?:\d+[-–—]\d+|\d{1,2})\s*$', name_for_parsing)
             if match:
                 potential_series = match.group(2).strip()
                 # Убедимся что это не автор (не похоже на имя)
@@ -1775,6 +1811,14 @@ class Pass2SeriesFilename:
         
         if "охотник" in name_without_ext.lower() or "Наследник" in name_without_ext:
             pass
+
+        # Если паттерн БЕЗ Series, но числовой суффикс обнаружен и Rules 3B/4
+        # ничего не вернули, возвращаем metadata или пусто
+        if pattern_found_without_series:
+            if metadata_series:
+                return metadata_series if validate else ""
+            return ""
+
         return ""
     
     def _apply_config_pattern(self, pattern: str, filename: str) -> str:
@@ -2285,6 +2329,11 @@ class Pass2SeriesFilename:
                     # Это вероятно папка (ТОЛЬКО blacklist-word)
                     # Пример: "СССР"
                     return False
+                elif bl_word_index == 0 and len(words) >= 3:
+                    # Blacklist-слово в начале многословной фразы (≥3 слов) →
+                    # жанр-префикс в названии серии, допускаем.
+                    # Пример: "Попаданец в Дракона", "Детектив из прошлого"
+                    continue
                 else:
                     # В других случаях (blacklist-word в середине или начале):
                     # Проверяем паттерн «Профессия/Звание + Имя собственное».

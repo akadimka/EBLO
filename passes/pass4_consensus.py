@@ -144,6 +144,12 @@ class Pass4Consensus:
                 has_pattern_evidence = False
                 if record.file_path and record.series_source == "filename":
                     filename = Path(record.file_path).name
+                    filename_no_ext = filename.rsplit('.', 1)[0]
+
+                    # Числовой диапазон N-M в имени файла — надёжный признак серии
+                    # Пример: "Wismurt. Отпрыск рода Орловых 1-5" → серия реальна
+                    if re.search(r'\s+\d+[-–—]\d+\s*$', filename_no_ext):
+                        has_pattern_evidence = True
                     
                     # Find ALL brackets in the filename
                     all_brackets = re.findall(r'\([^)]*\)', filename)
