@@ -523,8 +523,18 @@ class Pass2SeriesFilename:
             
             if series_candidate:
                 # Базовые фильтры (НЕ валидация) — ДО записи в extracted_series_candidate
+                # Запятая-разделитель авторов стоит перед словом с заглавной буквы
+                # ("Иванов, Петров"), грамматическая — перед строчной ("Игрок, забравшийся").
                 if ',' in series_candidate:
-                    series_candidate = None  # Список авторов
+                    # Считаем это списком авторов только если после каждой запятой
+                    # идёт слово с заглавной буквы (или инициал)
+                    parts_after_comma = [p.strip() for p in series_candidate.split(',')[1:]]
+                    all_capitalized = all(
+                        p and (p[0].isupper() or (len(p) >= 2 and p[1] == '.'))
+                        for p in parts_after_comma
+                    )
+                    if all_capitalized:
+                        series_candidate = None  # Список авторов
                 elif self._is_author_surname(series_candidate, record.proposed_author):
                     series_candidate = None  # Фамилия или полное имя автора
                 elif record.file_title:
@@ -1763,10 +1773,14 @@ class Pass2SeriesFilename:
                 second_part = parts[1].strip()
                 
                 # Проверяем что первая часть это вероятный автор
-                # (может быть одно слово OR полное имя, но БЕЗ цифр)
+                # Убираем скобочные части (псевдоним/реальное имя) перед проверкой цифр:
+                # "Leach23 (Михалек Дмитрий)" → "Leach23" → содержит цифры → всё равно автор
+                # Нам важно чтобы СУТЬ части была авторской, а не чтобы не было цифр вообще.
+                # Критерий: длина < 60 и НЕ начинается с цифры (т.е. не год/том).
+                first_part_no_parens = re.sub(r'\s*\([^)]*\)', '', first_part).strip()
                 looks_like_author = (
-                    len(first_part) < 50 and  # Обычно имена авторов менее 50 символов
-                    not any(digit in first_part for digit in '0123456789')  # Нет цифр
+                    len(first_part) < 60 and
+                    not first_part_no_parens[:1].isdigit()  # Не начинается с цифры
                 )
                 
                 if looks_like_author:

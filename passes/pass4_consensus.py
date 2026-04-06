@@ -150,6 +150,10 @@ class Pass4Consensus:
                     # Пример: "Wismurt. Отпрыск рода Орловых 1-5" → серия реальна
                     if re.search(r'\s+\d+[-–—]\d+\s*$', filename_no_ext):
                         has_pattern_evidence = True
+                    # Одиночный числовой суффикс тоже признак серии
+                    # Пример: "Leach23 (Михалек). Игрок, забравшийся на вершину 1-12"
+                    elif re.search(r'\s+\d+\s*$', filename_no_ext):
+                        has_pattern_evidence = True
                     
                     # Find ALL brackets in the filename
                     all_brackets = re.findall(r'\([^)]*\)', filename)
