@@ -329,7 +329,7 @@ class Pass4Consensus:
             for series_base, source_records in series_base_map.items():
                 # For each record without extracted_series_candidate
                 for target_record in author_records:
-                    if target_record.proposed_series and target_record.series_source not in ("metadata", "metadata_folder_confirmed"):
+                    if target_record.proposed_series and target_record.series_source not in ("metadata", "metadata_folder_confirmed", "folder_metadata_confirmed"):
                         # Already has series from filename or other source, skip
                         # But try consensus if it's only from metadata or metadata confirmed by folder
                         continue

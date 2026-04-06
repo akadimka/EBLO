@@ -480,7 +480,7 @@ class Pass2SeriesFilename:
                                     # Та же серия, разная форма ("Барраярский цикл" / "Барраяр")
                                     # → оставляем точное название из меты, но фиксируем подтверждение папкой
                                     record.proposed_series = record.metadata_series
-                                    record.series_source = "metadata_folder_confirmed"
+                                    record.series_source = "folder_metadata_confirmed"
                             else:
                                 record.proposed_series = series_name
                                 record.series_source = "folder_hierarchy"
@@ -889,7 +889,7 @@ class Pass2SeriesFilename:
 
         Правило: папка — единица доверия. Если хотя бы один файл в папке получил
         series_source='folder_hierarchy', значит именно папка является источником
-        серии для ВСЕЙ папки. Все файлы с series_source='metadata_folder_confirmed'
+        серии для ВСЕЙ папки. Все файлы с series_source='folder_metadata_confirmed'
         в той же папке повышаются до 'folder_hierarchy', и их proposed_series
         унифицируется до значения из folder_hierarchy-файла.
 
@@ -923,7 +923,7 @@ class Pass2SeriesFilename:
             canonical_series = max(series_counts, key=series_counts.get)
 
             # Применяем ко ВСЕМ файлам в папке с более слабым источником серии
-            WEAK_SOURCES = {"metadata_folder_confirmed", "metadata", "consensus", "", "filename"}
+            WEAK_SOURCES = {"folder_metadata_confirmed", "metadata", "consensus", "", "filename"}
             for record in group:
                 if record.series_source in WEAK_SOURCES:
                     record.proposed_series = canonical_series
