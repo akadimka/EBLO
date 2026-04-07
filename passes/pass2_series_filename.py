@@ -1550,7 +1550,7 @@ class Pass2SeriesFilename:
                             processed_series = self._extract_main_series_from_multi_level(series_from_block)
                             if processed_series:
                                 return processed_series
-                            return series_from_block
+                            # processed_series пуст (напр. аббревиатура О.Р.З.) → не возвращаем сырое значение
                     else:
                         # Нет metadata для проверки, используем результат BlockLevelPatternMatcher как есть
                         # Обработать через _extract_main_series_from_multi_level() для удаления номеров томов/иерархии
@@ -1560,8 +1560,7 @@ class Pass2SeriesFilename:
                         processed_series = self._extract_main_series_from_multi_level(series_from_block)
                         if processed_series:
                             return processed_series
-                        # Не проверяем blacklist для series из блок-матчера, т.к. это надёжный метод
-                        return series_from_block
+                        # processed_series пуст → аббревиатура или мусор, не возвращаем сырое значение
         except Exception as e:
             # Если случится ошибка, продолжаем со старым методом
             pass
