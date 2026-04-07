@@ -118,8 +118,11 @@ class Pass3SeriesNormalize:
         
         # Шаг 4: Убрать лишние служебные слова в конце
         # "Война и Мир том 1" → "Война и Мир"
+        # НО: не убирать если остаток — одно слово ("Каирский цикл" → не strip, т.к. "цикл" — часть названия)
         for pat in self._service_word_patterns:
-            series = pat.sub('', series)
+            candidate = pat.sub('', series).strip()
+            if len(candidate.split()) >= 2:
+                series = candidate
         
         # Шаг 5: Применить conversions из config (если настроены)
         for old_name, new_name in self.series_conversions.items():

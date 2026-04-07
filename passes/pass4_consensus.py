@@ -265,7 +265,7 @@ class Pass4Consensus:
             
             if not determined or not undetermined:
                 continue
-            
+
             # Find consensus author from determined files  
             author_counts = {}
             for record in determined:
@@ -277,7 +277,7 @@ class Pass4Consensus:
                 continue
             
             consensus_author = max(author_counts, key=author_counts.get)
-            
+
             # Apply to all undetermined files (only empty ones)
             for record in undetermined:
                 if record.proposed_author and record.proposed_author != "Сборник":

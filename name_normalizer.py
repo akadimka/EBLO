@@ -440,6 +440,16 @@ class AuthorName:
                     lastname = remaining_words[-1]
                     return (lastname, firstname, found_patronymic)
             
+            # Handle "К. Роберт Каргилл" → "Каргилл К. Роберт"
+            # (initial at position 0: short word ending with dot)
+            first_word = remaining_words[0]
+            if (len(remaining_words) == 3
+                    and len(first_word) <= 2
+                    and first_word.endswith('.')):
+                firstname = first_word + ' ' + remaining_words[1]
+                lastname = remaining_words[2]
+                return (lastname, firstname, patronymic)
+
             middle_word = remaining_words[1]
             if len(middle_word) <= 3 and middle_word.endswith('.'):
                 firstname = remaining_words[0] + ' ' + middle_word

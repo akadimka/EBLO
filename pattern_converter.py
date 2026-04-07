@@ -134,8 +134,11 @@ def convert_simple_pattern_to_regex(pattern_str: str) -> str:
         # Добавляем текст перед токеном (экранированный с гибким пробелом)
         before = token['before']
         if before:
-            # Заменяем пробелы на \\s*
             before_escaped = re.escape(before)
+            # " - " (пробел-дефис-пробел) требует хотя бы один пробел с каждой стороны,
+            # чтобы НЕ совпадать с дефисом в составных словах типа "Марк-Уве".
+            before_escaped = before_escaped.replace(r'\ \-\ ', r'\s+-\s+')
+            # Остальные пробелы — необязательные
             before_escaped = before_escaped.replace(r'\ ', r'\s*')
             regex_parts.append(before_escaped)
         

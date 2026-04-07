@@ -465,31 +465,43 @@ class Pass2SeriesFilename:
                         # Папка имеет ВЫСШИЙ приоритет. Но если metadata_series — вариация
                         # того же названия (напр. "Барраярский цикл" и "Барраяр"), то
                         # сохраняем более точное название из FB2 тегов.
-                        series_name = self._extract_series_from_folder_name(part)
-                        if series_name:
-                            if record.metadata_series:
-                                meta_l = record.metadata_series.lower().replace('ё', 'е')
-                                folder_l = series_name.lower().replace('ё', 'е')
-                                # Если одно является префиксом другого — это одна серия,
-                                # просто разные формы названия → оставляем более точную.
-                                if not (folder_l.startswith(meta_l) or meta_l.startswith(folder_l)):
-                                    # Разные названия → папка имеет высший приоритет
+
+                        # ЗАЩИТА: "Издательская папка с фамилией" — папка вида
+                        # "Fanzon. Наш выбор. Куанг" содержит фамилию автора как ПОСЛЕДНЕЕ слово.
+                        # Такие папки — организационные, а не серийные.
+                        # Серию ищем сначала по имени файла, мета только подтверждает.
+                        _part_words = re.split(r'[\s.\-]+', part.strip())
+                        _part_last_word = _part_words[-1].lower().replace('ё', 'е') if _part_words else ''
+                        _author_words = set(w.lower().replace('ё', 'е') for w in author_name.split() if len(w) > 2)
+                        _folder_ends_with_author = bool(_part_last_word and _part_last_word in _author_words)
+                        if _folder_ends_with_author:
+                            pass  # Не устанавливаем серию из папки → идём дальше к filename extraction
+                        else:
+                            series_name = self._extract_series_from_folder_name(part)
+                            if series_name:
+                                if record.metadata_series:
+                                    meta_l = record.metadata_series.lower().replace('ё', 'е')
+                                    folder_l = series_name.lower().replace('ё', 'е')
+                                    # Если одно является префиксом другого — это одна серия,
+                                    # просто разные формы названия → оставляем более точную.
+                                    if not (folder_l.startswith(meta_l) or meta_l.startswith(folder_l)):
+                                        # Разные названия → папка имеет высший приоритет
+                                        record.proposed_series = series_name
+                                        record.series_source = "folder_hierarchy"
+                                    else:
+                                        # Та же серия, разная форма.
+                                        # Если meta_l начинается с folder_l → мета добавляет лишнее
+                                        # (напр. "Ацтек (RedDetonator)" vs "Ацтек") → берём folder_name.
+                                        # Если folder_l начинается с meta_l → папка добавляет описание
+                                        # (напр. "Барраярский цикл" vs "Барраяр") → берём мету.
+                                        if meta_l.startswith(folder_l) and len(meta_l) > len(folder_l):
+                                            record.proposed_series = series_name
+                                        else:
+                                            record.proposed_series = record.metadata_series
+                                        record.series_source = "folder_metadata_confirmed"
+                                else:
                                     record.proposed_series = series_name
                                     record.series_source = "folder_hierarchy"
-                                else:
-                                    # Та же серия, разная форма.
-                                    # Если meta_l начинается с folder_l → мета добавляет лишнее
-                                    # (напр. "Ацтек (RedDetonator)" vs "Ацтек") → берём folder_name.
-                                    # Если folder_l начинается с meta_l → папка добавляет описание
-                                    # (напр. "Барраярский цикл" vs "Барраяр") → берём мету.
-                                    if meta_l.startswith(folder_l) and len(meta_l) > len(folder_l):
-                                        record.proposed_series = series_name
-                                    else:
-                                        record.proposed_series = record.metadata_series
-                                    record.series_source = "folder_metadata_confirmed"
-                            else:
-                                record.proposed_series = series_name
-                                record.series_source = "folder_hierarchy"
             
             # Special case: depth==4 without series subfolder
             # Pass 1 wrongly sets folder_dataset for depth==4, allowing Pass 2 to override it
@@ -557,10 +569,15 @@ class Pass2SeriesFilename:
                     # Прямое совпадение ИЛИ кандидат является началом названия книги
                     # (ловит обрезанные кандидаты типа "Спасение (альт" от "Спасение (альт. перевод)")
                     # ИЛИ кандидат начинается с базового названия (без скобок) — "спасение (альт" startswith "спасение"
-                    if (_title_lower and _cand_lower == _title_lower) or \
+                    # ИСКЛЮЧЕНИЕ: если кандидат совпадает с metadata_series → это подтверждённая серия,
+                    # название книги просто совпадает (1-я книга серии называется так же, как серия)
+                    _meta_lower = record.metadata_series.lower().replace('ё', 'е') if record.metadata_series else ''
+                    _is_confirmed_by_meta = bool(_meta_lower and _cand_lower.replace('ё', 'е') == _meta_lower)
+                    if not _is_confirmed_by_meta and (
+                       (_title_lower and _cand_lower == _title_lower) or \
                        (_title_np_lower and _cand_lower == _title_np_lower) or \
                        (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
-                       (_title_np_lower and len(_title_np_lower) >= 4 and _cand_lower.startswith(_title_np_lower)):
+                       (_title_np_lower and len(_title_np_lower) >= 4 and _cand_lower.startswith(_title_np_lower))):
                         series_candidate = None  # Название книги ≠ серия
                 
                 # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)
@@ -1541,10 +1558,21 @@ class Pass2SeriesFilename:
                         # Если НЕ совпадают - это сигнал, что BlockLevelPatternMatcher ошибся
                         # Не возвращаем результат, продолжаем со старыми методами
                         if metadata_cleaned.lower() != series_from_block_cleaned.lower():
+                            # Проверяем: может metadata совпадает с КОМПОНЕНТОМ иерархии
+                            # Пример: metadata="Хроники Кайлара", hierarchy="Кодекс ка'кари\Хроники Кайлара"
+                            hierarchy_components = [c.strip().lower() for c in series_from_block_cleaned.split('\\') if c.strip()]
+                            if metadata_cleaned.lower() in hierarchy_components:
+                                # ✅ Metadata подтвердила один уровень иерархии → возвращаем полную цепочку
+                                if series_from_block_cleaned:
+                                    return series_from_block_cleaned
+                            elif best_score >= 0.85 and series_from_block_cleaned:
+                                # ✅ Очень высокий score паттерна (≥0.9) — уверены в правильности иерархии
+                                # даже если metadata не совпадает (metadata может быть названием издательства)
+                                # Пример: metadata="Fantasy World" (издатель), но иерархия "Земной круг\Первый закон" верна
+                                return series_from_block_cleaned
                             # ВНИМАНИЕ: Результат BlockLevelPatternMatcher не совпадает с metadata!
                             # Это может быть ошибка распознавания (例: "1-2 книги" вместо "Император из стали")
                             # Продолжаем без этого результата
-                            pass
                         else:
                             # ✅ Metadata подтвердила результат BlockLevelPatternMatcher!
                             processed_series = self._extract_main_series_from_multi_level(series_from_block)
@@ -1779,17 +1807,21 @@ class Pass2SeriesFilename:
             # Если содержит " - ", это скорее всего "Author - Series" паттерн
             if ' - ' in potential_series:
                 pass  # Skip: config pattern was first priority, don't fall back to Rule 3
-            # Если это просто одно слово без пробелов и без специальных символов
-            # то это скорее всего фамилия автора, а не название серии
-            elif ' ' not in potential_series and len(potential_series) < 50:
-                pass  # Single word - likely an author surname, skip it
-            # Если в имени файла есть числовой суффикс (N или N-M) — Rule 3B справится точнее:
-            # она возьмёт часть ПОСЛЕ точки (серию), а не ДО (автора).
-            # Rule 3 возвращает всё ДО точки — т.е. автора, а не серию.
-            elif _has_numeric_suffix:
-                pass  # Пропускаем, Rule 3B обработает корректнее
-            elif not validate or self._is_valid_series(potential_series):
-                return potential_series
+            else:
+                _ps_words = potential_series.split()
+                # Одно слово → вероятно фамилия автора
+                # Заканчивается на одну заглавную букву → формат "Фамилия И." (инициал) = автор
+                # Пример: "Кларк Ф" (Ф — инициал) или "Белоус" (одно слово)
+                _is_author_pattern = (
+                    len(_ps_words) <= 1 or
+                    (len(_ps_words[-1]) == 1 and _ps_words[-1][0].isupper())
+                )
+                if _is_author_pattern:
+                    pass  # Likely author name format, not a series
+                elif _has_numeric_suffix:
+                    pass  # Пропускаем, Rule 3B обработает корректнее
+                elif not validate or self._is_valid_series(potential_series):
+                    return potential_series
         
         # Правило 3B: Author. Series N (без второго элемента после точки)
         # "Курилкин. Охотник 1" → "Охотник"
