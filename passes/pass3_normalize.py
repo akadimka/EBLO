@@ -143,8 +143,8 @@ class Pass3Normalize:
                     metadata_for_normalization = record.metadata_authors
                 else:
                     metadata_for_normalization = ""
-            elif record.author_source == "filename":
-                # For filename: use metadata strategy depends on structure
+            elif record.author_source in ("filename", "filename_meta_confirmed"):
+                # For filename / filename_meta_confirmed: use metadata strategy depends on structure
                 has_separator = ', ' in record.proposed_author or '; ' in record.proposed_author
                 
                 if has_separator:

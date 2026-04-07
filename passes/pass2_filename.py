@@ -453,6 +453,11 @@ class Pass2Filename:
         )
         
         if has_short:
+            # Есть короткое слово — но если есть хотя бы ДВА полных слова (len > 2),
+            # это скорее всего формат "Фамилия Имя М." (отчество-инициаль) → полное имя.
+            full_words = [w for w in words if len(w) > 2]
+            if len(full_words) >= 2:
+                return False  # "Форд Джон М." — полное имя с инициалью отчества
             return True  # At least one word is short → incomplete name
         
         # All words are full words → complete
