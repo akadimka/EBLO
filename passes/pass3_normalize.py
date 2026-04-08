@@ -181,8 +181,26 @@ class Pass3Normalize:
                     # Already restored from metadata with correct format, don't transform
                     normalized = record.proposed_author
             else:
-                # Single author
-                normalized = self.normalizer.normalize_format(record.proposed_author, metadata_for_normalization)
+                # Single author — normalize
+                normalized_candidate = self.normalizer.normalize_format(record.proposed_author, metadata_for_normalization)
+
+                # For filename-sourced multi-word authors: the block extractor already guarantees
+                # ФИ order (Фамилия first). If normalize_format reordered the words (first word
+                # changed), the heuristics fired incorrectly — keep original ФИ order instead.
+                # Examples: "Линдквист Йон Айвиде", "Феррандис Хуан Франсиско"
+                if (record.author_source in ("filename", "filename_meta_confirmed")
+                        and normalized_candidate
+                        and len(record.proposed_author.split()) >= 2
+                        and metadata_for_normalization == ""):
+                    orig_first = record.proposed_author.split()[0].lower().replace('ё', 'е')
+                    norm_first = normalized_candidate.split()[0].lower().replace('ё', 'е')
+                    if orig_first != norm_first:
+                        # normalize_format tried to reorder — keep ФИ order, only clean up
+                        normalized = self.normalizer.apply_conversions(record.proposed_author)
+                    else:
+                        normalized = normalized_candidate
+                else:
+                    normalized = normalized_candidate
             
             if normalized and normalized != record.proposed_author:
                 record.proposed_author = normalized

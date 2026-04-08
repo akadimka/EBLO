@@ -689,8 +689,25 @@ class Pass4Consensus:
                 if len(w) >= 4
             )
 
-            if author_prefixes & series_prefixes:
-                # Author name found in series name → publisher spotlight folder, not a series
+            # Also check short author words (< 4 chars, >= 2) via exact match in series
+            author_short = set(
+                w.lower() for w in (record.proposed_author or '').split()
+                if 2 <= len(w) < 4
+            )
+            series_words_lower = set(
+                w.lower().rstrip('аяоеуиёью') for w in record.proposed_series.split()
+            )
+
+            # Check 1: long-word prefix match (e.g. "Браста" vs "Браст")
+            # Check 2: blacklist word in series (e.g. "Loft. ..." → publisher branding)
+            # Check 3: short author words appear in series (e.g. "Мо Янь" in "Мо Яня")
+            _blacklist = [bl.lower() for bl in (self.settings.get_list('filename_blacklist') if self.settings else [])]
+            _series_lower = record.proposed_series.lower()
+            is_publisher_branding = any(bl in _series_lower for bl in _blacklist)
+            is_author_in_series = bool(author_prefixes & series_prefixes) or bool(author_short & series_words_lower)
+
+            if is_publisher_branding or is_author_in_series:
+                # Publisher spotlight folder — not a real series
                 # Also reject metadata_series that look like library classifications
                 # e.g. "Дик, Филип. Сборники" (Surname, Firstname. Category)
                 import re as _re

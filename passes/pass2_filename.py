@@ -73,6 +73,8 @@ class Pass2Filename:
                             'ля', 'ле', 'ла', 'мак', 'о'})
         )
         self.patterns = self._load_patterns()
+        # Precomputed lowercase set of collection keywords for fast lookup in _looks_like_author_name
+        self._collection_kw_lower = {k.lower() for k in self.collection_keywords}
         # Author cache: maps abbreviated/partial names to full names
         # e.g., {"А. Живой" -> "Живой Алексей", "Живой" -> "Живой Алексей"}
         self.author_cache = {}
@@ -228,12 +230,20 @@ class Pass2Filename:
                     author_lower = author.lower().strip()
                     # Cache full name
                     self.author_cache[author_lower] = author
-                    # Cache each word (surname, firstname) separately
-                    for part in author.split():
+                    # Cache each word (surname, firstname) separately.
+                    # Always store the word-keyed entry with THAT WORD FIRST (ФИ convention):
+                    # "Хуан Франсиско Феррандис" → cache["феррандис"] = "Феррандис Хуан Франсиско"
+                    # so that single-surname lookups get the canonical ФИ form.
+                    author_words = author.split()
+                    for idx, part in enumerate(author_words):
                         if len(part) > 2:
                             part_lower = part.lower()
                             if part_lower not in self.author_cache:
-                                self.author_cache[part_lower] = author
+                                if idx == 0:
+                                    self.author_cache[part_lower] = author
+                                else:
+                                    rest = [w for i, w in enumerate(author_words) if i != idx]
+                                    self.author_cache[part_lower] = part + ' ' + ' '.join(rest)
                     cached_count += 1
 
             except Exception:
@@ -314,6 +324,15 @@ class Pass2Filename:
                         if len(extracted_words_list) == 1:
                             # Single word expansion - check if it's in FB2 author
                             if extracted_lower in fb2_words_list:
+                                # Put the matched surname FIRST (ФИ convention).
+                                # FB2 metadata often stores names in ИФ order ("Хуан Франсиско Феррандис"),
+                                # but canonical format is ФИ ("Феррандис Хуан Франсиско").
+                                match_idx = fb2_words_list.index(extracted_lower)
+                                if match_idx > 0:
+                                    rest = [w for i, w in enumerate(fb2_author.split()) if i != match_idx]
+                                    reordered = fb2_author.split()[match_idx] + ' ' + ' '.join(rest)
+                                    self._add_to_author_cache(extracted_author, reordered)
+                                    return reordered
                                 self._add_to_author_cache(extracted_author, fb2_author)
                                 return fb2_author  # Use fuller name from FB2
                         elif (len(extracted_words_list) == len(fb2_words_list) and 
@@ -399,6 +418,16 @@ class Pass2Filename:
         text_words = text_normalized.split()
         
         if len(text_words) > 1:  # Multi-word - likely "FirstName LastName" or "Title Words"
+            # EXCEPTION: if ALL words start with uppercase AND ≤3 words AND none is a
+            # collection/genre keyword → treat as proper name (proper-name typography).
+            # Handles foreign/exotic names absent from Russian dictionaries:
+            # "Ровена Бергман", "Линдквист Йон Айвиде", "Тисако Вакатакэ" etc.
+            text_words_orig = text.split()
+            all_capitalized = all(w[0].isupper() for w in text_words_orig if w)
+            if all_capitalized and len(text_words) <= 3:
+                if not any(w in self._collection_kw_lower for w in text_words):
+                    return True  # Proper-name pattern: all words capitalised, ≤3 words
+
             # Require at least one known first name OR a known name particle (de, van, von…)
             # to filter out collection titles like "Боевая фантастика".
             # Particles count as valid name-components (they are part of proper names).
@@ -549,10 +578,17 @@ class Pass2Filename:
             
             # Try to find matching surname in metadata
             # E.g., if looking for "Кумин", check if metadata has "...Кумин..."
-            for word in meta_words:
+            for idx, word in enumerate(meta_words):
                 if word.lower() == surname_candidate:
-                    # Found match! Return full metadata author
-                    return meta_author
+                    # Found match!
+                    # Always put the matched surname FIRST (ФИ convention).
+                    # Metadata stores names in ИФ order ("Хуан Франсиско Феррандис"),
+                    # but our canonical format is ФИ ("Феррандис Хуан Франсиско").
+                    if idx == 0:
+                        return meta_author  # Already in ФИ order
+                    else:
+                        rest = [w for i, w in enumerate(meta_words) if i != idx]
+                        return word + ' ' + ' '.join(rest)
         
         # No clear match found - return original
         return incomplete_author
@@ -1006,9 +1042,12 @@ class Pass2Filename:
                     # Also strip trailing (...) noise (e.g. "(ЛП)", "(СИ)", "(альт. перевод)")
                     # so "Спасение (ЛП)" → "Спасение" can be matched against extracted author.
                     _book_title_no_parens = re.sub(r'\s*\([^)]*\)\s*$', '', _book_title_clean).strip()
+                    # Normalise ё→е before comparing so "Звёздочка" matches "Звездочка"
+                    def _yo(s: str) -> str:
+                        return s.lower().replace('ё', 'е')
                     _title_matches_author = (
-                        (_book_title_clean and _book_title_clean.lower() == author.lower()) or
-                        (_book_title_no_parens and _book_title_no_parens.lower() == author.lower())
+                        (_book_title_clean and _yo(_book_title_clean) == _yo(author)) or
+                        (_book_title_no_parens and _yo(_book_title_no_parens) == _yo(author))
                     )
                     if _title_matches_author:
                         self.logger.log(

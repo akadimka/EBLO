@@ -408,7 +408,7 @@ class AuthorName:
                 else:
                     # Use vowel ratio heuristic: surnames have fewer vowels
                     def count_vowels(word):
-                        vowels = 'aeiouыяеёиoюаAEIOUЫЯЕЁИОЮА'
+                        vowels = 'aeiouAEIOU' + 'аеёиоуыэюяАЕЁИОУЫЭЮЯ'
                         return sum(1 for c in word if c in vowels)
                     
                     word0_vowels = count_vowels(remaining_words[0])
@@ -459,6 +459,7 @@ class AuthorName:
                 lastname = remaining_words[-1]
                 firstname = remaining_words[0]
                 
+                surname_found_in_middle = False
                 for i in range(1, len(remaining_words) - 1):
                     word_lower = remaining_words[i].lower()
                     word_ends = word_lower[-2:] if len(word_lower) >= 2 else ''
@@ -468,8 +469,26 @@ class AuthorName:
                     )
                     if word_ends in surname_suffixes:
                         lastname = remaining_words[i]
+                        surname_found_in_middle = True
                         break
                 
+                # If no middle-word surname found, check if we should apply ФИ convention.
+                # When NEITHER first NOR last word is a known first name, the input is most
+                # likely already in ФИ order (Фамилия Имя …) — e.g. foreign author names
+                # from filenames: "Линдквист Йон Айвиде", "Толкин Джон Рональд".
+                # In that case first word = surname is the correct interpretation.
+                if not surname_found_in_middle:
+                    known_names = self._get_known_names()
+                    first_is_known = remaining_words[0].lower() in known_names
+                    last_is_known = remaining_words[-1].lower() in known_names
+                    if not first_is_known and not last_is_known:
+                        # Neither end-word recognised as a first name → ФИ convention.
+                        # Keep ALL words: lastname = words[0], firstname = rest joined.
+                        # "Линдквист Йон Айвиде" → lastname="Линдквист", firstname="Йон Айвиде"
+                        # "Маркес Гарсиа Габриэль" → lastname="Маркес", firstname="Гарсиа Габриэль"
+                        lastname = remaining_words[0]
+                        firstname = ' '.join(remaining_words[1:])
+
                 return (lastname, firstname, patronymic)
     
     @staticmethod
