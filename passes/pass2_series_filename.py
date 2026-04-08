@@ -851,6 +851,11 @@ class Pass2SeriesFilename:
 
         def _parse_folder_author(folder_name: str) -> str:
             """Попытаться распознать автора из имени папки, вернуть '' если не удалось."""
+            # Быстрая проверка через filename_blacklist — слова издателей/серий
+            folder_lower = folder_name.lower()
+            for bl in self.filename_blacklist:
+                if bl.lower() in folder_lower:
+                    return ''
             author = parse_author_from_folder_name(
                 folder_name,
                 male_names=self.male_names,
@@ -1548,10 +1553,16 @@ class Pass2SeriesFilename:
                 if series_from_block and (not validate or self._is_valid_series(series_from_block, skip_author_check=True)):
                     # ✅ ДОБАВЛЕНО: Подтверждение результата с помощью metadata
                     # Если есть metadata_series - проверяем совпадает ли она с найденной
-                    if metadata_series:
+                    # Но сначала отбрасываем metadata_series если это blacklist-слово (издатель/серия-обёртка)
+                    _effective_metadata_series = metadata_series
+                    if _effective_metadata_series and self.filename_blacklist:
+                        _ms_lower = _effective_metadata_series.lower()
+                        if any(bl.lower() in _ms_lower for bl in self.filename_blacklist):
+                            _effective_metadata_series = None
+                    if _effective_metadata_series:
                         # Очищаем оба значения для сравнения
                         metadata_cleaned = self._extract_series_from_brackets(
-                            self._extract_main_series_from_multi_level(metadata_series)
+                            self._extract_main_series_from_multi_level(_effective_metadata_series)
                         ).strip()
                         series_from_block_cleaned = self._extract_main_series_from_multi_level(series_from_block).strip()
                         

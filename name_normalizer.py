@@ -500,6 +500,11 @@ class AuthorName:
         
         Returns: Normalized name string (or empty if invalid or matches blacklist)
         """
+        # Special token: "Коллектив авторов" = anthology, not a person's name
+        _raw_lower = self.raw_name.lower()
+        if _raw_lower in ('коллектив авторов', 'collective authors', 'various authors'):
+            return 'Сборник'
+
         if not self.is_valid:
             return ""
         

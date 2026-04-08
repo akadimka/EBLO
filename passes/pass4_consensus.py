@@ -630,10 +630,12 @@ class Pass4Consensus:
             
             for record in author_records:
                 if record.proposed_series:
-                    # Extract base series (part before ". " if hierarchical)
+                    # Extract base series (part before ". " or "\" if hierarchical)
                     series = record.proposed_series
                     if '. ' in series:
                         base = series.split('. ')[0]
+                    elif '\\' in series:
+                        base = series.split('\\')[0]
                     else:
                         base = series
                     
@@ -662,3 +664,44 @@ class Pass4Consensus:
                                 hierarchical_unification_count += 1
         
         self.logger.log(f"[PASS 4] Unified {hierarchical_unification_count} hierarchical series variants")
+
+        # FOLDER_HIERARCHY CLEANUP: If series comes from folder_hierarchy and the folder name
+        # contains the author's own name (publisher "author spotlight" folders like
+        # "Fanzon. Фэнтези Стивена Браста"), the folder name is NOT a real series.
+        # Fall back to metadata_series if available, otherwise clear.
+        print("[PASS 4] Cleaning up folder_hierarchy series with embedded author names...")
+        folder_hierarchy_cleanup_count = 0
+
+        for record in records:
+            if record.series_source != "folder_hierarchy":
+                continue
+            if not record.proposed_series:
+                continue
+
+            # Build 4-char prefix sets for fuzzy Russian declension matching
+            # e.g. "Браст" → author prefix "Брас" matches series word "Браста"[:4] = "Брас"
+            author_prefixes = set(
+                w[:4].lower() for w in (record.proposed_author or '').split()
+                if len(w) >= 4
+            )
+            series_prefixes = set(
+                w[:4].lower() for w in record.proposed_series.split()
+                if len(w) >= 4
+            )
+
+            if author_prefixes & series_prefixes:
+                # Author name found in series name → publisher spotlight folder, not a series
+                # Also reject metadata_series that look like library classifications
+                # e.g. "Дик, Филип. Сборники" (Surname, Firstname. Category)
+                import re as _re
+                _lib_class_pattern = _re.compile(r'^\w[\w\s]+,\s+\w', _re.UNICODE)
+                meta = record.metadata_series or ''
+                if meta and not _lib_class_pattern.match(meta):
+                    record.proposed_series = meta
+                    record.series_source = "metadata"
+                else:
+                    record.proposed_series = ""
+                    record.series_source = ""
+                folder_hierarchy_cleanup_count += 1
+
+        self.logger.log(f"[PASS 4] Cleaned up {folder_hierarchy_cleanup_count} folder_hierarchy series with embedded author names")

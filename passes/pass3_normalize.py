@@ -45,7 +45,14 @@ class Pass3Normalize:
         for record in records:
             if not record.proposed_author or record.proposed_author == "Сборник":
                 continue
-            
+
+            # Если среди авторов есть "Коллектив авторов" → это антология, ставим Сборник
+            _authors_to_check = record.proposed_author.replace(';', ',')
+            if any(a.strip().lower().replace('ё', 'е') == 'коллектив авторов'
+                   for a in _authors_to_check.split(',')):
+                record.proposed_author = "Сборник"
+                continue
+
             original = record.proposed_author
             
             # Check for multi-author cases with different separators
