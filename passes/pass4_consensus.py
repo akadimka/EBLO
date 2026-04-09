@@ -729,3 +729,44 @@ class Pass4Consensus:
                 folder_hierarchy_cleanup_count += 1
 
         self.logger.log(f"[PASS 4] Cleaned up {folder_hierarchy_cleanup_count} folder_hierarchy series with embedded author names")
+
+        # FILENAME PREFIX AUTHOR CONSENSUS
+        # For records with [unknown] or empty author, check if the filename starts with
+        # a known author name from another file in the same folder.
+        # Use case: "Злой медик (сборник).fb2" has no metadata author, but the same folder
+        # contains "Злой медик. Тень медработника (сборник).fb2" which has author="Zлой Медик".
+        # The shared filename prefix identifies the author.
+        import re as _re_prefix
+        _MIXED_SCRIPT_NORM = str.maketrans('ZzАВЕКМНОРСТХ', 'ЗзАВЕКМНОРСТХ')  # Latin→Cyrillic lookalikes
+
+        def _norm_for_prefix(s: str) -> str:
+            return s.lower().replace('ё', 'е').translate(_MIXED_SCRIPT_NORM)
+
+        prefix_fixed_count = 0
+        for folder, group_records in groups.items():
+            unknown = [r for r in group_records
+                       if r.proposed_author in ('[unknown]', '') or not r.proposed_author]
+            if not unknown:
+                continue
+            # Build author → normalised-name map from known files
+            known = [(r.proposed_author, _norm_for_prefix(r.proposed_author))
+                     for r in group_records
+                     if r.proposed_author and r.proposed_author not in ('[unknown]', 'Сборник', 'Соавторство')]
+            if not known:
+                continue
+            for record in unknown:
+                stem = Path(record.file_path).stem
+                stem_norm = _norm_for_prefix(stem)
+                for orig_author, author_norm in known:
+                    if not author_norm:
+                        continue
+                    # Require filename to start with author name followed by a non-letter char
+                    if stem_norm.startswith(author_norm):
+                        next_char_idx = len(author_norm)
+                        if next_char_idx >= len(stem_norm) or not stem_norm[next_char_idx].isalpha():
+                            record.proposed_author = orig_author
+                            record.author_source = "filename"
+                            prefix_fixed_count += 1
+                            break
+
+        self.logger.log(f"[PASS 4] Fixed {prefix_fixed_count} [unknown] authors via filename prefix")
