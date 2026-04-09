@@ -1012,7 +1012,7 @@ class Pass2Filename:
         
         # Pattern 2: Other known meta-patterns that shouldn't create extra blocks
         # Remove tags/meta in parens at the end
-        cleaned = re.sub(r'\s*\([^)]*издание[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\([^)]*(?:издание|изд\.)[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*\(пер\.\s*[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*\(перевод[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*\(пер\)\s*$', '', cleaned, flags=re.IGNORECASE)

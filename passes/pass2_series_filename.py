@@ -1555,8 +1555,10 @@ class Pass2SeriesFilename:
         # ВАЖНО: Удалить метатеги из конца filename ПЕРЕД парсингом
         # "(СИ)" - Самиздат/Интернет
         # "(ЛП)" - Лицензионное произведение
+        # "(др. изд.)" / "(другое издание)" - ссылки на другое издание
         # Эти метатеги не должны влиять на извлечение series
         name_for_parsing = re.sub(r'\s*\([СЛ]И\)\s*$', '', name_without_ext).strip()
+        name_for_parsing = re.sub(r'\s*\([^)]*(?:издание|изд\.)[^)]*\)\s*$', '', name_for_parsing, flags=re.IGNORECASE).strip()
         
 
         
