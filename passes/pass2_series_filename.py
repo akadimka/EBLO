@@ -1636,7 +1636,12 @@ class Pass2SeriesFilename:
                 # Если Title это только точки - skip this pattern (it's a false match)
                 if title_candidate and all(c == '.' for c in title_candidate):
                     continue
-                
+
+                # Если Title начинается с "- " — паттерн захватил разделитель автор/название
+                # как часть Title; это признак ложного совпадения (напр. К.Дж. → Series="Дж", Title="- Доминион")
+                if title_candidate and title_candidate.startswith(('- ', '– ', '— ')):
+                    continue
+
                 for g_name in group_names:
                     if 'series' in g_name:
                         series_group_name = g_name
@@ -1823,9 +1828,11 @@ class Pass2SeriesFilename:
                 # Одно слово → вероятно фамилия автора
                 # Заканчивается на одну заглавную букву → формат "Фамилия И." (инициал) = автор
                 # Пример: "Кларк Ф" (Ф — инициал) или "Белоус" (одно слово)
+                # Содержит аббревиатурный паттерн → формат инициалов "Сэнсом К.Дж" = автор
                 _is_author_pattern = (
                     len(_ps_words) <= 1 or
-                    (len(_ps_words[-1]) == 1 and _ps_words[-1][0].isupper())
+                    (len(_ps_words[-1]) == 1 and _ps_words[-1][0].isupper()) or
+                    bool(re.search(r'[А-ЯA-Z]\.[А-Яа-яA-Za-z]', potential_series))
                 )
                 if _is_author_pattern:
                     pass  # Likely author name format, not a series
