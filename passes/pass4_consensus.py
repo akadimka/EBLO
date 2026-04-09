@@ -703,7 +703,14 @@ class Pass4Consensus:
             # Check 3: short author words appear in series (e.g. "Мо Янь" in "Мо Яня")
             _blacklist = [bl.lower() for bl in (self.settings.get_list('filename_blacklist') if self.settings else [])]
             _series_lower = record.proposed_series.lower()
-            is_publisher_branding = any(bl in _series_lower for bl in _blacklist)
+            import re as _re2
+            def _bl_matches(bl, text):
+                # Short blacklist entries must match as whole words to avoid
+                # substring false positives (e.g. "си" inside "цусимские")
+                if len(bl) < 4:
+                    return bool(_re2.search(r'(?<![а-яёa-z])' + _re2.escape(bl) + r'(?![а-яёa-z])', text, _re2.IGNORECASE))
+                return bl in text
+            is_publisher_branding = any(_bl_matches(bl, _series_lower) for bl in _blacklist)
             is_author_in_series = bool(author_prefixes & series_prefixes) or bool(author_short & series_words_lower)
 
             if is_publisher_branding or is_author_in_series:

@@ -470,7 +470,10 @@ class Pass2SeriesFilename:
                         # "Fanzon. Наш выбор. Куанг" содержит фамилию автора как ПОСЛЕДНЕЕ слово.
                         # Такие папки — организационные, а не серийные.
                         # Серию ищем сначала по имени файла, мета только подтверждает.
-                        _part_words = re.split(r'[\s.\-]+', part.strip())
+                        # ИСКЛЮЧЕНИЕ: "Серия (Автор)" — фамилия в скобках является лишь дизамбигуатором,
+                        # такая папка — это серия; проверяем только хвост БЕЗ скобок.
+                        _part_no_parens = re.sub(r'\s*\([^)]*\)\s*$', '', part.strip()).strip()
+                        _part_words = re.split(r'[\s.\-]+', _part_no_parens) if _part_no_parens else re.split(r'[\s.\-]+', part.strip())
                         _part_last_word = _part_words[-1].lower().replace('ё', 'е') if _part_words else ''
                         _author_words = set(w.lower().replace('ё', 'е') for w in author_name.split() if len(w) > 2)
                         _folder_ends_with_author = bool(_part_last_word and _part_last_word in _author_words)
@@ -1049,6 +1052,35 @@ class Pass2SeriesFilename:
                     # Переопределяем серию на основе папочного консенсуса
                     record.proposed_series = canonical_series
                     record.series_source = "folder_dataset"
+
+        # ДОПОЛНИТЕЛЬНЫЙ КОНСЕНСУС: папки с metadata-серией.
+        # Если большинство файлов одного автора в папке имеют одинаковую серию
+        # из любого источника — применяем её к аутсайдерам (файлам с другой серией).
+        # Это исправляет случаи когда часть файлов имеет правильную серию из metadata,
+        # а остальные — издательскую мета-серию («Военная фантастика (АСТ)»).
+        for folder_path, files_in_folder in folder_files.items():
+            if len(files_in_folder) < 2:
+                continue
+            authors_in_folder = {f.proposed_author.strip() for f in files_in_folder if f.proposed_author}
+            if len(authors_in_folder) > 1:
+                continue  # Коллекция — не трогаем
+            # Считаем голоса за каждую серию (источниками выше metadata)
+            from collections import Counter
+            series_votes = Counter(
+                f.proposed_series
+                for f in files_in_folder
+                if f.proposed_series and f.series_source != "folder_dataset"
+            )
+            if not series_votes:
+                continue
+            top_series, top_count = series_votes.most_common(1)[0]
+            if top_count <= 1:
+                continue  # Нет явного большинства
+            # Применяем к файлам, у которых серия отличается
+            for record in files_in_folder:
+                if record.proposed_series != top_series:
+                    record.proposed_series = top_series
+                    record.series_source = "author-consensus"
 
     def _apply_series_folder_pattern_consensus(self, records: List[BookRecord]) -> None:
         """
