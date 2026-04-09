@@ -195,8 +195,21 @@ class Pass3Normalize:
                     orig_first = record.proposed_author.split()[0].lower().replace('ё', 'е')
                     norm_first = normalized_candidate.split()[0].lower().replace('ё', 'е')
                     if orig_first != norm_first:
-                        # normalize_format tried to reorder — keep ФИ order, only clean up
-                        normalized = self.normalizer.apply_conversions(record.proposed_author)
+                        # normalize_format tried to reorder — check if metadata confirms the new order.
+                        # Example: "Чжэён Пак" (filename) → normalized "Пак Чжэен":
+                        #   metadata_authors="Пак Чжэен", meta_first="пак" == norm_first="пак" → accept.
+                        # Example: "Линдквист Йон Айвиде" → normalized "Айвиде …":
+                        #   metadata confirms "Линдквист …" → meta_first != norm_first → keep original.
+                        _meta_first = (record.metadata_authors or "").strip().split()[0].lower().replace('ё', 'е') \
+                            if record.metadata_authors else ""
+                        if _meta_first and _meta_first == norm_first:
+                            # Metadata confirms the reorder — trust normalization (includes ё→е)
+                            normalized = normalized_candidate
+                        else:
+                            # Keep original ФИ order; still apply ё→е and conversions
+                            normalized = self.normalizer.apply_conversions(
+                                record.proposed_author
+                            ).replace('ё', 'е')
                     else:
                         normalized = normalized_candidate
                 else:
