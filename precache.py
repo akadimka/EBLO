@@ -57,9 +57,11 @@ class Precache:
             return False
         
         # Check for abbreviated name pattern: "А.Михайловский" or "А. Михайловский"
-        # Pattern: single capital letter (optional dot and space) followed by capitalized word
+        # Pattern: single capital letter (NOT preceded by another Cyrillic letter — i.e. a real initial,
+        # not the last letter of an acronym like "МИФ") followed by optional dot/space and a surname.
+        # Negative lookbehind (?<![а-яёА-Я]) prevents "Ф" in "МИФ." from matching as an initial.
         import re
-        if re.search(r'[А-Я]\.*\s*[А-Я][а-яё]+', author_name):
+        if re.search(r'(?<![а-яёА-Я])[А-Я]\.*\s*[А-Я][а-яё]+', author_name):
             return True  # Matches abbreviated name pattern
         
         # Split author name into words

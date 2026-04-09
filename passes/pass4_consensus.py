@@ -720,7 +720,9 @@ class Pass4Consensus:
                 import re as _re
                 _lib_class_pattern = _re.compile(r'^\w[\w\s]+,\s+\w', _re.UNICODE)
                 meta = record.metadata_series or ''
-                if meta and not _lib_class_pattern.match(meta):
+                # Дополнительно: не используем metadata как fallback если оно само в blacklist
+                _meta_blacklisted = bool(meta) and any(_bl_matches(bl, meta.lower()) for bl in _blacklist)
+                if meta and not _lib_class_pattern.match(meta) and not _meta_blacklisted:
                     record.proposed_series = meta
                     record.series_source = "metadata"
                 else:

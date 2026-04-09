@@ -576,11 +576,19 @@ class Pass2SeriesFilename:
                     # название книги просто совпадает (1-я книга серии называется так же, как серия)
                     # ИСКЛЮЧЕНИЕ 2: если кандидат явно присутствует в скобках в имени файла —
                     # "(Серый. Трилогия)" → серия "Серый" надёжна даже если title="Серый"
+                    # ИСКЛЮЧЕНИЕ 3: если в имени файла кандидат стоит перед номером тома
+                    # "Чисто шведские убийства 1. Отпуск в раю" → кандидат явно является серией,
+                    # даже если file_title тоже начинается с него (1-я книга = имя серии + подзаголовок)
                     _meta_lower = record.metadata_series.lower().replace('ё', 'е') if record.metadata_series else ''
                     _is_confirmed_by_meta = bool(_meta_lower and _cand_lower.replace('ё', 'е') == _meta_lower)
                     _fn_stem_lower = Path(record.file_path).stem.lower()
                     _is_in_parens = bool(_re.search(r'\(\s*' + _re.escape(_cand_lower), _fn_stem_lower))
-                    if not _is_confirmed_by_meta and not _is_in_parens and (
+                    # Кандидат + номер в имени файла: "... - Серия N." или "... - Серия N "
+                    _is_numbered_series = bool(_re.search(
+                        _re.escape(_cand_lower.replace('ё', 'е')) + r'\s+\d+[\s.]',
+                        _fn_stem_lower.replace('ё', 'е')
+                    ))
+                    if not _is_confirmed_by_meta and not _is_in_parens and not _is_numbered_series and (
                        (_title_lower and _cand_lower == _title_lower) or \
                        (_title_np_lower and _cand_lower == _title_np_lower) or \
                        (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
@@ -870,6 +878,24 @@ class Pass2SeriesFilename:
             )
             if not author:
                 return ''
+            # Валидация: убеждаемся что извлечённое имя содержит реальное имя человека.
+            # Это отсеивает коллекционные папки вроде «Романы МИФ. Один момент - целая жизнь»,
+            # которые parse_author_from_folder_name может неверно распознать как автора.
+            # Используем ту же логику что и precache._contains_valid_name, с корректным
+            # lookbehind чтобы «Ф» в «МИФ.» не считался инициалом.
+            author_valid = False
+            # 1. Проверка по спискам имён
+            for word in author.split():
+                word_clean = word.strip('.,;:!?').lower()
+                if word_clean in self.male_names or word_clean in self.female_names:
+                    author_valid = True
+                    break
+            # 2. Паттерн инициала: "А.Фамилия" — инициал не должен быть частью слова (МИ<Ф>)
+            if not author_valid:
+                if re.search(r'(?<![а-яёА-Я])[А-Я]\.*\s*[А-Я][а-яё]+', author):
+                    author_valid = True
+            if not author_valid:
+                return ''
             # Убираем "и др", "et al." в конце
             author = _ET_AL_PATTERN.sub('', author).strip()
             return author
@@ -1063,7 +1089,19 @@ class Pass2SeriesFilename:
                 continue
             authors_in_folder = {f.proposed_author.strip() for f in files_in_folder if f.proposed_author}
             if len(authors_in_folder) > 1:
-                continue  # Коллекция — не трогаем
+                continue  # Разные proposed_author — не трогаем
+            # Главное правило: если в папке книги РАЗНЫХ реальных авторов —
+            # это жанровая коллекция или издательская серия, а не авторская серия.
+            # Имя папки (например, «МИФ Проза», «Клуб убийств») = ярлык, не серия.
+            # Проверяем metadata_authors, т.к. folder_dataset назначает имя папки
+            # как proposed_author для всех файлов, маскируя реальное разнообразие.
+            real_meta_authors = {
+                f.metadata_authors.strip()
+                for f in files_in_folder
+                if f.metadata_authors and f.metadata_authors.strip() not in ('[unknown]', '')
+            }
+            if len(real_meta_authors) > 1:
+                continue  # Многоавторная коллекция — не трогаем
             # Считаем голоса за каждую серию (источниками выше metadata)
             from collections import Counter
             series_votes = Counter(
@@ -1075,12 +1113,14 @@ class Pass2SeriesFilename:
                 continue
             top_series, top_count = series_votes.most_common(1)[0]
             if top_count <= 1:
-                continue  # Нет явного большинства
-            # Применяем к файлам, у которых серия отличается
+                continue
+            # Применяем только к файлам без серии или с низкоприоритетным источником.
+            # Не трогаем то, что уже надёжно определено из имени файла.
             for record in files_in_folder:
                 if record.proposed_series != top_series:
-                    record.proposed_series = top_series
-                    record.series_source = "author-consensus"
+                    if record.series_source not in ('filename', 'filename+meta_confirmed'):
+                        record.proposed_series = top_series
+                        record.series_source = "author-consensus"
 
     def _apply_series_folder_pattern_consensus(self, records: List[BookRecord]) -> None:
         """
