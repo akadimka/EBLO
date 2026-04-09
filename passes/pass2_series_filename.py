@@ -569,11 +569,15 @@ class Pass2SeriesFilename:
                     # Прямое совпадение ИЛИ кандидат является началом названия книги
                     # (ловит обрезанные кандидаты типа "Спасение (альт" от "Спасение (альт. перевод)")
                     # ИЛИ кандидат начинается с базового названия (без скобок) — "спасение (альт" startswith "спасение"
-                    # ИСКЛЮЧЕНИЕ: если кандидат совпадает с metadata_series → это подтверждённая серия,
+                    # ИСКЛЮЧЕНИЕ 1: если кандидат совпадает с metadata_series → это подтверждённая серия,
                     # название книги просто совпадает (1-я книга серии называется так же, как серия)
+                    # ИСКЛЮЧЕНИЕ 2: если кандидат явно присутствует в скобках в имени файла —
+                    # "(Серый. Трилогия)" → серия "Серый" надёжна даже если title="Серый"
                     _meta_lower = record.metadata_series.lower().replace('ё', 'е') if record.metadata_series else ''
                     _is_confirmed_by_meta = bool(_meta_lower and _cand_lower.replace('ё', 'е') == _meta_lower)
-                    if not _is_confirmed_by_meta and (
+                    _fn_stem_lower = Path(record.file_path).stem.lower()
+                    _is_in_parens = bool(_re.search(r'\(\s*' + _re.escape(_cand_lower), _fn_stem_lower))
+                    if not _is_confirmed_by_meta and not _is_in_parens and (
                        (_title_lower and _cand_lower == _title_lower) or \
                        (_title_np_lower and _cand_lower == _title_np_lower) or \
                        (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
