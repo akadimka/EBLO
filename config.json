@@ -372,6 +372,10 @@
     {
       "pattern": "Author - Series. Series. Title",
       "example": "Уикс Брент - Кодекс ка'кари 2. Хроники Кайлара 1. Немезида ночного ангела.fb2"
+    },
+    {
+      "pattern": "Author - Series. Series. service_words. Title",
+      "example": "Клавелл Джеймс - Азиатская сага 04. Роман о Гонконге. Книга 1. На краю пропасти.fb2"
     }
   ],
   "series_patterns_in_metadata": [

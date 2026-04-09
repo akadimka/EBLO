@@ -207,14 +207,21 @@ class Pass3Normalize:
                 normalized_count += 1
 
         # Капитализация: каждое слово в proposed_author начинается с заглавной буквы.
-        # Исключение: "Соавторство", "Сборник" — уже корректны.
+        # Исключения: "Соавторство", "Сборник" — уже корректны.
+        # Частицы имён (де, ван, фон…) всегда остаются строчными.
+        _PARTICLES_LOWER = frozenset({
+            'де', 'ди', 'дю', 'ду', 'да', 'дер', 'ден', 'дель', 'дела', 'делла',
+            'дос', 'дас', 'ван', 'фон', 'ля', 'ле', 'ла', 'о',
+            'de', 'di', 'du', 'da', 'der', 'den', 'van', 'von',
+            'la', 'le', 'les', 'del', 'della', 'dos', 'das',
+        })
         for record in records:
             if not record.proposed_author:
                 continue
             if record.proposed_author in ("Сборник", "Соавторство", "[unknown]"):
                 continue
             capitalized = ' '.join(
-                w[0].upper() + w[1:] if w else w
+                w if w.lower() in _PARTICLES_LOWER else (w[0].upper() + w[1:] if w else w)
                 for w in record.proposed_author.split(' ')
             )
             if capitalized != record.proposed_author:
@@ -230,5 +237,16 @@ class Pass3Normalize:
                 if colon_char in record.proposed_author:
                     record.proposed_author = record.proposed_author.split(colon_char, 1)[1].strip()
                     break
+
+        # Санитизация: убрать символы, недопустимые в именах папок Windows/Linux,
+        # а также случайные знаки "=", которые иногда попадают из метаданных.
+        # Windows-запрещённые: \ / : * ? " < > |   Linux-запрещённые: /
+        import re as _re_san
+        _SANITIZE_RE = _re_san.compile(r'[\\/:*?"<>=|]')
+        for record in records:
+            if record.proposed_author:
+                sanitized = _SANITIZE_RE.sub('', record.proposed_author).strip()
+                if sanitized != record.proposed_author:
+                    record.proposed_author = sanitized
 
         self.logger.log(f"[PASS 3] Normalized {normalized_count} author names")

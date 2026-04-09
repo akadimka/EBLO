@@ -152,9 +152,11 @@ class Pass2Filename:
         extracted_lower = extracted.lower().strip()
         expanded_lower = expanded.lower().strip()
         
-        # Only cache if they differ
+        # Prefer longer (more complete) forms — never downgrade to a shorter one
         if extracted_lower != expanded_lower:
-            self.author_cache[extracted_lower] = expanded
+            existing = self.author_cache.get(extracted_lower)
+            if not existing or len(expanded.split()) >= len(existing.split()):
+                self.author_cache[extracted_lower] = expanded
     
     def _build_author_cache_from_extraction(self, author_str: str) -> None:
         """Build cache from successfully extracted author(s).
@@ -184,13 +186,14 @@ class Pass2Filename:
             # Cache the full name
             self.author_cache[author_lower] = author
             
-            # Also cache each word (surname, name) separately
+            # Also cache each word (surname, name) separately.
+            # Prefer longer (more complete) forms — overwrite shorter existing entries.
             parts = author.split()
             for part in parts:
                 if len(part) > 2:  # Skip very short parts (initials like "А.")
                     part_lower = part.lower()
-                    # Don't override existing full-name entries
-                    if part_lower not in self.author_cache:
+                    existing = self.author_cache.get(part_lower)
+                    if not existing or len(author.split()) > len(existing.split()):
                         self.author_cache[part_lower] = author
     
     def prebuild_author_cache(self, records: List) -> None:
@@ -238,12 +241,14 @@ class Pass2Filename:
                     for idx, part in enumerate(author_words):
                         if len(part) > 2:
                             part_lower = part.lower()
-                            if part_lower not in self.author_cache:
-                                if idx == 0:
-                                    self.author_cache[part_lower] = author
-                                else:
-                                    rest = [w for i, w in enumerate(author_words) if i != idx]
-                                    self.author_cache[part_lower] = part + ' ' + ' '.join(rest)
+                            if idx == 0:
+                                candidate = author
+                            else:
+                                rest = [w for i, w in enumerate(author_words) if i != idx]
+                                candidate = part + ' ' + ' '.join(rest)
+                            existing = self.author_cache.get(part_lower)
+                            if not existing or len(candidate.split()) > len(existing.split()):
+                                self.author_cache[part_lower] = candidate
                     cached_count += 1
 
             except Exception:
@@ -275,9 +280,16 @@ class Pass2Filename:
         
         extracted_lower = extracted_author.lower().strip()
         
-        # STEP 1: Check author cache first (knowledge from other files)
-        if extracted_lower in self.author_cache:
-            return self.author_cache[extracted_lower]
+        # STEP 1: Check author cache first (knowledge from other files).
+        # BUT: for single-word extractions (surname only), the cache entry might have come
+        # from a DIFFERENT author who shares the same surname (e.g. "Стайн Роберт" vs
+        # "Стайн Гарт"). Always prefer the FB2 file's own metadata over such cross-file
+        # cache hits when the extracted form is a single word.
+        cache_hit = self.author_cache.get(extracted_lower)
+        is_single_word = len(extracted_author.split()) == 1
+        if cache_hit and not is_single_word:
+            return cache_hit
+        # For single-word: fall through to FB2 check; use cache only as final fallback
         
         # STEP 2: Try FB2 metadata if available
         if fb2_path and fb2_path.exists():
@@ -366,7 +378,11 @@ class Pass2Filename:
             except Exception as e:
                 self.logger.log(f"[PASS 2] WARNING: Failed to validate author against FB2: {e}")
         
-        # No match in cache or FB2, return original extraction
+        # FB2 lookup found nothing — use cross-file cache hit if available (single-word fallback)
+        if cache_hit:
+            return cache_hit
+        
+        # No match anywhere, return original extraction
         return extracted_author
     
     def _looks_like_author_name(self, text: str) -> bool:
@@ -785,6 +801,40 @@ class Pass2Filename:
                 # else: keep existing (might be metadata or empty)
         
         print(f"[PASS 2] Extracted {processed_count} authors from filenames, skipped {skipped_count} folder_dataset records, errors: {error_count}")
+
+        # SECOND PASS: upgrade short author forms to longer ones now in cache.
+        # Needed because processing order is unpredictable: a file with short surname-only
+        # extraction ("Робертс Грегори") may have been processed before another file that
+        # extracted the full 3-word form ("Робертс Грегори Дэвид") and populated the cache.
+        upgraded = 0
+        for record in records:
+            if record.author_source in ("folder_dataset", "collection", "metadata"):
+                continue
+            if not record.proposed_author:
+                continue
+            author_words = record.proposed_author.split()
+            author_lower = record.proposed_author.lower().strip()
+
+            # Try exact-key cache lookup first
+            cached = self.author_cache.get(author_lower)
+
+            # If no exact match (or exact match is not longer), try surname-only lookup.
+            # This upgrades e.g. "Фальконес Ильдефонсо" → "Фальконес Ильдефонсо де Сьерра"
+            # when the cache has key "фальконес" → full 3-word form.
+            if (not cached or len(cached.split()) <= len(author_words)) and len(author_words) >= 1:
+                first_lower = author_words[0].lower()
+                if first_lower != author_lower:  # avoid re-checking single-word authors
+                    surname_cached = self.author_cache.get(first_lower)
+                    if (surname_cached
+                            and len(surname_cached.split()) > len(author_words)
+                            and surname_cached.split()[0].lower() == first_lower):
+                        cached = surname_cached
+
+            if cached and len(cached.split()) > len(author_words):
+                record.proposed_author = cached
+                upgraded += 1
+        if upgraded:
+            self.logger.log(f"[PASS 2] Upgraded {upgraded} short author names to longer cached forms")
     
     def _extract_by_pattern(self, filename: str, pattern: str, struct: dict) -> str:
         """Extract author from filename based on matched pattern.

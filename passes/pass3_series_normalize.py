@@ -65,6 +65,7 @@ class Pass3SeriesNormalize:
                 continue
             
             normalized = self._normalize_series_name(record.proposed_series)
+            normalized = self._sanitize_for_folder(normalized)
             
             if normalized != record.proposed_series:
                 record.proposed_series = normalized
@@ -137,3 +138,8 @@ class Pass3SeriesNormalize:
                 break
         
         return series.strip()
+
+    def _sanitize_for_folder(self, value: str) -> str:
+        """Убрать символы, недопустимые в именах папок Windows/Linux, и случайные '='."""
+        import re
+        return re.sub(r'[\\/:*?"<>=|]', '', value).strip()
