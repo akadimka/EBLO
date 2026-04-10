@@ -599,7 +599,11 @@ class Pass2SeriesFilename:
                        # Пример: candidate="Правдивая история о том, как студентка исчезла у всех на виду"
                        # title="Пропавшая: Исчезновение Лорен Спирер. Правдивая история..."
                        # → title.endswith(candidate) → это подзаголовок, не серия.
-                       (_title_lower and _title_lower.endswith(_cand_lower) and len(_cand_lower) >= 10)):
+                       (_title_lower and _title_lower.endswith(_cand_lower) and len(_cand_lower) >= 10) or \
+                       # ИСКЛЮЧЕНИЕ guard: кандидат является подстрокой заголовка (фрагмент в середине).
+                       # Пример: candidate="Рязань, год" (блок из "Время умирать. Рязань, год 1237")
+                       # title="Время умирать. Рязань, год 1237" → candidate in title → не серия.
+                       (_title_lower and _cand_lower in _title_lower and len(_cand_lower) >= 8)):
                         series_candidate = None  # Название книги ≠ серия
 
                 # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)
@@ -621,6 +625,21 @@ class Pass2SeriesFilename:
                     author_for_validation = record.proposed_author or None
                     
                     if self._is_valid_series(clean, extracted_author=author_for_validation):
+                        # ✅ Если extracted series является частью metadata_series
+                        # (например "Амур" ⊂ "Амур. Лицом к лицу") → расширяем до полного имени.
+                        # Это покрывает серии с точкой в названии, которые токенайзер разбивает.
+                        if record.metadata_series:
+                            meta_clean = record.metadata_series.strip()
+                            meta_lower = meta_clean.lower().replace('ё', 'е')
+                            clean_lower_norm = clean.lower().replace('ё', 'е')
+                            if (meta_lower != clean_lower_norm and
+                                    (meta_lower.startswith(clean_lower_norm + '.') or
+                                     meta_lower.startswith(clean_lower_norm + ' ') or
+                                     clean_lower_norm in meta_lower)):
+                                clean = self._fix_russian_grammar(meta_clean)
+                                record.proposed_series = clean
+                                record.series_source = "filename+meta_confirmed"
+                                continue
                         # Исправляем грамматику русского языка (добавляем запятую перед "что")
                         clean = self._fix_russian_grammar(clean)
                         record.proposed_series = clean
@@ -664,7 +683,9 @@ class Pass2SeriesFilename:
                                 match = re.search(r'^(.+?)\s+[IVX]+\s*$', second_part)
                             if match:
                                 simple_series = match.group(1).strip()
-                                if self._is_valid_series(simple_series, extracted_author=record.proposed_author):
+                                _ftitle = (record.file_title or '').lower()
+                                _in_title = bool(_ftitle and simple_series.lower() in _ftitle)
+                                if not _in_title and self._is_valid_series(simple_series, extracted_author=record.proposed_author):
                                     series_candidate = simple_series
                 
                 # ✅ НОВОЕ: Попробуем "Author - Series NUM или N-M" паттерн
@@ -682,7 +703,9 @@ class Pass2SeriesFilename:
                         )
                         
                         if looks_like_author:
-                            if self._is_valid_series(series_part, extracted_author=record.proposed_author):
+                            _ftitle = (record.file_title or '').lower()
+                            _in_title = bool(_ftitle and series_part.lower() in _ftitle)
+                            if not _in_title and self._is_valid_series(series_part, extracted_author=record.proposed_author):
                                 series_candidate = series_part
             
             if series_candidate:
