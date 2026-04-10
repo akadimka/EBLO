@@ -594,6 +594,12 @@ class Pass2SeriesFilename:
                        (_title_lower and _cand_lower == _title_lower) or \
                        (_title_np_lower and _cand_lower == _title_np_lower) or \
                        (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
+                       # ИСКЛЮЧЕНИЕ: однословный кандидат без подтверждённой metadata_series,
+                       # а заголовок начинается с этого слова → это первое слово заголовка, не серия.
+                       # Пример: "Куонг Валери Тонг - Бей. Беги. Замри" → candidate="Бей", title="Бей. Беги. Замри"
+                       (not record.metadata_series and
+                        ' ' not in _cand_lower and
+                        _title_lower and _title_lower.startswith(_cand_lower)) or \
                        (_title_np_lower and len(_title_np_lower) >= 4 and _cand_lower.startswith(_title_np_lower)) or \
                        # ИСКЛЮЧЕНИЕ guard: кандидат является хвостом заголовка (subtitle-суффикс).
                        # Пример: candidate="Правдивая история о том, как студентка исчезла у всех на виду"
