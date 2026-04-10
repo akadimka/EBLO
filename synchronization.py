@@ -62,6 +62,7 @@ class SynchronizationService:
             'files_moved': 0,
             'duplicates_found': 0,
             'duplicates_deleted': 0,
+            'compilation_deletions': 0,
             'folders_deleted': 0,
             'errors': 0,
             'total_files': 0,
@@ -221,28 +222,39 @@ class SynchronizationService:
                 self._log("Синхронизация: нет файлов в исходной папке")
                 return self.stats
             
-            # Step 2: Build folder structure and detect duplicates
+            # Step 2: Deduplicate by compilation (compilations win over single volumes)
+            if progress_callback:
+                progress_callback(13, 100, "Дедупликация: компиляции vs одиночные тома")
+
+            records, compilation_deletions = self._deduplicate_by_compilation(
+                records, progress_callback
+            )
+            if compilation_deletions:
+                self._log(f"  Компиляционная дедупликация: удалено {len(compilation_deletions)} одиночных томов")
+                self._delete_records_and_files(compilation_deletions, self.last_scan_path)
+
+            # Step 3: Build folder structure and detect duplicates
             if progress_callback:
                 progress_callback(15, 100, "Анализ дубликатов")
             
             folder_structure = self._build_folder_structure(records, progress_callback)
             
-            # Step 3: Move files and track successfully moved
+            # Step 4: Move files and track successfully moved
             if progress_callback:
                 progress_callback(50, 100, "Перемещение файлов в библиотеку")
-            
+
             moved_records = self._move_files(records, folder_structure, progress_callback)
-            
+
             self._log(f"Всего перемещено: {len(moved_records)} файлов")
             self._log(f"Готово к внесению в БД: {len(moved_records)} записей")
-            
-            # Step 4: Update database with moved files
+
+            # Step 5: Update database with moved files
             if progress_callback:
                 progress_callback(80, 100, "Обновление базы данных")
-            
+
             self._update_database(moved_records, progress_callback)
-            
-            # Step 5: Cleanup empty folders
+
+            # Step 6: Cleanup empty folders
             if progress_callback:
                 progress_callback(90, 100, "Очистка пустых папок")
             
@@ -258,7 +270,8 @@ class SynchronizationService:
             self._log("=" * 60)
             self._log("ИТОГОВАЯ СТАТИСТИКА:")
             self._log(f"  Файлов перемещено: {self.stats['files_moved']}")
-            self._log(f"  Дубликатов найдено и удалено: {self.stats['duplicates_found']}")
+            self._log(f"  Дубликатов (по БД) найдено и удалено: {self.stats['duplicates_found']}")
+            self._log(f"  Одиночных томов удалено по компиляциям: {self.stats.get('compilation_deletions', 0)}")
             self._log(f"  Папок удалено: {self.stats['folders_deleted']}")
             self._log(f"  Ошибок: {self.stats['errors']}")
             self._log("=" * 60)
@@ -419,6 +432,204 @@ class SynchronizationService:
         """
         # For now, return empty - can be enhanced to parse from metadata
         return ""
+
+    # ---------------------------------------------------------------------------
+    # Compilation-based deduplication
+    # ---------------------------------------------------------------------------
+
+    # Ключевые слова, сигнализирующие что файл является компиляцией нескольких томов.
+    # Значение — сколько томов охватывает (None = неизвестно).
+    _COMPILATION_KEYWORDS: Dict[str, Optional[int]] = {
+        'дилогия': 2, 'трилогия': 3, 'тетралогия': 4, 'пенталогия': 5,
+        'гексалогия': 6, 'гептало': 7, 'октало': 8,
+        'дилог': 2, 'трилог': 3, 'тетралог': 4,
+        'omnibus': None, 'omnib': None,
+        'сборник': None, 'тетралог': 4,
+    }
+
+    def _classify_record(self, record) -> Tuple[str, set]:
+        """Классифицировать запись как компиляцию или одиночный том.
+
+        Returns:
+            ('compilation', covered_volumes) | ('single', {volume_num}) | ('unknown', set())
+            covered_volumes — set номеров томов, которые охватывает компиляция.
+            Пустой set означает «является компиляцией, но diапазон неизвестен».
+        """
+        sn = (getattr(record, 'series_number', '') or '').strip()
+
+        # series_number = "1-4" → это явный диапазон компиляции
+        range_m = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', sn)
+        if range_m:
+            lo, hi = int(range_m.group(1)), int(range_m.group(2))
+            return 'compilation', set(range(lo, hi + 1))
+
+        stem = Path(record.file_path).stem.lower()
+        title_lower = (record.file_title or '').lower()
+        combined = stem + ' ' + title_lower
+
+        # Паттерн "(N-M)" в имени файла или заголовке
+        paren_range = re.search(r'\(\s*(\d+)\s*[-–]\s*(\d+)\s*\)', combined)
+        if paren_range:
+            lo, hi = int(paren_range.group(1)), int(paren_range.group(2))
+            return 'compilation', set(range(lo, hi + 1))
+
+        # Ключевые слова компиляции
+        for kw, count in self._COMPILATION_KEYWORDS.items():
+            if kw in combined:
+                return 'compilation', set(range(1, count + 1)) if count else set()
+
+        # Несколько заголовков перечислены через ". " или ":" в file_title → компиляция
+        title = record.file_title or ''
+        if len(re.findall(r'\.\s+[А-ЯЁA-Z]', title)) >= 2:
+            return 'compilation', set()
+
+        # Одиночный том — series_number — целое число
+        if sn and re.match(r'^\d+$', sn):
+            return 'single', {int(sn)}
+
+        # Пробуем извлечь номер из паттерна "... N. Title" или "... - N. Title"
+        num_m = re.search(r'(?:[-–\s])(\d{1,3})\.\s+[А-ЯЁA-Z]', Path(record.file_path).stem)
+        if num_m:
+            return 'single', {int(num_m.group(1))}
+
+        return 'unknown', set()
+
+    def _deduplicate_by_compilation(
+        self,
+        records: List,
+        progress_callback: Optional[Callable] = None
+    ) -> Tuple[List, List]:
+        """Дедуплицировать записи: компиляции имеют приоритет над одиночными томами.
+
+        Правило:
+        - Компиляция всегда остаётся.
+        - Одиночный том удаляется, если его номер охвачен хотя бы одной компиляцией
+          той же серии того же автора.
+        - Одиночные тома с номерами вне диапазона компиляций — остаются.
+        - Файлы без серии и файлы с неизвестным типом — остаются (не трогаем).
+
+        Returns:
+            (records_to_keep, records_to_delete)
+        """
+        self._log("Шаг 1.5: Дедупликация по компиляциям")
+
+        # Группируем только файлы с author + series
+        groups: Dict[Tuple[str, str], List] = defaultdict(list)
+        no_series: List = []
+
+        for rec in records:
+            author = (rec.proposed_author or '').strip()
+            series = (rec.proposed_series or '').strip()
+            if author and series:
+                groups[(author, series)].append(rec)
+            else:
+                no_series.append(rec)
+
+        to_keep: List = list(no_series)
+        to_delete: List = []
+        total_deleted = 0
+
+        for (author, series), group in groups.items():
+            classified = [(rec, self._classify_record(rec)) for rec in group]
+
+            compilations = [(rec, vols) for rec, (kind, vols) in classified if kind == 'compilation']
+            singles      = [(rec, vols) for rec, (kind, vols) in classified if kind == 'single']
+            unknowns     = [rec         for rec, (kind, _)    in classified if kind == 'unknown']
+
+            if not compilations:
+                # Нет компиляций — нечего дедублировать
+                to_keep.extend(rec for rec, _ in classified)
+                continue
+
+            # Строим покрытие — объединение диапазонов всех компиляций
+            covered: set = set()
+            unknown_range_compilations = 0
+            for _, vols in compilations:
+                if vols:
+                    covered |= vols
+                else:
+                    unknown_range_compilations += 1
+
+            self._log(f"  {author} / {series}: "
+                      f"{len(compilations)} компил., {len(singles)} одиночных, "
+                      f"покрытие={sorted(covered) if covered else '?'}")
+
+            # Компиляции и неизвестные — всегда оставляем
+            to_keep.extend(rec for rec, _ in compilations)
+            to_keep.extend(unknowns)
+
+            for rec, vols in singles:
+                if covered and vols and vols.issubset(covered):
+                    # Том полностью покрыт компиляцией → удаляем
+                    self._log(f"    ✗ УДАЛИТЬ: {Path(rec.file_path).name} (тома {sorted(vols)} ⊆ {sorted(covered)})")
+                    to_delete.append(rec)
+                    total_deleted += 1
+                elif unknown_range_compilations > 0 and not covered:
+                    # Есть компиляция с неизвестным диапазоном — безопаснее удалить одиночку
+                    self._log(f"    ✗ УДАЛИТЬ (неизв. компиляция): {Path(rec.file_path).name}")
+                    to_delete.append(rec)
+                    total_deleted += 1
+                else:
+                    # Том вне покрытия → оставляем
+                    self._log(f"    ✓ ОСТАВИТЬ: {Path(rec.file_path).name} (том {sorted(vols)} вне диапазона)")
+                    to_keep.append(rec)
+
+        self._log(f"  Итого: оставить {len(to_keep)}, удалить {total_deleted}")
+        return to_keep, to_delete
+
+    def _delete_records_and_files(
+        self,
+        records_to_delete: List,
+        scan_path: Path,
+    ) -> None:
+        """Физически удалить файлы и их записи из БД.
+
+        Args:
+            records_to_delete: Записи, файлы которых нужно удалить.
+            scan_path: Корневой путь откуда берутся исходные файлы.
+        """
+        if not records_to_delete:
+            return
+
+        deleted_paths = []
+
+        for rec in records_to_delete:
+            src = scan_path / rec.file_path
+            if src.exists():
+                try:
+                    src.unlink()
+                    self._log(f"  ✓ Удалён файл: {rec.file_path}")
+                    deleted_paths.append(rec.file_path)
+                    self.stats['duplicates_deleted'] = self.stats.get('duplicates_deleted', 0) + 1
+                except Exception as e:
+                    self._log(f"  ✗ Не удалось удалить {rec.file_path}: {e}")
+                    self.stats['errors'] += 1
+            else:
+                self._log(f"  ⚠ Файл не найден (уже удалён?): {rec.file_path}")
+
+        # Удаляем соответствующие записи из БД (если там уже есть)
+        if deleted_paths and self.db_path.exists():
+            try:
+                conn = sqlite3.connect(str(self.db_path))
+                cursor = conn.cursor()
+                # В БД file_path относительный к library_path, но при первой синхронизации
+                # файл ещё не в библиотеке — ищем по title+author+series тоже.
+                for rec in records_to_delete:
+                    cursor.execute(
+                        "DELETE FROM books WHERE file_path = ? OR "
+                        "(author = ? AND series = ? AND title = ?)",
+                        (
+                            rec.file_path,
+                            rec.proposed_author or '',
+                            rec.proposed_series or '',
+                            rec.file_title or '',
+                        )
+                    )
+                conn.commit()
+                self._log(f"  БД: удалено записей ~ {len(records_to_delete)}")
+                conn.close()
+            except Exception as e:
+                self._log(f"  Ошибка при удалении из БД: {e}")
     
     def _move_files(
         self,
