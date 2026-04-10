@@ -541,7 +541,7 @@ class Pass2SeriesFilename:
             series_candidate = self._extract_series_from_filename(
                 record.file_path, validate=False, metadata_series=record.metadata_series
             )
-            
+
             if series_candidate:
                 # Базовые фильтры (НЕ валидация) — ДО записи в extracted_series_candidate
                 # Запятая-разделитель авторов стоит перед словом с заглавной буквы
@@ -556,9 +556,11 @@ class Pass2SeriesFilename:
                     )
                     if all_capitalized:
                         series_candidate = None  # Список авторов
-                elif self._is_author_surname(series_candidate, record.proposed_author):
+                # ВАЖНО: проверки ниже — независимые (не elif), чтобы срабатывать
+                # даже когда кандидат прошёл comma-check (например "о том, как")
+                if series_candidate and self._is_author_surname(series_candidate, record.proposed_author):
                     series_candidate = None  # Фамилия или полное имя автора
-                elif record.file_title:
+                if series_candidate and record.file_title:
                     # TITLE-AS-SERIES GUARD: если кандидат совпадает с названием книги,
                     # это ложный матч (например "Книга" в service_words увела нас не туда).
                     # Очищаем file_title от мусора [litres] и сравниваем.
@@ -592,9 +594,14 @@ class Pass2SeriesFilename:
                        (_title_lower and _cand_lower == _title_lower) or \
                        (_title_np_lower and _cand_lower == _title_np_lower) or \
                        (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
-                       (_title_np_lower and len(_title_np_lower) >= 4 and _cand_lower.startswith(_title_np_lower))):
+                       (_title_np_lower and len(_title_np_lower) >= 4 and _cand_lower.startswith(_title_np_lower)) or \
+                       # ИСКЛЮЧЕНИЕ guard: кандидат является хвостом заголовка (subtitle-суффикс).
+                       # Пример: candidate="Правдивая история о том, как студентка исчезла у всех на виду"
+                       # title="Пропавшая: Исчезновение Лорен Спирер. Правдивая история..."
+                       # → title.endswith(candidate) → это подзаголовок, не серия.
+                       (_title_lower and _title_lower.endswith(_cand_lower) and len(_cand_lower) >= 10)):
                         series_candidate = None  # Название книги ≠ серия
-                
+
                 # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)
                 if series_candidate:
                     record.extracted_series_candidate = series_candidate

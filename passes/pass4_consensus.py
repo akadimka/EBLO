@@ -772,3 +772,51 @@ class Pass4Consensus:
                             break
 
         self.logger.log(f"[PASS 4] Fixed {prefix_fixed_count} [unknown] authors via filename prefix")
+
+        # MULTI-AUTHOR SERIES FOLDER CLEANUP
+        # Если тематическая папка "Серия - «X»" содержит книги разных авторов,
+        # X — это издательская/жанровая серия, а не авторская.
+        # Очищаем proposed_series у тех файлов, где серия совпадает с именем папки.
+        import re as _re_ser
+        multiauthor_series_cleared = 0
+        for folder, group_records in groups.items():
+            folder_name_lower = folder.name.lower().replace('ё', 'е') if folder.name else ''
+            if not folder_name_lower or len(folder_name_lower) < 4:
+                continue
+
+            # Считаем уникальных «настоящих» авторов (не Соавторство/Сборник/unknown)
+            real_authors = {
+                r.proposed_author for r in group_records
+                if r.proposed_author and r.proposed_author not in (
+                    'Соавторство', 'Сборник', '[unknown]', ''
+                )
+            }
+            has_collection_files = any(
+                r.proposed_author in ('Соавторство', 'Сборник')
+                for r in group_records
+            )
+
+            # Многоавторная папка: >1 разных авторов ИЛИ есть Соавторство/Сборник файлы
+            # вместе с хотя бы одним другим автором
+            is_multiauthor_folder = (
+                len(real_authors) > 1 or
+                (has_collection_files and len(real_authors) >= 1)
+            )
+            if not is_multiauthor_folder:
+                continue
+
+            for record in group_records:
+                if not record.proposed_series:
+                    continue
+                rec_series_norm = record.proposed_series.lower().replace('ё', 'е')
+                # Проверяем что имя серии содержится в имени папки (покрывает "Серия - «X»" формат)
+                if rec_series_norm in folder_name_lower:
+                    record.proposed_series = ''
+                    record.series_source = ''
+                    multiauthor_series_cleared += 1
+
+        self.logger.log(
+            f"[PASS 4] Cleared {multiauthor_series_cleared} publisher-imprint series "
+            f"from multi-author folders"
+        )
+        print(f"[PASS 4] Cleared {multiauthor_series_cleared} publisher-imprint series from multi-author folders")

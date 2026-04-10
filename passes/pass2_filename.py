@@ -628,13 +628,14 @@ class Pass2Filename:
         if not self.collection_keywords:
             return False
 
-        # Check in filename (basename, no extension) and in book title
+        # Check in filename (basename, no extension) only — NOT in book title,
+        # because publishers sometimes add "(сборник)" to the title of an ordinary
+        # co-authored book, which should still be classified as "Соавторство".
         filename_noext = file_path.replace('\\', '/').split('/')[-1].rsplit('.', 1)[0].lower()
-        title_lower = (file_title or '').lower()
 
         for kw in self.collection_keywords:
             kw_l = kw.lower()
-            if kw_l in filename_noext or kw_l in title_lower:
+            if kw_l in filename_noext:
                 return True
 
         return False
@@ -767,6 +768,21 @@ class Pass2Filename:
                             if expanded and expanded != expanded_author:
                                 expanded_author = expanded
                                 use_hybrid_source = True  # Mark as hybrid source
+
+                    # TITLE-AS-AUTHOR GUARD: если извлечённый автор является частью
+                    # заголовка книги, он скорее всего не автор (например "Дух Рождества"
+                    # из файла "Дух Рождества. 101 история...").
+                    # Если при этом metadata_authors содержит одного автора → используем его.
+                    file_title = getattr(record, 'file_title', '') or ''
+                    if (file_title and expanded_author and
+                            expanded_author.lower() in file_title.lower() and
+                            record.metadata_authors and
+                            self._count_authors(record.metadata_authors) == 1):
+                        record.proposed_author = record.metadata_authors
+                        record.author_source = "metadata"
+                        record.needs_filename_fallback = False
+                        processed_count += 1
+                        continue
 
                     # No folder_dataset - use filename extraction
                     # This OVERRIDES metadata (FILE -> METADATA priority)
