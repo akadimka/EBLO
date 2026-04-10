@@ -1299,11 +1299,23 @@ class FB2AuthorExtractor:
         # UTF-8 не подошла: файл в однобайтной кодировке.
         # Если объявленная кодировка известна и отличается от utf-8 — пробуем её первой.
         declared_lower = (declared_encoding or '').lower()
+
+        # Если файл объявил UTF-8 но строгое чтение упало (редкие битые байты в теле),
+        # пробуем с errors='replace' — метаданные в начале файла останутся корректными.
+        if declared_lower in ('utf-8', 'utf8', 'utf-8-sig'):
+            try:
+                with open(fb2_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                if content and _score_naturalness(content) > 0:
+                    return content
+            except Exception:
+                pass
+
         candidates = []
         priority = []
         if declared_encoding and declared_lower not in ('utf-8', 'utf8'):
             priority.append(declared_encoding)
-        for enc in ['koi8-r', 'cp1251']:
+        for enc in ['koi8-r', 'cp1251', 'cp866']:
             if enc not in [e.lower() for e in priority]:
                 priority.append(enc)
 
