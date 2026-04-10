@@ -744,7 +744,7 @@ class Pass2Filename:
                 fb2_path = self.work_dir / record.file_path
             
             author = self._extract_author_from_filename(filename_without_ext, fb2_path)
-            
+
             if author:
                 # Successfully extracted from filename
                 # IMPORTANT: NEVER OVERWRITE folder_dataset source!
@@ -769,6 +769,42 @@ class Pass2Filename:
                                 expanded_author = expanded
                                 use_hybrid_source = True  # Mark as hybrid source
 
+                    # GLUED-INITIALS GUARD: если извлечённый автор начинается с 2+ заглавных
+                    # букв, слитно сросшихся с фамилией (например "АКТроицкий" = "А.К." + "Троицкий"),
+                    # это скорее всего инициалы без разделителей. Если meta даёт одного автора — берём его.
+                    import re as _re_gi
+                    if (expanded_author and
+                            _re_gi.match(r'^[А-ЯЁ]{2,}[А-ЯЁ][а-яё]', expanded_author) and
+                            record.metadata_authors and
+                            self._count_authors(record.metadata_authors) == 1):
+                        record.proposed_author = record.metadata_authors
+                        record.author_source = "metadata"
+                        record.needs_filename_fallback = False
+                        processed_count += 1
+                        continue
+
+                    # JOINED-NAMES GUARD: если извлечённый автор содержит " и " или " И "
+                    # (русский союз между именами двух авторов, например "Альвтеген Альбин и Карин"),
+                    # и мета даёт ровно 2 авторов — берём мету и нормализуем каждого отдельно.
+                    if (expanded_author and
+                            _re_gi.search(r'\s+[иИ]\s+', expanded_author) and
+                            record.metadata_authors and
+                            self._count_authors(record.metadata_authors) == 2):
+                        sep = '; ' if '; ' in record.metadata_authors else ', '
+                        meta_parts = [a.strip() for a in record.metadata_authors.split(sep) if a.strip()]
+                        if len(meta_parts) == 2:
+                            from author_normalizer_extended import AuthorNormalizer as _AN
+                            _norm = _AN(self.settings)
+                            normalized_pair = [
+                                _norm.normalize_format(a) for a in meta_parts
+                            ]
+                            record.proposed_author = ', '.join(normalized_pair)
+                            record.author_source = "metadata"
+                            record.needs_filename_fallback = False
+                            processed_count += 1
+                            self._build_author_cache_from_extraction(record.proposed_author)
+                            continue
+
                     # TITLE-AS-AUTHOR GUARD: если извлечённый автор является частью
                     # заголовка книги, он скорее всего не автор (например "Дух Рождества"
                     # из файла "Дух Рождества. 101 история...").
@@ -790,7 +826,7 @@ class Pass2Filename:
                     record.author_source = "filename_meta_confirmed" if use_hybrid_source else "filename"
                     record.needs_filename_fallback = False  # Clear the fallback flag since we found something
                     processed_count += 1
-                    
+
                     # BUILD AUTHOR CACHE: Track this extraction for future abbreviation expansion
                     # This helps expand abbreviated names in subsequent files
                     # e.g., if we extract "Живой Алексей", cache that we've seen this full form
