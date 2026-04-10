@@ -778,6 +778,7 @@ class CSVNormalizerApp:
         ttk.Button(buttons_frame, text="Великомученницы", command=self.show_templates).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Дубликаты", command=self.show_duplicates).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Удалить пустые папки", command=self.delete_empty_folders).pack(side=tk.LEFT, padx=2)
+        ttk.Button(buttons_frame, text="Скомпилировать", command=self.open_compiler).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Логи", command=self.show_logs).pack(side=tk.LEFT, padx=2)
         
         # Панель прогресса (над кнопками)
@@ -1267,6 +1268,35 @@ class CSVNormalizerApp:
         DuplicateFinderWindow(self.root, self.settings_manager)
         self._log("Окно 'Поиск дубликатов' открыто")
         
+    def open_compiler(self):
+        """Открыть диалог компиляции серий."""
+        records = getattr(self, '_all_records', [])
+        if not records:
+            messagebox.showwarning('Внимание',
+                'Сначала создайте CSV (загрузите данные в таблицу).',
+                parent=self.root)
+            return
+
+        folder = self.folder_path.get().strip()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror('Ошибка', 'Укажите корректную папку.', parent=self.root)
+            return
+
+        try:
+            try:
+                from gui_compiler import CompilerDialog
+            except ImportError:
+                from .gui_compiler import CompilerDialog
+            CompilerDialog(
+                parent=self.root,
+                records=records,
+                work_dir=Path(folder),
+                logger=self.logger,
+            )
+        except Exception as e:
+            self._log(f'Ошибка открытия компилятора: {e}')
+            messagebox.showerror('Ошибка', str(e), parent=self.root)
+
     def delete_empty_folders(self):
         if messagebox.askyesno("Подтверждение", "Удалить пустые папки?"):
             messagebox.showinfo("Информация", "Пустые папки удалены")

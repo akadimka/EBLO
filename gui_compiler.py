@@ -1,0 +1,369 @@
+"""
+Диалог компиляции FB2-файлов.
+
+Открывается из окна нормализации кнопкой «Скомпилировать».
+Показывает все найденные группы (автор + серия ≥ 2 книг),
+даёт запустить компиляцию с опцией удаления исходников.
+"""
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+import threading
+from pathlib import Path
+from typing import List, Optional
+
+try:
+    from fb2_compiler import FB2CompilerService, CompilationGroup, CompilationResult
+except ImportError:
+    from .fb2_compiler import FB2CompilerService, CompilationGroup, CompilationResult
+
+
+_SORT_SOURCE_LABEL = {
+    'series_number': 'Номер тома (мета)',
+    'filename':      'Номер в имени файла',
+    'title_date':    'Год написания (мета)',
+    'publish_date':  'Год издания (мета)',
+    'unknown':       '⚠ Не определён',
+}
+
+_ORDER_OK_COLOR   = '#DFF0D8'   # бледно-зелёный
+_ORDER_WARN_COLOR = '#FCF8E3'   # жёлтый
+_ORDER_ERR_COLOR  = '#F2DEDE'   # розовый
+
+
+class CompilerDialog:
+    """Модальный диалог компиляции серий."""
+
+    def __init__(self, parent: tk.Widget, records: list, work_dir: Path, logger=None):
+        """
+        Args:
+            parent:   Родительское окно (CSVNormalizerApp.root).
+            records:  Список BookRecord из текущей загруженной таблицы.
+            work_dir: Корневая папка (для разрешения file_path).
+            logger:   Logger приложения.
+        """
+        self._parent   = parent
+        self._records  = records
+        self._work_dir = work_dir
+        self._logger   = logger
+        self._service  = FB2CompilerService(logger=logger)
+        self._groups: List[CompilationGroup] = []
+        self._results: List[CompilationResult] = []
+
+        self._win = tk.Toplevel(parent)
+        self._win.title('Компиляция серий')
+        self._win.transient(parent)
+        self._win.grab_set()
+        self._win.resizable(True, True)
+        self._win.geometry('900x620')
+
+        self._build_ui()
+        self._win.after(100, self._load_groups)
+
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
+
+    def _build_ui(self):
+        # ── Верхняя панель ────────────────────────────────────────────
+        top = ttk.Frame(self._win, padding='5 5 5 0')
+        top.pack(fill=tk.X)
+
+        ttk.Label(top, text='Найденные группы серий (≥ 2 файлов):',
+                  font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT)
+
+        self._status_var = tk.StringVar(value='Анализ…')
+        ttk.Label(top, textvariable=self._status_var,
+                  foreground='#0067C0').pack(side=tk.RIGHT, padx=5)
+
+        # ── Таблица групп ─────────────────────────────────────────────
+        frm = ttk.Frame(self._win, padding='5 2 5 0')
+        frm.pack(fill=tk.BOTH, expand=True)
+        frm.rowconfigure(0, weight=1)
+        frm.columnconfigure(0, weight=1)
+
+        cols = ('author', 'series', 'books', 'order', 'range')
+        self._tree = ttk.Treeview(
+            frm, columns=cols, show='headings', selectmode='extended',
+        )
+        vsb = ttk.Scrollbar(frm, orient=tk.VERTICAL, command=self._tree.yview)
+        self._tree.configure(yscrollcommand=vsb.set)
+
+        self._tree.heading('author', text='Автор')
+        self._tree.heading('series', text='Серия')
+        self._tree.heading('books',  text='Кн.')
+        self._tree.heading('order',  text='Сортировка')
+        self._tree.heading('range',  text='Диапазон')
+
+        self._tree.column('author', width=220, minwidth=120)
+        self._tree.column('series', width=220, minwidth=120)
+        self._tree.column('books',  width=40,  minwidth=40,  anchor='center')
+        self._tree.column('order',  width=200, minwidth=140)
+        self._tree.column('range',  width=80,  minwidth=60,  anchor='center')
+
+        self._tree.tag_configure('ok',   background=_ORDER_OK_COLOR)
+        self._tree.tag_configure('warn', background=_ORDER_WARN_COLOR)
+
+        self._tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+
+        self._tree.bind('<ButtonRelease-1>', self._on_select)
+
+        # ── Детали выбранной группы ───────────────────────────────────
+        det_lf = ttk.LabelFrame(self._win, text='Книги выбранной группы', padding=4)
+        det_lf.pack(fill=tk.BOTH, padx=5, pady=3, ipady=2)
+
+        det_cols = ('num', 'title', 'file', 'sort_src', 'sn')
+        self._det_tree = ttk.Treeview(
+            det_lf, columns=det_cols, show='headings', height=5,
+        )
+        det_vsb = ttk.Scrollbar(det_lf, orient=tk.VERTICAL,
+                                 command=self._det_tree.yview)
+        self._det_tree.configure(yscrollcommand=det_vsb.set)
+
+        self._det_tree.heading('num',      text='#')
+        self._det_tree.heading('title',    text='Название')
+        self._det_tree.heading('file',     text='Файл')
+        self._det_tree.heading('sort_src', text='Источник порядка')
+        self._det_tree.heading('sn',       text='№ тома')
+
+        self._det_tree.column('num',      width=30,  minwidth=25, anchor='center')
+        self._det_tree.column('title',    width=260, minwidth=100)
+        self._det_tree.column('file',     width=250, minwidth=100)
+        self._det_tree.column('sort_src', width=180, minwidth=120)
+        self._det_tree.column('sn',       width=60,  minwidth=40, anchor='center')
+
+        self._det_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        det_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # ── Нижняя панель: опции + кнопки ────────────────────────────
+        bot = ttk.Frame(self._win, padding='5 3 5 5')
+        bot.pack(fill=tk.X, side=tk.BOTTOM)
+
+        # Папка вывода
+        ttk.Label(bot, text='Папка результата:').grid(
+            row=0, column=0, sticky='w', pady=2)
+        self._out_var = tk.StringVar(value=str(work_dir))
+        ttk.Entry(bot, textvariable=self._out_var, width=55).grid(
+            row=0, column=1, sticky='ew', padx=4)
+        ttk.Button(bot, text='…', width=3,
+                   command=self._browse_output).grid(row=0, column=2)
+        bot.columnconfigure(1, weight=1)
+
+        # Чекбокс удаления исходников
+        self._delete_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            bot, text='Удалять исходники сразу после компиляции',
+            variable=self._delete_var,
+        ).grid(row=1, column=0, columnspan=3, sticky='w', pady=2)
+
+        # Кнопки
+        btn_frm = ttk.Frame(bot)
+        btn_frm.grid(row=2, column=0, columnspan=3, sticky='e', pady=4)
+
+        self._sel_all_btn = ttk.Button(btn_frm, text='Выбрать все',
+                                       command=self._select_all)
+        self._sel_all_btn.pack(side=tk.LEFT, padx=3)
+
+        self._compile_btn = ttk.Button(btn_frm, text='Скомпилировать',
+                                       command=self._run_compile,
+                                       state=tk.DISABLED)
+        self._compile_btn.pack(side=tk.LEFT, padx=3)
+
+        ttk.Button(btn_frm, text='Закрыть',
+                   command=self._win.destroy).pack(side=tk.LEFT, padx=3)
+
+    # ------------------------------------------------------------------
+    # Загрузка групп
+    # ------------------------------------------------------------------
+
+    def _load_groups(self):
+        """Запустить поиск групп в фоне."""
+        def worker():
+            groups = self._service.find_groups(self._records, self._work_dir)
+            self._win.after(0, lambda: self._populate_groups(groups))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _populate_groups(self, groups: List[CompilationGroup]):
+        self._groups = groups
+
+        for iid in self._tree.get_children():
+            self._tree.delete(iid)
+
+        if not groups:
+            self._status_var.set('Групп для компиляции не найдено')
+            return
+
+        total      = len(groups)
+        skipped    = sum(1 for g in groups if not g.order_determined)
+        compilable = total - skipped
+
+        for idx, g in enumerate(groups):
+            # Описание источника сортировки
+            sources = {b.sort_source for b in g.books}
+            sources.discard('unknown')
+            if g.order_determined:
+                order_txt = ', '.join(_SORT_SOURCE_LABEL.get(s, s) for s in sources)
+                tag = 'ok'
+            else:
+                order_txt = '⚠ Порядок не определён — пропущено'
+                tag = 'warn'
+
+            self._tree.insert(
+                '', tk.END,
+                iid=str(idx),
+                values=(
+                    g.author,
+                    g.series,
+                    len(g.books),
+                    order_txt,
+                    g.volume_range or '—',
+                ),
+                tags=(tag,),
+            )
+
+        self._status_var.set(
+            f'Групп: {total}  |  К компиляции: {compilable}  |  Пропущено: {skipped}'
+        )
+        self._compile_btn.configure(state=tk.NORMAL if compilable else tk.DISABLED)
+
+    # ------------------------------------------------------------------
+    # Взаимодействие
+    # ------------------------------------------------------------------
+
+    def _on_select(self, _event=None):
+        """Показать детали выбранной группы."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        idx = int(sel[0])
+        if idx >= len(self._groups):
+            return
+        group = self._groups[idx]
+
+        for iid in self._det_tree.get_children():
+            self._det_tree.delete(iid)
+
+        for pos, book in enumerate(group.books, 1):
+            title     = (book.record.file_title or '').strip() or book.abs_path.stem
+            sort_lbl  = _SORT_SOURCE_LABEL.get(book.sort_source, book.sort_source)
+            sn        = (book.record.series_number or '').strip() or '—'
+            warn      = ' ⚠' if book.order_ambiguous else ''
+            self._det_tree.insert(
+                '', tk.END,
+                values=(
+                    pos,
+                    title,
+                    book.abs_path.name,
+                    sort_lbl + warn,
+                    sn,
+                ),
+            )
+
+    def _select_all(self):
+        """Выделить все строки в таблице групп."""
+        self._tree.selection_set(self._tree.get_children())
+
+    def _browse_output(self):
+        from tkinter import filedialog
+        folder = filedialog.askdirectory(
+            parent=self._win, initialdir=self._out_var.get()
+        )
+        if folder:
+            self._out_var.set(folder)
+
+    # ------------------------------------------------------------------
+    # Запуск компиляции
+    # ------------------------------------------------------------------
+
+    def _run_compile(self):
+        sel = self._tree.selection()
+        if not sel:
+            messagebox.showwarning('Внимание', 'Выберите группы для компиляции',
+                                   parent=self._win)
+            return
+
+        selected_groups = [self._groups[int(iid)] for iid in sel]
+        # Фильтруем группы с неопределённым порядком
+        to_compile = [g for g in selected_groups if g.order_determined]
+        skipped    = [g for g in selected_groups if not g.order_determined]
+
+        if not to_compile:
+            messagebox.showwarning(
+                'Внимание',
+                'Во всех выбранных группах порядок книг не определён.\n'
+                'Компиляция невозможна.',
+                parent=self._win,
+            )
+            return
+
+        out_dir = Path(self._out_var.get().strip())
+        if not out_dir.is_dir():
+            messagebox.showerror('Ошибка', f'Папка результата не найдена:\n{out_dir}',
+                                 parent=self._win)
+            return
+
+        delete_now = self._delete_var.get()
+
+        msg = f'Скомпилировать {len(to_compile)} групп(ы)?'
+        if skipped:
+            msg += f'\n(Пропущено {len(skipped)} с неопределённым порядком)'
+        if delete_now:
+            msg += '\n\n⚠ Исходные файлы будут удалены сразу!'
+        if not messagebox.askyesno('Подтверждение', msg, parent=self._win):
+            return
+
+        self._compile_btn.configure(state=tk.DISABLED)
+        self._sel_all_btn.configure(state=tk.DISABLED)
+        self._status_var.set('Компиляция…')
+
+        def worker():
+            results = []
+            for g in to_compile:
+                r = self._service.compile_group(g, out_dir, delete_sources=delete_now)
+                results.append(r)
+            self._win.after(0, lambda: self._on_compile_done(results, skipped, delete_now))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_compile_done(
+        self,
+        results: List[CompilationResult],
+        skipped: List[CompilationGroup],
+        delete_now: bool,
+    ):
+        ok      = [r for r in results if r.success]
+        failed  = [r for r in results if not r.success]
+
+        self._compile_btn.configure(state=tk.NORMAL)
+        self._sel_all_btn.configure(state=tk.NORMAL)
+        self._status_var.set(
+            f'Готово: {len(ok)} успешно, {len(failed)} ошибок, {len(skipped)} пропущено'
+        )
+
+        # Если не удаляли сразу — предложить удалить сейчас
+        if not delete_now and ok:
+            if messagebox.askyesno(
+                'Удалить исходники?',
+                f'Скомпилировано {len(ok)} групп(ы).\n'
+                'Удалить исходные файлы?',
+                parent=self._win,
+            ):
+                for r in ok:
+                    self._service.delete_sources_for_result(r)
+
+        # Итог
+        lines = [f'Успешно скомпилировано: {len(ok)}']
+        for r in ok:
+            lines.append(f'  ✓ {r.group.author} / {r.group.series} → {r.output_path.name}')
+        if failed:
+            lines.append(f'\nОшибок: {len(failed)}')
+            for r in failed:
+                lines.append(f'  ✗ {r.group.series}: {r.error}')
+        if skipped:
+            lines.append(f'\nПропущено (порядок не определён): {len(skipped)}')
+            for g in skipped:
+                lines.append(f'  ⚠ {g.author} / {g.series}')
+
+        messagebox.showinfo('Результат компиляции', '\n'.join(lines), parent=self._win)
