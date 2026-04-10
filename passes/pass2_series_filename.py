@@ -1164,6 +1164,10 @@ class Pass2SeriesFilename:
             for record in files_in_folder:
                 if record.proposed_series != top_series:
                     if record.series_source not in ('filename', 'filename+meta_confirmed'):
+                        # Не навязываем серию файлу, у которого нет metadata_series —
+                        # он скорее всего не принадлежит этой серии (просто тот же автор).
+                        if not record.metadata_series:
+                            continue
                         record.proposed_series = top_series
                         record.series_source = "author-consensus"
 
