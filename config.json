@@ -6,12 +6,12 @@
   "window_sizes": {
     "settings": "708x466+250+200",
     "main": {
-      "geometry": "1000x700+100+50",
+      "geometry": "1000x700+402+89",
       "state": "normal"
     },
     "genres_manager": "700x456+690+361",
     "log": {
-      "geometry": "700x400+100+100",
+      "geometry": "1150x400+100+100",
       "state": "normal"
     },
     "duplicates_window": {
@@ -76,6 +76,7 @@
   "filename_blacklist": [
     "компиляция",
     "+",
+    "Артефакт - детектив",
     "МИФ Проза",
     "Азбука-бестселлер",
     "Книга-загадка, книга-бестселлер",
