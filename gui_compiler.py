@@ -143,7 +143,7 @@ class CompilerDialog:
         # Папка вывода
         ttk.Label(bot, text='Папка результата:').grid(
             row=0, column=0, sticky='w', pady=2)
-        self._out_var = tk.StringVar(value=str(work_dir))
+        self._out_var = tk.StringVar(value=str(self._work_dir))
         ttk.Entry(bot, textvariable=self._out_var, width=55).grid(
             row=0, column=1, sticky='ew', padx=4)
         ttk.Button(bot, text='…', width=3,
