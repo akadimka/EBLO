@@ -238,10 +238,15 @@ class AuthorNormalizer:
         conversions = self.settings.get_author_surname_conversions()
 
         def _convert_single(single: str) -> str:
+            import re as _re
             result = single
             for pattern, replacement in conversions.items():
-                if pattern in result:
-                    result = result.replace(pattern, replacement)
+                # Используем границы слов чтобы «Бирюк» не срабатывал внутри «Бирюков»
+                result = _re.sub(
+                    r'(?<![\w])' + _re.escape(pattern) + r'(?![\w])',
+                    replacement,
+                    result
+                )
             return result
 
         return self._apply_to_each_author(author, _convert_single)
