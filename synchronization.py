@@ -521,7 +521,7 @@ class SynchronizationService:
             author = (rec.proposed_author or '').strip()
             series = (rec.proposed_series or '').strip()
             if author and series:
-                groups[(author, series)].append(rec)
+                groups[(author.lower(), series.lower())].append(rec)
             else:
                 no_series.append(rec)
 

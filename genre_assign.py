@@ -136,6 +136,9 @@ class GenreAssignmentService:
             self.logger.log(f"Папка не найдена: {folder_path_normalized}")
             return 0
         
+        self.logger.log(f"Папка сканирования: {folder_path_normalized}")
+        self.logger.log(f"Поиск файлов (рекурсивно)...")
+        
         # Найти все FB2 файлы (*.fb2 покрывает оба случая на Windows)
         fb2_files = list(folder.rglob('*.fb2')) + list(folder.rglob('*.FBZ'))
         
@@ -143,7 +146,9 @@ class GenreAssignmentService:
         
         if fb2_files:
             for fb2_file in fb2_files[:5]:  # Показать первые 5
-                self.logger.log(f"  - {fb2_file.name}")
+                self.logger.log(f"  - {fb2_file.relative_to(folder)}")
+            if len(fb2_files) > 5:
+                self.logger.log(f"  ... и ещё {len(fb2_files) - 5} файлов")
         
         if not fb2_files:
             self.logger.log(f"FB2 файлы не найдены в {folder_path}")
@@ -196,6 +201,7 @@ class GenreAssignmentService:
         try:
             # Сначала проверить, не ZIP ли это (FBZ или архивированный FB2)
             content = None
+            content_encoding = 'utf-8'  # default; overridden below
             
             try:
                 import zipfile
@@ -211,6 +217,7 @@ class GenreAssignmentService:
                         # Прочитать первый XML файл
                         with zf.open(xml_files[0]) as f:
                             content = f.read().decode('utf-8-sig', errors='replace')
+                            content_encoding = 'utf-8'
             except (zipfile.BadZipFile, ImportError):
                 pass
             

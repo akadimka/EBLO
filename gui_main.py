@@ -119,6 +119,7 @@ class MainWindow(tk.Tk):
         self.selected_folder = tk.StringVar()
         self.progress_var = tk.StringVar(value='Готово')
         self.view_mode = 'tree'  # 'tree' или 'listboxes'
+        self._scan_results: Dict[str, list] = {}  # {genre_combo: [file_paths]}
 
         # Обработчик закрытия окна
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
@@ -277,6 +278,7 @@ class MainWindow(tk.Tk):
         )
         self.genres_list.pack(fill='both', expand=True, side='left')
         self.genres_list.bind('<Double-Button-1>', self._on_genre_double_click)
+        self.genres_list.bind('<<ListboxSelect>>', self._on_genre_selected)
         genres_scroll = ttk.Scrollbar(self.genres_frame, command=self.genres_list.yview)
         self.genres_list.config(yscrollcommand=genres_scroll.set)
         genres_scroll.pack(side='right', fill='y')
@@ -432,6 +434,17 @@ class MainWindow(tk.Tk):
         if folder and self.view_mode == 'tree' and hasattr(self, 'folder_tree'):
             self._populate_folder_tree()
 
+    def _on_genre_selected(self, event=None):
+        """Обработчик выбора жанра — заполняет список деталей файлами."""
+        sel = self.genres_list.curselection()
+        if not sel:
+            return
+        genre_combo = self.genres_list.get(sel[0])
+        files = self._scan_results.get(genre_combo, [])
+        self.details_list.delete(0, 'end')
+        for fp in sorted(files):
+            self.details_list.insert('end', fp)
+
     def _on_genre_double_click(self, event=None):
         """Обработчик двойного клика по жанру."""
         pass
@@ -573,17 +586,94 @@ class MainWindow(tk.Tk):
                 messagebox.showerror('Ошибка', f'Не удалось загрузить жанры:\n{e}')
 
     def _on_scan_action(self):
-        """Обработчик действия 'Сканирование'."""
+        """Обработчик действия 'Сканирование'. Извлекает жанры из FB2-файлов."""
         folder = self.selected_folder.get()
         if not folder:
             messagebox.showwarning('Внимание', 'Не выбрана папка для обработки')
             return
-        
+        if not os.path.isdir(folder):
+            messagebox.showwarning('Внимание', f'Папка не найдена:\n{folder}')
+            return
+
         self.progress_var.set('Сканирование...')
         if self._status_bar:
             self._status_bar.set('Сканирование...', 'busy')
         self.logger.log(f'Начато сканирование: {folder}')
-        # TODO: Реализовать сканирование
+
+        def _scan_worker():
+            try:
+                try:
+                    from fb2_author_extractor import FB2AuthorExtractor
+                except ImportError:
+                    from .fb2_author_extractor import FB2AuthorExtractor
+
+                extractor = FB2AuthorExtractor(self.settings.config_path)
+                results: Dict[str, list] = {}
+                errors: list = []
+                folder_path = Path(folder)
+                fb2_files = sorted(folder_path.rglob('*.fb2'))
+                total = len(fb2_files)
+
+                for idx, fb2_file in enumerate(fb2_files, 1):
+                    try:
+                        genre_str = extractor._extract_genres_from_fb2(fb2_file)
+                        if genre_str and genre_str.strip():
+                            key = genre_str.strip()
+                        else:
+                            key = 'Не определено'
+                        try:
+                            rel_path = str(fb2_file.relative_to(folder_path))
+                        except ValueError:
+                            rel_path = str(fb2_file)
+                        results.setdefault(key, []).append(rel_path)
+                    except Exception as e:
+                        errors.append(f'{fb2_file.name}: {e}')
+
+                    if idx % 20 == 0 or idx == total:
+                        pct = int(idx * 100 / total) if total else 100
+                        self.after(0, lambda p=pct, n=idx, t=total:
+                            self.progress_var.set(f'Сканирование... {n}/{t} ({p}%)'))
+
+                self.after(0, lambda: _update_ui(results, errors, total))
+            except Exception as e:
+                import traceback
+                err_text = traceback.format_exc()
+                self.after(0, lambda err=e, tb=err_text: (
+                    self.logger.log(f'Ошибка сканирования: {tb}'),
+                    self.progress_var.set(f'Ошибка сканирования: {err}'),
+                    self._status_bar.set(f'Ошибка сканирования', 'error') if self._status_bar else None,
+                    messagebox.showerror('Ошибка сканирования', str(err))
+                ))
+
+        def _update_ui(results: Dict[str, list], errors: list, total: int):
+            self._scan_results = results
+
+            self.genres_list.delete(0, 'end')
+            for combo in sorted(results.keys()):
+                self.genres_list.insert('end', combo)
+
+            self.errors_list.delete(0, 'end')
+            for err in errors:
+                self.errors_list.insert('end', err)
+
+            self.details_list.delete(0, 'end')
+
+            if self.view_mode != 'listboxes':
+                self._toggle_view_mode()
+
+            genre_count = len(results)
+            status_msg = (
+                f'Сканирование завершено: {total} файлов, '
+                f'{genre_count} уникальных наборов жанров'
+            )
+            self.progress_var.set(status_msg)
+            if self._status_bar:
+                self._status_bar.set(status_msg, 'ok')
+            self.logger.log(status_msg)
+            if errors:
+                self.logger.log(f'Ошибок при сканировании: {len(errors)}')
+
+        threading.Thread(target=_scan_worker, daemon=True).start()
 
     def _on_normalization_action(self):
         """Обработчик действия 'Нормализация'. Открывает окно нормализации."""
