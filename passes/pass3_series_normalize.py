@@ -66,7 +66,30 @@ class Pass3SeriesNormalize:
             
             normalized = self._normalize_series_name(record.proposed_series)
             normalized = self._sanitize_for_folder(normalized)
-            
+
+            # FOLDER-PREFIX GUARD: если серия вида «Коллекция. Подсерия»,
+            # а «Коллекция» совпадает с именем одной из родительских папок —
+            # оставляем только «Подсерия».
+            # Пример: «Артефакт - детектив. Астра Ельцова»,
+            #   папка «Артефакт & Детектив» → серия «Астра Ельцова»
+            if '. ' in normalized and record.file_path:
+                import re as _re2
+                from pathlib import Path as _P
+                prefix, suffix = normalized.split('. ', 1)
+                suffix = suffix.strip()
+                if suffix:
+                    prefix_words = set(_re2.sub(r'[^\w]', ' ', prefix.lower()).split())
+                    prefix_words.discard('')
+                    for folder in _P(record.file_path).parts[:-1]:
+                        folder_words = set(_re2.sub(r'[^\w]', ' ', folder.lower()).split())
+                        folder_words.discard('')
+                        if prefix_words and folder_words:
+                            overlap = prefix_words & folder_words
+                            ratio = len(overlap) / len(prefix_words)
+                            if ratio >= 0.6:  # ≥60% слов префикса есть в имени папки
+                                normalized = suffix
+                                break
+
             if normalized != record.proposed_series:
                 record.proposed_series = normalized
     
@@ -121,6 +144,17 @@ class Pass3SeriesNormalize:
         # Правило: убирать если число либо zero-padded (0X, XX) либо имеет суффикс +
         # Примеры что НЕ должно strip: "Война 1941" (4 цифры), "100 лет" (не trailing)
         series = re.sub(r'\s+(?:0\d+\+?|\d+\+)\s*$', '', series).strip()
+
+        # Шаг 1.95: Убрать служебный префикс «Цикл «...»» / «Цикл "..."»
+        # "Цикл «Солдат удачи»" → "Солдат удачи"
+        # "Цикл «Вариант «Бис»»" → "Вариант «Бис»"
+        # НО: "Каледонийский цикл" — слово "цикл" НЕ в начале → не трогаем.
+        _cycle_match = re.match(
+            r'^[Цц]икл\s*[«"\'«](.+?)[»"\'»]\s*$',
+            series
+        )
+        if _cycle_match:
+            series = _cycle_match.group(1).strip()
 
         # Шаг 2: Убрать номер в скобках если есть
         # "Война в Космосе (1-3)" → "Война в Космосе"
