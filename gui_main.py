@@ -207,6 +207,7 @@ class MainWindow(tk.Tk):
         self.action_menu.add_command(label='Сканирование', command=self._on_scan_action)
         self.action_menu.add_command(label='Нормализация', command=self._on_normalization_action)
         self.action_menu.add_command(label='Синхронизация', command=self._on_synchronization_action)
+        self.action_menu.add_command(label='Заархивировать', command=self._on_archive_action)
         self.action_menu.add_separator()
         self.action_menu.add_command(label='База данных', command=self._open_database_viewer)
         menubar.add_cascade(label='Действия', menu=self.action_menu)
@@ -674,6 +675,83 @@ class MainWindow(tk.Tk):
                 self.logger.log(f'Ошибок при сканировании: {len(errors)}')
 
         threading.Thread(target=_scan_worker, daemon=True).start()
+
+    def _on_archive_action(self):
+        """Архивировать все FB2-файлы в папке библиотеки в формат fb2.zip."""
+        library_path = self.settings.get_library_path()
+        if not library_path or not os.path.isdir(library_path):
+            messagebox.showwarning(
+                'Внимание',
+                'Папка библиотеки не задана или не найдена.\n'
+                'Укажите её в Файл → Настройки.'
+            )
+            return
+
+        # Подсчитать файлы для подтверждения
+        fb2_files = list(Path(library_path).rglob('*.fb2'))
+        if not fb2_files:
+            messagebox.showinfo('Информация', 'FB2-файлы в папке библиотеки не найдены.')
+            return
+
+        if not messagebox.askyesno(
+            'Заархивировать',
+            f'Найдено {len(fb2_files)} FB2-файл(ов) в папке библиотеки:\n{library_path}\n\n'
+            'Каждый файл будет упакован в ZIP-архив (file.fb2 → file.fb2.zip),\n'
+            'оригинал будет удалён.\n\nПродолжить?'
+        ):
+            return
+
+        self.progress_var.set('Архивирование...')
+        if self._status_bar:
+            self._status_bar.set('Архивирование...', 'busy')
+        self.logger.log(f'Начато архивирование: {library_path} ({len(fb2_files)} файлов)')
+
+        def _archive_worker():
+            import zipfile as _zipfile
+            done = 0
+            errors = []
+            total = len(fb2_files)
+            for idx, fb2_path in enumerate(fb2_files, 1):
+                try:
+                    zip_path = fb2_path.with_name(fb2_path.name + '.zip')
+                    # Имя внутри архива — только имя файла (без пути)
+                    with _zipfile.ZipFile(
+                        zip_path, 'w',
+                        compression=_zipfile.ZIP_DEFLATED,
+                        compresslevel=6
+                    ) as zf:
+                        zf.write(fb2_path, arcname=fb2_path.name)
+                    fb2_path.unlink()
+                    done += 1
+                except Exception as e:
+                    errors.append(f'{fb2_path.name}: {e}')
+
+                if idx % 50 == 0 or idx == total:
+                    pct = int(idx * 100 / total)
+                    self.after(0, lambda n=idx, t=total, p=pct:
+                        self.progress_var.set(f'Архивирование... {n}/{t} ({p}%)'))
+
+            self.after(0, lambda: _finish(done, errors, total))
+
+        def _finish(done, errors, total):
+            msg = f'Архивирование завершено: {done}/{total} файлов'
+            self.progress_var.set(msg)
+            if self._status_bar:
+                self._status_bar.set(msg, 'ok')
+            self.logger.log(msg)
+            if errors:
+                self.logger.log(f'Ошибок: {len(errors)}')
+                for e in errors[:10]:
+                    self.logger.log(f'  {e}')
+                messagebox.showwarning(
+                    'Завершено с ошибками',
+                    f'{msg}\nОшибок: {len(errors)}\n\nПервые ошибки:\n' +
+                    '\n'.join(errors[:5])
+                )
+            else:
+                messagebox.showinfo('Готово', msg)
+
+        threading.Thread(target=_archive_worker, daemon=True).start()
 
     def _on_normalization_action(self):
         """Обработчик действия 'Нормализация'. Открывает окно нормализации."""
