@@ -79,6 +79,36 @@ class FB2CompilerService:
         r'^(\d{1,4})\s*[.\-–—_)]\s*|\s+(\d{1,4})\s*[.\-–—_)]\s', re.UNICODE
     )
 
+    # Сервисные слова для N томов (2..N)
+    _SERIES_WORDS = [
+        None,          # 0 — не используется
+        None,          # 1 — одиночная книга
+        'Дилогия',    # 2
+        'Трилогия',   # 3
+        'Тетралогия', # 4
+        'Пенталогия', # 5
+        'Гексалогия', # 6
+        'Гепталогия', # 7
+        'Окталогия', # 8
+        'Ноналогия', # 9
+        'Декалогия', # 10
+    ]
+
+    @classmethod
+    def _series_suffix(cls, book_count: int, volume_range: str) -> str:
+        """Вернуть суффикс для имени файла компиляции.
+
+        - 2..10 книг: используем сервисное слово (Дилогия, Трилогия…)
+        - больше 10 либо book_count=0: используем диапазон (1-17)
+        - если volume_range пустой: просто «Сборник»
+        """
+        if not volume_range:
+            return 'Сборник'
+        n = book_count
+        if 2 <= n < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n]:
+            return cls._SERIES_WORDS[n]
+        return volume_range
+
     def __init__(self, logger=None):
         self.logger = logger
 
@@ -301,10 +331,8 @@ class FB2CompilerService:
             # --- Имя выходного файла ---
             safe_author = re.sub(r'[\\/:*?"<>|]', '_', group.author)
             safe_series = re.sub(r'[\\/:*?"<>|]', '_', group.series)
-            if volume_range:
-                fname = f"{safe_author} - {safe_series} ({safe_series}. Тетралогия {volume_range}).fb2"
-            else:
-                fname = f"{safe_author} - {safe_series} (Сборник).fb2"
+            suffix = self._series_suffix(len(group.books), volume_range)
+            fname = f"{safe_author} - {safe_series} ({suffix}).fb2"
 
             output_path = output_dir / fname
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -402,8 +430,9 @@ class FB2CompilerService:
 
         safe_series = _html.escape(series)
         safe_series_range = _html.escape(volume_range) if volume_range else ''
-        book_title = f"{safe_series} ({safe_series}. Сборник {volume_range})" \
-            if volume_range else f"{safe_series} (Сборник)"
+        n_books = len(bodies)
+        suffix = self._series_suffix(n_books, volume_range)
+        book_title = f"{safe_series} ({suffix})"
 
         # Жанр — берём первый, если несколько через запятую
         genre_tag = ''
