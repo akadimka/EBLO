@@ -93,6 +93,20 @@ class Pass1ReadFiles:
             try:
                 meta = self.extractor._extract_all_metadata_at_once(fb2_file)
                 author, author_source = self._get_author_for_file(fb2_file)
+
+                # ВАЛИДАЦИЯ FOLDER_DATASET: если автор из кэша папок не подтверждён
+                # метаданными файла (ни одно слово не пересекается), это скорее всего
+                # ярлык серии/издательства (например «Питер» из «Мировой криминальный
+                # бестселлер (Питер)»), а не реальный автор. Сбрасываем — pass2 доберёт
+                # автора из имени файла или метаданных.
+                if author_source == "folder_dataset" and author and meta.get('authors'):
+                    import re as _re_p1
+                    author_words = set(author.lower().split())
+                    meta_words = set(_re_p1.sub(r'[;,]', ' ', meta['authors'].lower()).split())
+                    if author_words and meta_words and not (author_words & meta_words):
+                        author = ""
+                        author_source = ""
+
                 rel_path = str(fb2_file.relative_to(self.work_dir))
 
                 record = BookRecord(

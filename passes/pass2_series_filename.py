@@ -946,6 +946,15 @@ class Pass2SeriesFilename:
             for part in path_parts:
                 parsed_author = _parse_folder_author(part)
                 if parsed_author:
+                    # ВАЛИДАЦИЯ ПРОТИВ МЕТАДАННЫХ: если у файла есть metadata_authors,
+                    # проверяем что хотя бы одно слово из parsed_author присутствует в мете.
+                    # Это отсекает ложные «авторы» вроде «Питер» (издательство в скобках),
+                    # когда мета однозначно указывает на других людей.
+                    if record.metadata_authors:
+                        author_words = set(parsed_author.lower().split())
+                        meta_words = set(re.sub(r'[;,]', ' ', record.metadata_authors.lower()).split())
+                        if author_words and meta_words and not (author_words & meta_words):
+                            break  # Папка не подтверждена метой — не перезаписываем
                     if parsed_author != record.proposed_author or record.author_source != "folder_dataset":
                         record.proposed_author = parsed_author
                         record.author_source = "folder_dataset"
