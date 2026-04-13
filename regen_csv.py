@@ -341,7 +341,6 @@ class RegenCSVService:
             if propagated:
                 self.logger.log(f"[OK] PASS 1.5: Propagated folder_dataset author to {propagated} files")
 
-
             if progress_callback:
                 progress_callback(20, 100, "Pass 2: Извлечение авторов")
             pass2 = Pass2Filename(self.settings, self.logger, self.work_dir,
@@ -357,7 +356,94 @@ class RegenCSVService:
             pass2_fallback = Pass2Fallback(self.logger, settings=self.settings)
             pass2_fallback.execute(self.records)
             self.logger.log("[OK] PASS 2 Fallback: Metadata applied")
-            
+
+            # ===== PASS 2.5: Expand abbreviated/plural author from consistent metadata =====
+            # Случай: папка "Войлошниковы", proposed_author="Войлошниковы" (filename),
+            # но metadata_authors стабильно содержит полные имена авторов. Расширяем.
+            import re as _re25
+
+            # Перестраиваем группы по папкам после Pass 2
+            _folder_groups2: dict = {}
+            for rec in self.records:
+                parent = str(Path(rec.file_path).parent)
+                _folder_groups2.setdefault(parent, []).append(rec)
+
+            def _stem25(s: str) -> str:
+                # Two passes to handle compound endings like 'овы' = 'ов'+'ы'
+                # "Войлошниковы" → "Войлошников" → "Войлошник"
+                s = s.lower().replace('ё', 'е')
+                for _ in range(2):
+                    s2 = _re25.sub(r'(?:ова|ева|ов|ев|ин|ина|ий|ая|ый|ых|ы|а|я)$', '', s)
+                    if s2 == s:
+                        break
+                    s = s2
+                return s
+
+            def _normalize_meta_author25(name: str) -> str:
+                parts = name.strip().split()
+                if len(parts) == 2:
+                    return f"{parts[-1]} {parts[0]}"
+                return name.strip()
+
+            expanded25 = 0
+            for parent, group in _folder_groups2.items():
+                filename_recs = [
+                    r for r in group
+                    if r.author_source == 'filename' and r.proposed_author
+                    and r.metadata_authors and r.metadata_authors != '[unknown]'
+                ]
+                if not filename_recs:
+                    continue
+
+                # Проверяем стабильность metadata_authors (≥ 60% файлов согласны)
+                # Нормализуем: разбиваем на авторов и сортируем, чтобы порядок не важен
+                import re as _re25b
+                def _meta_key(m):
+                    authors = frozenset(a.strip().lower() for a in _re25b.split(r'[;,]+', m) if a.strip())
+                    return authors
+
+                meta_counts: dict = {}
+                for r in filename_recs:
+                    key = _meta_key(r.metadata_authors.strip())
+                    meta_counts[key] = meta_counts.get(key, 0) + 1
+                dominant_key, dominant_count = max(meta_counts.items(), key=lambda x: x[1])
+                if dominant_count / len(filename_recs) < 0.6:
+                    continue
+                # Берём первый файл с этим ключом как источник canonical metadata
+                dominant_meta = next(
+                    r.metadata_authors for r in filename_recs
+                    if _meta_key(r.metadata_authors.strip()) == dominant_key
+                )
+
+                # proposed_author должен быть усечённой формой одного из авторов в meta
+                proposed = filename_recs[0].proposed_author
+                proposed_stem = _stem25(proposed)
+                if len(proposed_stem) < 4:
+                    continue
+
+                meta_authors_list = [a.strip() for a in _re25.split(r'[;,]+', dominant_meta) if a.strip()]
+                matched = any(
+                    # bidirectional: either stem contains the other
+                    (proposed_stem in _stem25(part) or _stem25(part) in proposed_stem)
+                    for a in meta_authors_list
+                    for part in a.split()
+                    if len(_stem25(part)) >= 4
+                )
+                if not matched:
+                    continue
+
+                normalized_authors = ', '.join(_normalize_meta_author25(a) for a in meta_authors_list)
+
+                for rec in group:
+                    if rec.proposed_author == proposed and rec.author_source in ('filename', ''):
+                        rec.proposed_author = normalized_authors
+                        rec.author_source = 'metadata'
+                        rec.needs_filename_fallback = False
+                        expanded25 += 1
+
+            if expanded25:
+                self.logger.log(f"[OK] PASS 2.5: Expanded abbreviated authors in {expanded25} files")
+
             # ===== SERIES EXTRACTION: From Folders (VARIANT B) =====
             if progress_callback:
                 progress_callback(30, 100, "Извлечение серий")
