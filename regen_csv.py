@@ -591,6 +591,15 @@ class RegenCSVService:
                 progress_callback(90, 100, "Финальная обработка")
             self._clear_series_for_compilations()
             self.logger.log("[OK] Series cleared for compilations")
+
+            # ===== Final sanitization: strip folder-illegal chars from all series/authors =====
+            _ILLEGAL = re.compile(r'[\\/:*?"<>=|]')
+            for rec in self.records:
+                if rec.proposed_series:
+                    rec.proposed_series = _ILLEGAL.sub('', rec.proposed_series).strip()
+                if rec.proposed_author:
+                    rec.proposed_author = _ILLEGAL.sub('', rec.proposed_author).strip()
+            self.logger.log("[OK] Final sanitization applied")
             
             # ===== Save CSV =====
             if progress_callback:
