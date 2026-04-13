@@ -633,6 +633,40 @@ class SynchronizationService:
             except Exception as e:
                 self._log(f"  Ошибка при удалении из БД: {e}")
     
+    def _build_target_filename(self, record, kind: str, covered_volumes: set) -> str:
+        """Build proper target filename based on record metadata.
+
+        - Compilations are renamed to clean convention: "Author - Series (Suffix).fb2"
+        - Single volumes keep original filename.
+        """
+        if kind != 'compilation':
+            return Path(record.file_path).name
+
+        try:
+            from fb2_compiler import FB2CompilerService
+            clean_series = FB2CompilerService._clean_series_name(
+                (record.proposed_series or '').strip()
+            )
+        except Exception:
+            clean_series = (record.proposed_series or '').strip()
+
+        safe_author = re.sub(r'[\\/:*?"<>|]', '_', (record.proposed_author or '').strip())
+        safe_series = re.sub(r'[\\/:*?"<>|]', '_', clean_series)
+
+        if covered_volumes:
+            lo, hi = min(covered_volumes), max(covered_volumes)
+            volume_range = str(lo) if lo == hi else f'{lo}-{hi}'
+        else:
+            volume_range = ''
+
+        try:
+            from fb2_compiler import FB2CompilerService
+            suffix = FB2CompilerService._series_suffix(len(covered_volumes), volume_range)
+        except Exception:
+            suffix = f'т. {volume_range}' if volume_range else 'Сборник'
+
+        return f"{safe_author} - {safe_series} ({suffix}).fb2"
+
     def _move_files(
         self,
         records: List,
@@ -705,7 +739,9 @@ class SynchronizationService:
 
                 # Build source and target file paths
                 source_file = self.last_scan_path / record.file_path
-                target_file = target_dir / source_file.name
+                kind, covered = self._classify_record(record)
+                target_name = self._build_target_filename(record, kind, covered)
+                target_file = target_dir / target_name
                 
                 # Check if file already exists at target
                 if target_file.exists():
