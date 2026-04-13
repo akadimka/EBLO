@@ -94,12 +94,44 @@ class FB2CompilerService:
         'Декалогия', # 10
     ]
 
+    # Regex для очистки сервисных слов/диапазонов из имени серии
+    _SERIES_CLEAN_RE = re.compile(
+        r'\s*\([^)]*\)\s*$'               # trailing (…)
+        r'|\s*[тт]\.\s+\d+[-–]\d+\s*$'   # trailing т. 1-4
+        r'|\s*\d+[-–]\d+\s*$',             # trailing 1-4
+        re.IGNORECASE | re.UNICODE,
+    )
+
+    @classmethod
+    def _clean_series_name(cls, series: str) -> str:
+        """Убрать сервисные слова и диапазоны из имени серии.
+
+        «Солдат удачи (Тетралогия)»       → «Солдат удачи»
+        «Солдат удачи. Тетралогия 1-4»   → «Солдат удачи. Тетралогия» (точечные
+        субсерии не трогаем — они часть иерархии).
+        """
+        cleaned = cls._SERIES_CLEAN_RE.sub('', series).strip()
+        # Убрать хвостовое сервисное слово после последней точки, если оно совпадает
+        for kw in cls._SERIES_WORDS[2:]:
+            if kw and cleaned.rstrip().lower().endswith('.' + kw.lower()):
+                cleaned = cleaned[:-(len(kw) + 1)].strip()
+                break
+            if kw and re.search(
+                rf'[.(\s]{re.escape(kw)}$', cleaned, re.IGNORECASE
+            ):
+                cleaned = re.sub(
+                    rf'[.\s]*{re.escape(kw)}\s*$', '', cleaned,
+                    flags=re.IGNORECASE
+                ).strip()
+                break
+        return cleaned or series
+
     @classmethod
     def _series_suffix(cls, book_count: int, volume_range: str) -> str:
         """Вернуть суффикс для имени файла компиляции.
 
         - 2..10 книг: используем сервисное слово (Дилогия, Трилогия…)
-        - больше 10 либо book_count=0: используем диапазон (1-17)
+        - больше 10: «т. 1-17»
         - если volume_range пустой: просто «Сборник»
         """
         if not volume_range:
@@ -107,7 +139,7 @@ class FB2CompilerService:
         n = book_count
         if 2 <= n < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n]:
             return cls._SERIES_WORDS[n]
-        return volume_range
+        return f'т. {volume_range}'
 
     def __init__(self, logger=None):
         self.logger = logger
@@ -189,10 +221,15 @@ class FB2CompilerService:
         Returns:
             (sort_key_tuple, source_name, is_ambiguous)
         """
-        # Уровень 1: series_number — целое число
+        # Уровень 1: series_number — целое число или диапазон «1-4» (компиляция)
         sn = (rec.series_number or '').strip()
-        if sn and re.match(r'^\d+$', sn):
-            return (0, int(sn), 0), 'series_number', False
+        if sn:
+            if re.match(r'^\d+$', sn):
+                return (0, int(sn), 0), 'series_number', False
+            rng = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', sn)
+            if rng:
+                # Для компиляции используем MIN для сортировки
+                return (0, int(rng.group(1)), 0), 'series_number', False
 
         # Уровень 2: число в начале имени файла
         stem = Path(rec.file_path).stem
@@ -322,15 +359,16 @@ class FB2CompilerService:
             volume_range = group.volume_range or self._compute_volume_range(group.books)
             output_xml = self._build_fb2(
                 author=group.author,
-                series=group.series,
+                series=clean_series,
                 volume_range=volume_range,
                 genre=meta.get('genre', ''),
                 bodies=bodies,
             )
 
             # --- Имя выходного файла ---
+            clean_series = self._clean_series_name(group.series)
             safe_author = re.sub(r'[\\/:*?"<>|]', '_', group.author)
-            safe_series = re.sub(r'[\\/:*?"<>|]', '_', group.series)
+            safe_series = re.sub(r'[\\/:*?"<>|]', '_', clean_series)
             suffix = self._series_suffix(len(group.books), volume_range)
             fname = f"{safe_author} - {safe_series} ({suffix}).fb2"
 

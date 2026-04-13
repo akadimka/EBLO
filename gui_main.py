@@ -833,14 +833,14 @@ class MainWindow(tk.Tk):
                 self.logger.log(f"[SYNC] {message}")
             
             # Run synchronization
-            self.after(0, lambda: self._set_status("Инициализация синхронизации...", 'busy'))
+            if self._status_bar: self.after(0, lambda: self._status_bar.set("Инициализация синхронизации...", 'busy'))
             stats = sync_service.synchronize(
                 progress_callback=progress_callback,
                 log_callback=log_callback
             )
             
             # Update final status
-            self.after(0, lambda: self._set_status("Синхронизация завершена", 'ok'))
+            if self._status_bar: self.after(0, lambda: self._status_bar.set("Синхронизация завершена", 'ok'))
             
             # Show statistics popup
             self._show_synchronization_stats(stats)
@@ -856,7 +856,7 @@ class MainWindow(tk.Tk):
                     f"Ошибка при синхронизации: {str(e)}"
                 )
             )
-            self.after(0, lambda: self._set_status("ОШИБКА", 'error'))
+            if self._status_bar: self.after(0, lambda: self._status_bar.set("ОШИБКА", 'error'))
         
         finally:
             sys.stdout = original_stdout
