@@ -330,8 +330,7 @@ class Pass4Consensus:
                 # For each record without extracted_series_candidate
                 for target_record in author_records:
                     if target_record.proposed_series and target_record.series_source not in ("metadata", "metadata_folder_confirmed", "folder_metadata_confirmed"):
-                        # Already has series from filename or other source, skip
-                        # But try consensus if it's only from metadata or metadata confirmed by folder
+                        # Already has series from filename, other source, or previous consensus — skip
                         continue
                     
                     if target_record.extracted_series_candidate:
@@ -416,6 +415,11 @@ class Pass4Consensus:
             }
             
             if not consensus_metadata_series:
+                continue
+
+            # Применяем только если в папке одна-единственная серия из метаданных.
+            # Если серий несколько — они конкурируют, применять нечего.
+            if len(consensus_metadata_series) != 1:
                 continue
             
             # Apply to files with empty proposed_series if they have empty proposed_series
