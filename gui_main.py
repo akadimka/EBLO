@@ -596,7 +596,10 @@ class MainWindow(tk.Tk):
             messagebox.showwarning('Внимание', f'Папка не найдена:\n{folder}')
             return
 
-        self.progress_var.set('Сканирование...')
+        fb2_count = sum(1 for _ in Path(folder).rglob('*.fb2'))
+        if fb2_count == 0:
+            messagebox.showwarning('Папка пуста', f'В папке нет FB2-файлов:\n{folder}')
+            return
         if self._status_bar:
             self._status_bar.set('Сканирование...', 'busy')
         self.logger.log(f'Начато сканирование: {folder}')

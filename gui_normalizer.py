@@ -1036,6 +1036,12 @@ class CSVNormalizerApp:
         if not folder or not os.path.isdir(folder):
             messagebox.showerror("Ошибка", "Укажите корректную папку")
             return
+        fb2_count = sum(1 for _ in Path(folder).rglob('*.fb2'))
+        if fb2_count == 0:
+            messagebox.showwarning("Папка пуста",
+                f"В папке нет FB2-файлов:\n{folder}",
+                parent=self.root)
+            return
         if self.processing:
             messagebox.showwarning("Внимание", "Обработка уже в процессе")
             return
@@ -1254,6 +1260,12 @@ class CSVNormalizerApp:
         folder = self.folder_path.get()
         if not folder or not os.path.isdir(folder):
             messagebox.showwarning("Внимание", "Укажите корректную рабочую папку")
+            return
+        fb2_count = sum(1 for _ in Path(folder).rglob('*.fb2'))
+        if fb2_count == 0:
+            messagebox.showwarning("Папка пуста",
+                f"В папке нет FB2-файлов:\n{folder}",
+                parent=self.root)
             return
         if self.processing:
             messagebox.showwarning("Внимание", "Обработка уже в процессе")

@@ -1,3 +1,4 @@
+import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -143,7 +144,28 @@ class DuplicateFinderWindow:
                   command=self.close_window).pack(side=tk.LEFT, padx=5)
         
     def compare_folders(self):
-        # Заглушка для функции сравнения
+        lib = self.library_path.get().strip()
+        work = self.work_path.get().strip()
+
+        if not lib or not os.path.isdir(lib):
+            messagebox.showerror("Ошибка", f"Папка библиотеки не найдена:\n{lib}")
+            return
+        if not work or not os.path.isdir(work):
+            messagebox.showerror("Ошибка", f"Рабочая папка не найдена:\n{work}")
+            return
+
+        from pathlib import Path
+        lib_count = sum(1 for _ in Path(lib).rglob('*.fb2'))
+        work_count = sum(1 for _ in Path(work).rglob('*.fb2'))
+        if lib_count == 0 and work_count == 0:
+            messagebox.showwarning("Папки пусты", "В обеих папках нет FB2-файлов")
+            return
+        if lib_count == 0:
+            messagebox.showwarning("Папка пуста", f"В папке библиотеки нет FB2-файлов:\n{lib}")
+            return
+        if work_count == 0:
+            messagebox.showwarning("Папка пуста", f"В рабочей папке нет FB2-файлов:\n{work}")
+            return
         self.status_text.set("Выполняется поиск дубликатов...")
         self.progress['value'] = 0
         
