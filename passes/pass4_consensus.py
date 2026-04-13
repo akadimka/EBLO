@@ -466,13 +466,24 @@ class Pass4Consensus:
                 # 2. Not extracted from extracted_series_candidate (would be caught earlier)
                 # 3. A proposed_series appears 2+ times in the group
                 # ВАЖНО: проверяем что extracted_series_candidate is None, не just falsey
-                # Потому что "" (empty string) означает что это одна книга, не серия
-                if (not record.proposed_series and 
-                    record.series_source != "no_series_folder" and
-                    record.extracted_series_candidate is None and
-                    len(consensus_proposed_series) == 1):  # Only apply if unanimous consensus
-                    
+                # Потому что "" (empty string) означает что это одна книга, не серия —
+                # НО делаем исключение если имя файла содержит консенсусную серию
+                # (первая книга серии часто не имеет номера, отсюда пустой candidate).
+                if not record.proposed_series and record.series_source != "no_series_folder":
+                    if len(consensus_proposed_series) != 1:
+                        continue
                     consensus_series = list(consensus_proposed_series.keys())[0]
+                    esc = record.extracted_series_candidate
+                    if esc is None:
+                        pass  # обычный случай — применяем
+                    elif esc == '':
+                        # Пустая строка: разрешаем только если имя файла содержит серию
+                        stem = Path(record.file_path).stem.lower().replace('ё', 'е')
+                        cs_norm = consensus_series.lower().replace('ё', 'е')
+                        if cs_norm not in stem:
+                            continue
+                    else:
+                        continue  # уже был другой кандидат
                     record.proposed_series = consensus_series
                     record.series_source = "consensus"
                     proposed_consensus_count += 1
@@ -970,12 +981,21 @@ class Pass4Consensus:
                     if rec_meta_base != best_base:
                         continue  # метаданные указывают на другую серию
                 else:
-                    # Нет метаданных — применяем только если proposed_series является
-                    # подстрокой/суффиксом консенсусной серии.
-                    # Пример: "Миха" → консенсус "Я - Миха" (парсер обрезал префикс на " - ").
+                    # Нет метаданных — два случая:
+                    # 1. proposed_series является подстрокой/суффиксом консенсусной серии
+                    #    (парсер обрезал префикс через " - ").
+                    # 2. proposed_series пустая, но имя файла содержит консенсусную серию
+                    #    (первая книга серии без номера — esc='', proposed='').
                     cur_series = (rec.proposed_series or '').lower().replace('ё', 'е')
-                    if not cur_series or cur_series not in best_clean.lower().replace('ё', 'е'):
-                        continue
+                    best_lower = best_clean.lower().replace('ё', 'е')
+                    if cur_series:
+                        if cur_series not in best_lower:
+                            continue
+                    else:
+                        # Пустая серия — применяем только если имя файла содержит серию
+                        stem = Path(rec.file_path).stem.lower().replace('ё', 'е')
+                        if best_lower not in stem:
+                            continue
                 # Исправляем
                 rec.proposed_series = best_clean
                 rec.series_source = "folder_meta_consensus"
@@ -983,7 +1003,112 @@ class Pass4Consensus:
 
         self.logger.log(f"[PASS 4] Folder metadata consensus corrections: {folder_meta_correction_count}")
 
-        # HIERARCHICAL SERIES UNIFICATION (финальный шаг — после всех consensus)
+        # FILENAME PHRASE + METADATA CONFIRMATION
+        #
+        # Для каждого автора: ищем словосочетания из имён файлов,
+        # которые встречаются в 2+ файлах И подтверждены metadata_series
+        # хотя бы одного файла. Применяем ко всем подходящим файлам.
+        #
+        # Пример: "Коруд Ал. Студент в СССР 2", "Коруд Ал. Студент в СССР 3",
+        #          "Коруд Ал. Студент в СССР"
+        #  → общее словосочетание "студент в ссср" в 3 файлах
+        #  → metadata_series у файлов 2 и 3 = "Студент в СССР" (подтверждает)
+        #  → все три получают proposed_series = "Студент в СССР"
+        import re as _re_ph
+
+        def _strip_author_from_stem(stem: str, author: str) -> str:
+            """Убрать имя автора с начала стема. Пробует 'Author. ' и 'Author - '."""
+            sl = stem.lower().replace('ё', 'е')
+            for sep in ('. ', ' - '):
+                prefix = author.lower().replace('ё', 'е') + sep
+                if sl.startswith(prefix):
+                    return stem[len(prefix):]
+            # Попробовать reversed "Фамилия Имя" → "Имя Фамилия"
+            parts = author.split()
+            if len(parts) == 2:
+                rev = f"{parts[1]} {parts[0]}"
+                for sep in ('. ', ' - '):
+                    prefix = rev.lower().replace('ё', 'е') + sep
+                    if sl.startswith(prefix):
+                        return stem[len(prefix):]
+            return stem
+
+        def _title_phrases(title: str, min_words: int = 2) -> list:
+            """Все N-грамы с начала строки (убирая концевой номер)."""
+            t = _re_ph.sub(r'\s+\d+(\s*\.\s*.*)?$', '', title).strip()
+            words = t.split()
+            result = []
+            for n in range(len(words), min_words - 1, -1):
+                phrase = ' '.join(words[:n])
+                if len(phrase) >= 3:
+                    result.append(phrase)
+            return result
+
+        LOW_CONF = {'consensus', 'author-consensus', 'author-consensus (metadata-confirmed)', ''}
+        phrase_fix_count = 0
+
+        _auth_for_phrase: dict = {}
+        for rec in records:
+            _auth_for_phrase.setdefault(rec.proposed_author or '', []).append(rec)
+
+        for author, auth_recs in _auth_for_phrase.items():
+            if not author:
+                continue
+
+            # 1. Собираем нормализованные metadata_series → оригинальное имя
+            meta_confirmed: dict = {}  # norm_base → clean_name
+            for rec in auth_recs:
+                raw_meta = (rec.metadata_series or '').strip()
+                if not raw_meta:
+                    continue
+                clean = _strip_author_suffix(raw_meta)
+                norm = self._normalize_series_for_consensus(clean).lower().replace('ё', 'е')
+                if norm and norm not in meta_confirmed:
+                    meta_confirmed[norm] = clean
+
+            if not meta_confirmed:
+                continue
+
+            # 2. Для каждого файла вычисляем title-часть и её фразы
+            file_phrases: list = []  # (record, [phrase_norm, ...])
+            phrase_count: dict = {}
+            for rec in auth_recs:
+                stem = Path(rec.file_path).stem
+                title = _strip_author_from_stem(stem, author)
+                title_norm = title.lower().replace('ё', 'е')
+                phrases = _title_phrases(title_norm)
+                file_phrases.append((rec, phrases))
+                for ph in set(phrases):
+                    phrase_count[ph] = phrase_count.get(ph, 0) + 1
+
+            # 3. Подтверждённые фразы: встречаются в 2+ файлах И есть в meta_confirmed
+            confirmed = {
+                ph: meta_confirmed[ph]
+                for ph, cnt in phrase_count.items()
+                if cnt >= 2 and ph in meta_confirmed
+            }
+            if not confirmed:
+                continue
+
+            # 4. Применяем к файлам
+            for rec, phrases in file_phrases:
+                # Применяем только если серия отсутствует или низкодостоверная
+                if rec.proposed_series and rec.series_source not in LOW_CONF:
+                    continue
+                # Выбираем самую длинную подходящую фразу
+                matching = [ph for ph in phrases if ph in confirmed]
+                if not matching:
+                    continue
+                best_ph = max(matching, key=len)
+                canonical = confirmed[best_ph]
+                if rec.proposed_series != canonical:
+                    rec.proposed_series = canonical
+                    rec.series_source = "filename_phrase_confirmed"
+                    phrase_fix_count += 1
+
+        self.logger.log(f"[PASS 4] Filename phrase+meta confirmations: {phrase_fix_count}")
+
+
         # Если у одного автора есть серии "А" и "А. Б" (с точкой), вторая — подсерия первой.
         # Конвертируем "А. Б" → "А\Б" по конвенции backslash.
         # Пример: "Рожденные в СССР" + "Рожденные в СССР. Личности"
