@@ -614,12 +614,13 @@ class Pass4Consensus:
         self.logger.log(f"[PASS 4] Applied series author consensus to {series_author_consensus_count} records")
         
         # HIERARCHICAL SERIES UNIFICATION
-        # For files of the same author with hierarchical series variants (e.g., "Серия" and "Серия. Подсерия"),
-        # unify all to the shortest/base version if it appears most frequently
-        # Example: "Старплекс" vs "Старплекс. Конец эры" → all use "Старплекс"
+        # Если у одного автора есть серии "А" и "А. Б" (с точкой), вторая — подсерия первой.
+        # Конвертируем "А. Б" → "А\Б" по конвенции backslash.
+        # Пример: "Рожденные в СССР" + "Рожденные в СССР. Личности"
+        #          → файлы подсерии получают "Рожденные в СССР\Личности"
         print("[PASS 4] Applying hierarchical series unification...")
         hierarchical_unification_count = 0
-        
+
         # Group by author
         author_groups = {}
         for record in records:
@@ -627,51 +628,34 @@ class Pass4Consensus:
             if author not in author_groups:
                 author_groups[author] = []
             author_groups[author].append(record)
-        
+
         for author, author_records in author_groups.items():
-            # Group by base series (part before first ". ")
-            base_series_groups = {}
-            
+            # Собираем все уникальные серии автора
+            all_series = {r.proposed_series for r in author_records if r.proposed_series and '\\' not in r.proposed_series}
+
+            # Строим множество "чистых" базовых серий (без точки-суффикса)
+            base_only = {s for s in all_series if '. ' not in s}
+
+            # Ищем варианты вида "База. Подсерия" где "База" есть в base_only
             for record in author_records:
-                if record.proposed_series:
-                    # Extract base series (part before ". " or "\" if hierarchical)
-                    series = record.proposed_series
-                    if '. ' in series:
-                        base = series.split('. ')[0]
-                    elif '\\' in series:
-                        base = series.split('\\')[0]
-                    else:
-                        base = series
-                    
-                    if base not in base_series_groups:
-                        base_series_groups[base] = []
-                    base_series_groups[base].append((record, series))
-            
-            # For each base series with multiple variants
-            for base, records_with_series in base_series_groups.items():
-                series_variants = {}
-                for record, series in records_with_series:
-                    if series not in series_variants:
-                        series_variants[series] = []
-                    series_variants[series].append(record)
-                
-                # If this base has multiple variants (e.g., "Старплекс" and "Старплекс. Конец эры")
-                if len(series_variants) > 1:
-                    # Choose the shortest variant as the canonical one
-                    canonical_series = min(series_variants.keys(), key=len)
-                    
-                    # Unify all variants to the canonical
-                    for variant_series, variant_records in series_variants.items():
-                        if variant_series != canonical_series:
-                            for record in variant_records:
-                                record.proposed_series = canonical_series
-                                hierarchical_unification_count += 1
-        
+                series = record.proposed_series or ''
+                if '\\' in series or '. ' not in series:
+                    continue
+                dot_pos = series.find('. ')
+                base = series[:dot_pos]
+                if base not in base_only:
+                    continue
+                subseries = series[dot_pos + 2:].strip()
+                # Не конвертируем числовые суффиксы ("Серия. 1" → просто "Серия")
+                if subseries.isdigit():
+                    record.proposed_series = base
+                else:
+                    record.proposed_series = f"{base}\\{subseries}"
+                hierarchical_unification_count += 1
+
         self.logger.log(f"[PASS 4] Unified {hierarchical_unification_count} hierarchical series variants")
 
-        # FOLDER_HIERARCHY CLEANUP: If series comes from folder_hierarchy and the folder name
-        # contains the author's own name (publisher "author spotlight" folders like
-        # "Fanzon. Фэнтези Стивена Браста"), the folder name is NOT a real series.
+        # FOLDER_HIERARCHY CLEANUP
         # Fall back to metadata_series if available, otherwise clear.
         print("[PASS 4] Cleaning up folder_hierarchy series with embedded author names...")
         folder_hierarchy_cleanup_count = 0
@@ -998,4 +982,34 @@ class Pass4Consensus:
                 folder_meta_correction_count += 1
 
         self.logger.log(f"[PASS 4] Folder metadata consensus corrections: {folder_meta_correction_count}")
+
+        # HIERARCHICAL SERIES UNIFICATION (финальный шаг — после всех consensus)
+        # Если у одного автора есть серии "А" и "А. Б" (с точкой), вторая — подсерия первой.
+        # Конвертируем "А. Б" → "А\Б" по конвенции backslash.
+        # Пример: "Рожденные в СССР" + "Рожденные в СССР. Личности"
+        #          → файлы подсерии получают "Рожденные в СССР\Личности"
+        hier_count = 0
+        _auth_grps2: dict = {}
+        for rec in records:
+            _auth_grps2.setdefault(rec.proposed_author or '', []).append(rec)
+
+        for auth, auth_recs in _auth_grps2.items():
+            all_s = {r.proposed_series for r in auth_recs if r.proposed_series and '\\' not in r.proposed_series}
+            base_only = {s for s in all_s if '. ' not in s}
+            for record in auth_recs:
+                series = record.proposed_series or ''
+                if '\\' in series or '. ' not in series:
+                    continue
+                dot_pos = series.find('. ')
+                base = series[:dot_pos]
+                if base not in base_only:
+                    continue
+                subseries = series[dot_pos + 2:].strip()
+                if subseries.isdigit():
+                    record.proposed_series = base
+                else:
+                    record.proposed_series = f"{base}\\{subseries}"
+                hier_count += 1
+
+        self.logger.log(f"[PASS 4] Hierarchical series conversions (dot→backslash): {hier_count}")
 

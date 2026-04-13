@@ -593,12 +593,14 @@ class RegenCSVService:
             self.logger.log("[OK] Series cleared for compilations")
 
             # ===== Final sanitization: strip folder-illegal chars from all series/authors =====
-            _ILLEGAL = re.compile(r'[\\/:*?"<>=|]')
+            # Backslash (\) сохраняем в series — это разделитель иерархии "Серия\Подсерия".
+            _ILLEGAL_AUTHOR = re.compile(r'[\\/:*?"<>=|]')
+            _ILLEGAL_SERIES = re.compile(r'[/:*?"<>=|]')   # без backslash
             for rec in self.records:
                 if rec.proposed_series:
-                    rec.proposed_series = _ILLEGAL.sub('', rec.proposed_series).strip()
+                    rec.proposed_series = _ILLEGAL_SERIES.sub('', rec.proposed_series).strip()
                 if rec.proposed_author:
-                    rec.proposed_author = _ILLEGAL.sub('', rec.proposed_author).strip()
+                    rec.proposed_author = _ILLEGAL_AUTHOR.sub('', rec.proposed_author).strip()
             self.logger.log("[OK] Final sanitization applied")
             
             # ===== Save CSV =====
