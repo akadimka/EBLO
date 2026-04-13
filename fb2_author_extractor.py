@@ -1177,7 +1177,9 @@ class FB2AuthorExtractor:
         """
         result = {'title': '', 'authors': '', 'series': '', 'series_number': '', 'genre': ''}
         try:
-            content = self._detect_correct_encoding(fb2_path)
+            # 65 536 байт достаточно для любого <title-info> — он всегда в начале файла.
+            # Это критично для компиляций (5–20 МБ), чтобы не читать лишние мегабайты.
+            content = self._detect_correct_encoding(fb2_path, max_bytes=65536)
             if not content:
                 return result
 
@@ -1238,8 +1240,12 @@ class FB2AuthorExtractor:
             pass
         return result
 
-    def _detect_correct_encoding(self, fb2_path: Path) -> str:
+    def _detect_correct_encoding(self, fb2_path: Path, max_bytes: int = 0) -> str:
         """Автоматически определить правильную кодировку FB2 файла.
+
+        Args:
+            max_bytes: Если > 0, читать не более max_bytes байт (ускоряет
+                       обработку компиляций — metadata всегда в начале файла).
 
         Стратегия:
         1. Читает BOM и объявление кодировки в XML-заголовке.
@@ -1270,6 +1276,14 @@ class FB2AuthorExtractor:
         except Exception:
             pass
 
+        def _read_limited(encoding, errors='strict'):
+            """Читать файл целиком или до max_bytes (если задан)."""
+            try:
+                with open(fb2_path, 'r', encoding=encoding, errors=errors) as f:
+                    return f.read(max_bytes) if max_bytes > 0 else f.read()
+            except Exception:
+                return None
+
         def _score_naturalness(text: str) -> int:
             """Оценивает «естественность» кириллицы.
 
@@ -1288,13 +1302,9 @@ class FB2AuthorExtractor:
             return score
 
         # Шаг 2: сначала пробуем UTF-8 (не нуждается в эвристике — либо OK, либо нет)
-        try:
-            with open(fb2_path, 'r', encoding='utf-8', errors='strict') as f:
-                content = f.read()
-            if content:
-                return content
-        except (UnicodeDecodeError, Exception):
-            pass
+        content = _read_limited('utf-8', errors='strict')
+        if content:
+            return content
 
         # UTF-8 не подошла: файл в однобайтной кодировке.
         # Если объявленная кодировка известна и отличается от utf-8 — пробуем её первой.
@@ -1303,13 +1313,9 @@ class FB2AuthorExtractor:
         # Если файл объявил UTF-8 но строгое чтение упало (редкие битые байты в теле),
         # пробуем с errors='replace' — метаданные в начале файла останутся корректными.
         if declared_lower in ('utf-8', 'utf8', 'utf-8-sig'):
-            try:
-                with open(fb2_path, 'r', encoding='utf-8', errors='replace') as f:
-                    content = f.read()
-                if content and _score_naturalness(content) > 0:
-                    return content
-            except Exception:
-                pass
+            content = _read_limited('utf-8', errors='replace')
+            if content and _score_naturalness(content) > 0:
+                return content
 
         candidates = []
         priority = []
@@ -1320,23 +1326,16 @@ class FB2AuthorExtractor:
                 priority.append(enc)
 
         for encoding in priority:
-            try:
-                with open(fb2_path, 'r', encoding=encoding, errors='strict') as f:
-                    content = f.read()
-                if content:
-                    candidates.append((_score_naturalness(content), content))
-            except (UnicodeDecodeError, LookupError, Exception):
-                continue
+            content = _read_limited(encoding, errors='strict')
+            if content:
+                candidates.append((_score_naturalness(content), content))
 
         if candidates:
             return max(candidates, key=lambda x: x[0])[1]
 
         # Финальный fallback с заменой символов
-        try:
-            with open(fb2_path, 'r', encoding='utf-8', errors='replace') as f:
-                return f.read()
-        except Exception:
-            return ''
+        content = _read_limited('utf-8', errors='replace')
+        return content or ''
     
     
     
