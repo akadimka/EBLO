@@ -824,3 +824,23 @@ class Pass4Consensus:
             f"from multi-author folders"
         )
         print(f"[PASS 4] Cleared {multiauthor_series_cleared} publisher-imprint series from multi-author folders")
+
+        # METADATA SERIES CORRECTION (финальный шаг)
+        # Если proposed_series пришла от низкодоверительного источника (consensus,
+        # author-consensus), но metadata_series содержит другое непустое значение —
+        # доверяем метаданным: они описывают конкретный файл, а не «соседей».
+        LOW_CONFIDENCE_SOURCES = {"consensus", "author-consensus", "author-consensus (metadata-confirmed)"}
+        meta_correction_count = 0
+        for record in records:
+            if record.series_source not in LOW_CONFIDENCE_SOURCES:
+                continue
+            meta = (record.metadata_series or '').strip()
+            if not meta:
+                continue
+            if record.proposed_series != meta:
+                record.proposed_series = meta
+                record.series_source = "metadata"
+                meta_correction_count += 1
+
+        self.logger.log(f"[PASS 4] Metadata series corrections: {meta_correction_count}")
+
