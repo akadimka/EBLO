@@ -408,11 +408,11 @@ class Pass4Consensus:
                     series = record.metadata_series
                     metadata_series_count[series] = metadata_series_count.get(series, 0) + 1
             
-            # Only consider series that appear 2+ times
+            # Учитываем серию если хотя бы ОДИН файл в папке имеет её в proposed_series
             consensus_metadata_series = {
                 series: count 
                 for series, count in metadata_series_count.items() 
-                if count >= 2
+                if count >= 1
             }
             
             if not consensus_metadata_series:
