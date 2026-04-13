@@ -887,7 +887,42 @@ class Pass4Consensus:
 
         self.logger.log(f"[PASS 4] Filename+meta dual confirmations: {seq_correction_count}")
 
-        # FOLDER METADATA SERIES CONSENSUS
+        # SERIES SUFFIX CORRECTION
+        #
+        # Парсер может срезать префикс серии через " - " как разделитель.
+        # Пример: "Я - Миха 1. Дикарь" → extracted "Миха", но правильно "Я - Миха".
+        # Если в группе автора есть файл с подтверждённой серией "Я - Миха",
+        # а соседний имеет "Миха" (суффикс), исправим его.
+        suffix_fix_count = 0
+        for author, grp in _auth_groups.items():
+            # Собираем все подтверждённые полные серии
+            full_series: list = sorted(
+                {
+                    rec.proposed_series
+                    for rec in grp
+                    if rec.proposed_series and rec.series_source in STRONG_SERIES_SOURCES
+                },
+                key=len, reverse=True  # длинные первыми
+            )
+            for rec in grp:
+                cur = rec.proposed_series or ''
+                if not cur or rec.series_source not in ('filename',):
+                    continue
+                cur_lower = cur.lower().replace('ё', 'е')
+                for full in full_series:
+                    full_lower = full.lower().replace('ё', 'е')
+                    if full_lower == cur_lower:
+                        break  # уже правильно
+                    if full_lower.endswith(cur_lower) and full_lower != cur_lower:
+                        # cur — суффикс full → скорее всего обрезан " - Prefix"
+                        rec.proposed_series = full
+                        rec.series_source = "author-consensus"
+                        suffix_fix_count += 1
+                        break
+
+        self.logger.log(f"[PASS 4] Series suffix corrections: {suffix_fix_count}")
+
+
         #
         # Если в папке большинство файлов имеют одинаковую metadata_series (после
         # стрипания суффиксов вида "(Автор)" и "[Автор]"), используем её для ВСЕХ
@@ -944,13 +979,19 @@ class Pass4Consensus:
                     continue  # уже правильно
                 # Применяем только если у файла есть metadata_series совпадающая с базой
                 rec_meta_raw = (rec.metadata_series or '').strip()
-                if not rec_meta_raw:
-                    continue  # нет метаданных — не трогаем (может быть не из этой серии)
-                rec_meta_base = self._normalize_series_for_consensus(
-                    _strip_author_suffix(rec_meta_raw)
-                ).lower().replace('ё', 'е')
-                if rec_meta_base != best_base:
-                    continue  # метаданные указывают на другую серию
+                if rec_meta_raw:
+                    rec_meta_base = self._normalize_series_for_consensus(
+                        _strip_author_suffix(rec_meta_raw)
+                    ).lower().replace('ё', 'е')
+                    if rec_meta_base != best_base:
+                        continue  # метаданные указывают на другую серию
+                else:
+                    # Нет метаданных — применяем только если proposed_series является
+                    # подстрокой/суффиксом консенсусной серии.
+                    # Пример: "Миха" → консенсус "Я - Миха" (парсер обрезал префикс на " - ").
+                    cur_series = (rec.proposed_series or '').lower().replace('ё', 'е')
+                    if not cur_series or cur_series not in best_clean.lower().replace('ё', 'е'):
+                        continue
                 # Исправляем
                 rec.proposed_series = best_clean
                 rec.series_source = "folder_meta_consensus"

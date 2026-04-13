@@ -1178,12 +1178,22 @@ class Pass2SeriesFilename:
                         if not record.metadata_series:
                             continue
                         # Не навязываем серию если metadata_series указывает на ДРУГУЮ серию.
-                        # Пример: у файла meta="Ювелир", а top_series="Инженер Петра Великого" —
-                        # это разные книги одного автора, не нужно смешивать.
                         if _norm_base(record.metadata_series) != top_base:
                             continue
                         record.proposed_series = top_series
                         record.series_source = "author-consensus"
+                    else:
+                        # Файл уже имеет серию из имени файла.
+                        # Исправляем если его серия является суффиксом/частью top_series —
+                        # это признак того, что парсер обрезал префикс через " - ".
+                        # Пример: "Миха" ⊂ "Я - Миха" → исправить до "Я - Миха".
+                        rec_series = (record.proposed_series or '').lower().replace('ё', 'е')
+                        top_lower = top_series.lower().replace('ё', 'е')
+                        if (rec_series and rec_series != top_lower
+                                and top_lower.endswith(rec_series)
+                                and not record.metadata_series):
+                            record.proposed_series = top_series
+                            record.series_source = "author-consensus"
 
     def _apply_series_folder_pattern_consensus(self, records: List[BookRecord]) -> None:
         """
