@@ -70,7 +70,11 @@ class Precache:
         # Check if any word is in our name sets
         for word in words:
             word_clean = word.strip('.,;:!?').lower()  # Remove punctuation and convert to lowercase
+            # Normalise ё→е so "Пётр" matches "петр" in the name list
+            word_norm = word_clean.replace('ё', 'е')
             if word_clean in self.male_names or word_clean in self.female_names:
+                return True
+            if word_norm in self.male_names or word_norm in self.female_names:
                 return True
         
         return False
