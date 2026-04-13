@@ -307,8 +307,10 @@ class RegenCSVService:
             self.records = pass1.execute()
             
             if not self.records:
-                self.logger.log("[X] No FB2 files found")
-                return False
+                raise FileNotFoundError(
+                    f"Файлы FB2 не найдены в папке:\n{self.work_dir}\n\n"
+                    "Убедитесь, что папка содержит FB2-файлы."
+                )
             
             self.logger.log(f"[OK] PASS 1: Read {len(self.records)} files")
             
