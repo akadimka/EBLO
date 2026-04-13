@@ -528,15 +528,21 @@ class BlockLevelPatternMatcher:
             Guessed type: "Author", "Series", or "Title"
         """
         text_lower = block_text.lower()
-        
-        # Check for service words (series markers) - if SINGLE word is service word, mark it as such
-        # This is important for patterns like "Author. service_words «Series»"
+
+        # SW qualifiers: words that signal service_words ONLY when combined with a real SW.
+        # NOT added to self.service_words because standalone they can start a Title.
+        # "Весь мир передо мной" — "весь" alone → Title; "весь цикл" → service_words.
+        SW_QUALIFIERS = {'весь', 'вся', 'все', 'полный', 'полная', 'полное',
+                         'целый', 'целая', 'целое', 'complete', 'omnibus'}
+
+        # Check for service words (series markers)
         for word in self.service_words:
             if word in text_lower:
                 block_words = text_lower.split()
-                # All tokens are either a service word or a number → pure numbering block
-                # e.g. "1 часть", "часть 2", "книга 3", "том 1"
-                if all(w in self.service_words or re.match(r'^\d+$', w) for w in block_words):
+                # All tokens are SW, numbers, or SW-qualifiers → pure numbering/annotation block
+                # e.g. "1 часть", "весь цикл", "вся трилогия", "книга 3"
+                if all(w in self.service_words or re.match(r'^\d+$', w) or w in SW_QUALIFIERS
+                       for w in block_words):
                     return "service_words"
                 else:
                     # Contains service word among other text → Series label

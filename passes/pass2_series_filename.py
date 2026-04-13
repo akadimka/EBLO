@@ -521,7 +521,8 @@ class Pass2SeriesFilename:
             )
             
             if record.series_source == "folder_dataset" and not is_depth4_without_real_series:
-                continue  # Папка дала series (кроме depth==4 ошибки)
+                if record.proposed_series:
+                    continue  # Папка дала series (кроме depth==4 ошибки)
             
             if record.series_source == "folder_hierarchy":
                 continue  # Иерархия папок определила серию - готово!
@@ -534,7 +535,8 @@ class Pass2SeriesFilename:
             
             # ОБЯЗАТЕЛЬНО пробуемы паттерны (глубина НЕ влияет!)
             # Если series уже установлена из папок → пропускаем extraction
-            if record.series_source == "folder_dataset":
+            # Но если folder_dataset дал пустую серию — продолжаем extraction из filename
+            if record.series_source == "folder_dataset" and record.proposed_series:
                 continue  # Folder extraction already set hierarchical series
             
             # Если папка НЕ дала series → пробуем extraction из filename
@@ -585,12 +587,15 @@ class Pass2SeriesFilename:
                     _is_confirmed_by_meta = bool(_meta_lower and _cand_lower.replace('ё', 'е') == _meta_lower)
                     _fn_stem_lower = Path(record.file_path).stem.lower()
                     _is_in_parens = bool(_re.search(r'\(\s*' + _re.escape(_cand_lower), _fn_stem_lower))
+                    # ИСКЛЮЧЕНИЕ 4: серия получена блок-матчером с score=1.0 — это структурное совпадение,
+                    # title в FB2 просто совпадает с названием серии (omnibus или 1-я книга)
+                    _is_block_matcher_confident = getattr(self, '_last_from_block_matcher', False)
                     # Кандидат + номер в имени файла: "... - Серия N." или "... - Серия N "
                     _is_numbered_series = bool(_re.search(
                         _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.]+\d+[\s.]',
                         _fn_stem_lower.replace('ё', 'е')
                     ))
-                    if not _is_confirmed_by_meta and not _is_in_parens and not _is_numbered_series and (
+                    if not _is_confirmed_by_meta and not _is_in_parens and not _is_numbered_series and not _is_block_matcher_confident and (
                        (_title_lower and _cand_lower == _title_lower) or \
                        (_title_np_lower and _cand_lower == _title_np_lower) or \
                        (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
@@ -1677,6 +1682,10 @@ class Pass2SeriesFilename:
         
         # 🔑 Флаг: найден паттерн БЕЗ Series информации
         pattern_found_without_series = False
+        # 🔑 Флаг: блок-матчер нашёл серию с высокой уверенностью (score=1.0)
+        # При таком score title-as-series guard не должен отбрасывать результат
+        block_matcher_high_confidence = False
+        self._last_from_block_matcher = False
         
         # ══════════════════════════════════════════════════════════════════
         # ШАГ 1 (NEW): Попробовать BlockLevelPatternMatcher 🎯
@@ -1749,6 +1758,9 @@ class Pass2SeriesFilename:
                         #   "Варлок 1-3" → "Варлок"
                         processed_series = self._extract_main_series_from_multi_level(series_from_block)
                         if processed_series:
+                            # Mark: this result came from block matcher with high confidence (score=1.0)
+                            # so title-as-series guard in caller should not discard it
+                            self._last_from_block_matcher = (best_score >= 0.99)
                             return processed_series
                         # processed_series пуст → аббревиатура или мусор, не возвращаем сырое значение
         except Exception as e:
@@ -1829,6 +1841,13 @@ class Pass2SeriesFilename:
                         if 'subseries' in series_group_name or 'subsubseries' in series_group_name:
                             series_candidate = self._extract_main_series_from_multi_level(raw_series)
                         elif 'service_words' in series_group_name or '. ' in raw_series or (raw_series.split() and '-' in raw_series.split()[-1]):
+                            # Structural check: if pattern expects "Series. service_words" (dot inside parens),
+                            # the captured value must also contain a dot. Otherwise the filename structure
+                            # doesn't match the pattern — e.g. "(весь цикл)" has no dot, so it can't be
+                            # "Series. service_words" — skip this pattern.
+                            if 'service_words' in series_group_name and '.' not in raw_series:
+                                series_candidate = None
+                                continue
                             series_candidate = self._extract_series_from_brackets(raw_series)
                         else:
                             series_candidate = raw_series
@@ -1946,21 +1965,33 @@ class Pass2SeriesFilename:
                     # Пропускаем это правило
                     pass  # ← Не извлекаем "Наследник", переходим к следующему правилу
                 else:
-                    # Это многословная комбинация в скобках - может быть серия
-                    potential_series = self._extract_series_from_brackets(content_in_brackets)
-                    
-                    # 🔑 ПРОВЕРКА: это не должна быть фамилия автора или список авторов!
-                    looks_like_author = False
-                    if ',' in potential_series:
-                        # Содержит запятую - это список авторов, не серия
-                        looks_like_author = True
-                    elif '.' in potential_series:
-                        # Содержит точку - для русских имён это часто инициал+фамилия
-                        # "А.Михайловский" → это явно инициал в скобках
-                        looks_like_author = True
-                    
-                    if not looks_like_author and (not validate or self._is_valid_series(potential_series)):
-                        return potential_series
+                    # Hard check: if all words in brackets are SW or qualifiers → pure annotation,
+                    # not a series name. E.g. "(весь цикл)", "(вся трилогия)", "(Дилогия)"
+                    SW_QUALIFIERS = {'весь', 'вся', 'все', 'полный', 'полная', 'полное',
+                                     'целый', 'целая', 'целое', 'complete', 'omnibus'}
+                    bracket_words = content_in_brackets.lower().split()
+                    is_pure_annotation = all(
+                        w in self.service_words or w in SW_QUALIFIERS or w.isdigit()
+                        for w in bracket_words
+                    )
+                    if is_pure_annotation:
+                        pass  # "(весь цикл)", "(Трилогия)" — аннотация, не серия
+                    else:
+                        # Это многословная комбинация в скобках - может быть серия
+                        potential_series = self._extract_series_from_brackets(content_in_brackets)
+                        
+                        # 🔑 ПРОВЕРКА: это не должна быть фамилия автора или список авторов!
+                        looks_like_author = False
+                        if ',' in potential_series:
+                            # Содержит запятую - это список авторов, не серия
+                            looks_like_author = True
+                        elif '.' in potential_series:
+                            # Содержит точку - для русских имён это часто инициал+фамилия
+                            # "А.Михайловский" → это явно инициал в скобках
+                            looks_like_author = True
+                        
+                        if not looks_like_author and (not validate or self._is_valid_series(potential_series)):
+                            return potential_series
         
         # Правило 3: Серия. Название (точка как разделитель в начале)
         # Из паттернов конфига: "Series. Title" и "Author - Series.Title"
