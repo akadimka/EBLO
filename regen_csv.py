@@ -313,8 +313,35 @@ class RegenCSVService:
                 )
             
             self.logger.log(f"[OK] PASS 1: Read {len(self.records)} files")
-            
-            # ===== PASS 2 =====
+
+            # ===== PASS 1.5: Propagate folder_dataset author within each folder =====
+            # If at least one file in a folder got author_source="folder_dataset",
+            # all other files in the same folder inherit that author.
+            from collections import defaultdict
+            _folder_groups = defaultdict(list)
+            for rec in self.records:
+                parent = str(Path(rec.file_path).parent)
+                _folder_groups[parent].append(rec)
+
+            propagated = 0
+            for parent, group in _folder_groups.items():
+                # Find the best folder_dataset author in this group
+                dataset_rec = next(
+                    (r for r in group if r.author_source == 'folder_dataset' and r.proposed_author),
+                    None
+                )
+                if dataset_rec:
+                    for rec in group:
+                        if rec is not dataset_rec and rec.proposed_author != dataset_rec.proposed_author:
+                            rec.proposed_author = dataset_rec.proposed_author
+                            rec.author_source = 'folder_dataset'
+                            rec.needs_filename_fallback = False
+                            propagated += 1
+
+            if propagated:
+                self.logger.log(f"[OK] PASS 1.5: Propagated folder_dataset author to {propagated} files")
+
+
             if progress_callback:
                 progress_callback(20, 100, "Pass 2: Извлечение авторов")
             pass2 = Pass2Filename(self.settings, self.logger, self.work_dir,
