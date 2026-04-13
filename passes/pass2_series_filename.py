@@ -1159,6 +1159,15 @@ class Pass2SeriesFilename:
             top_series, top_count = series_votes.most_common(1)[0]
             if top_count <= 1:
                 continue
+            # Нормализованная база top_series для сравнения
+            import re as _re_ac
+            def _norm_base(s: str) -> str:
+                s = _re_ac.sub(r'\s*\([^)]*\)\s*$', '', s).strip()
+                s = _re_ac.sub(r'\s*\[[^\]]*\]\s*$', '', s).strip()
+                s = _re_ac.sub(r'\s+\d+[\s\.\:].*$', '', s).strip()
+                s = _re_ac.sub(r'\s+\d+\s*$', '', s).strip()
+                return s.lower().replace('ё', 'е')
+            top_base = _norm_base(top_series)
             # Применяем только к файлам без серии или с низкоприоритетным источником.
             # Не трогаем то, что уже надёжно определено из имени файла.
             for record in files_in_folder:
@@ -1167,6 +1176,11 @@ class Pass2SeriesFilename:
                         # Не навязываем серию файлу, у которого нет metadata_series —
                         # он скорее всего не принадлежит этой серии (просто тот же автор).
                         if not record.metadata_series:
+                            continue
+                        # Не навязываем серию если metadata_series указывает на ДРУГУЮ серию.
+                        # Пример: у файла meta="Ювелир", а top_series="Инженер Петра Великого" —
+                        # это разные книги одного автора, не нужно смешивать.
+                        if _norm_base(record.metadata_series) != top_base:
                             continue
                         record.proposed_series = top_series
                         record.series_source = "author-consensus"
