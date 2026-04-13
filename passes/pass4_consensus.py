@@ -825,22 +825,66 @@ class Pass4Consensus:
         )
         print(f"[PASS 4] Cleared {multiauthor_series_cleared} publisher-imprint series from multi-author folders")
 
-        # METADATA SERIES CORRECTION (финальный шаг)
-        # Если proposed_series пришла от низкодоверительного источника (consensus,
-        # author-consensus), но metadata_series содержит другое непустое значение —
-        # доверяем метаданным: они описывают конкретный файл, а не «соседей».
-        LOW_CONFIDENCE_SOURCES = {"consensus", "author-consensus", "author-consensus (metadata-confirmed)"}
-        meta_correction_count = 0
-        for record in records:
-            if record.series_source not in LOW_CONFIDENCE_SOURCES:
-                continue
-            meta = (record.metadata_series or '').strip()
-            if not meta:
-                continue
-            if record.proposed_series != meta:
-                record.proposed_series = meta
-                record.series_source = "metadata"
-                meta_correction_count += 1
+        # FILENAME SEQUENCE + METADATA DUAL CONFIRMATION (финальный шаг)
+        #
+        # Исправляем записи с низкодоверительной серией (consensus / author-consensus),
+        # если выполняются ОБА условия:
+        #   1. В имени ФАЙЛА присутствует база серии, которую подтвердил другой файл
+        #      того же автора (filename+meta_confirmed или filename с номером).
+        #   2. metadata_series текущего файла совпадает с той же базой серии.
+        #
+        # Пример: "Переписать сценарий 2.fb2" → series_candidate = "Переписать сценарий"
+        #          "Переписать сценарий.fb2"   → в имени есть "переписать сценарий",
+        #                                        metadata_series = "Переписать сценарий"
+        #          → вывод: серия "Переписать сценарий", source = "filename+meta_confirmed"
+        import re as _re_seq
+        LOW_CONFIDENCE = {"consensus", "author-consensus", "author-consensus (metadata-confirmed)"}
+        STRONG_SERIES_SOURCES = {"filename+meta_confirmed", "filename", "folder_dataset", "metadata"}
 
-        self.logger.log(f"[PASS 4] Metadata series corrections: {meta_correction_count}")
+        # Группируем по автору
+        _auth_groups: dict = {}
+        for rec in records:
+            key = rec.proposed_author or ""
+            _auth_groups.setdefault(key, []).append(rec)
+
+        seq_correction_count = 0
+        for author, grp in _auth_groups.items():
+            # Собираем подтверждённые серии: normalized_base → original_name
+            confirmed_bases: dict = {}
+            for rec in grp:
+                if rec.series_source in STRONG_SERIES_SOURCES and rec.extracted_series_candidate:
+                    base = self._normalize_series_for_consensus(rec.extracted_series_candidate)
+                    if base and base not in confirmed_bases:
+                        confirmed_bases[base] = rec.proposed_series or rec.extracted_series_candidate
+
+            if not confirmed_bases:
+                continue
+
+            # Проверяем записи с ненадёжной серией
+            for rec in grp:
+                if rec.series_source not in LOW_CONFIDENCE:
+                    continue
+                meta = (rec.metadata_series or '').strip()
+                if not meta:
+                    continue
+                meta_base = self._normalize_series_for_consensus(meta)
+
+                # Условие 1: metadata_series совпадает с одной из подтверждённых баз
+                if meta_base not in confirmed_bases:
+                    continue
+
+                # Условие 2: база серии присутствует в имени файла
+                stem = Path(rec.file_path).stem.lower().replace('ё', 'е')
+                if meta_base.lower().replace('ё', 'е') not in stem:
+                    continue
+
+                # Оба условия выполнены — исправляем
+                correct_series = confirmed_bases[meta_base]
+                if rec.proposed_series != correct_series:
+                    rec.proposed_series = correct_series
+                    rec.series_source = "filename+meta_confirmed"
+                    seq_correction_count += 1
+
+        self.logger.log(f"[PASS 4] Filename+meta dual confirmations: {seq_correction_count}")
+
 
