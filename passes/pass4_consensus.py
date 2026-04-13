@@ -887,4 +887,74 @@ class Pass4Consensus:
 
         self.logger.log(f"[PASS 4] Filename+meta dual confirmations: {seq_correction_count}")
 
+        # FOLDER METADATA SERIES CONSENSUS
+        #
+        # Если в папке большинство файлов имеют одинаковую metadata_series (после
+        # стрипания суффиксов вида "(Автор)" и "[Автор]"), используем её для ВСЕХ
+        # файлов папки, включая те у которых series_source="filename".
+        #
+        # Пример: все 11 файлов Гаусса имеют metadata_series "Второй шанс (Максим Гаусс)"
+        # / "Второй шанс [Гаусс]" / "Второй шанс" → нормализовано = "второй шанс"
+        # → все получают proposed_series = "Второй шанс"
+        import re as _re_folder_meta
+        def _strip_author_suffix(s: str) -> str:
+            """Strip (Author) / [Author] suffixes from series name."""
+            s = _re_folder_meta.sub(r'\s*\([^)]*\)\s*$', '', s).strip()
+            s = _re_folder_meta.sub(r'\s*\[[^\]]*\]\s*$', '', s).strip()
+            return s
+
+        # Группируем по папке
+        _folder_groups_meta: dict = {}
+        for rec in records:
+            if rec.file_path:
+                folder = str(Path(rec.file_path).parent)
+                _folder_groups_meta.setdefault(folder, []).append(rec)
+
+        folder_meta_correction_count = 0
+        for folder, grp in _folder_groups_meta.items():
+            # Собираем нормализованные metadata_series
+            meta_votes: dict = {}  # normalized_base → (clean_display_name, count)
+            for rec in grp:
+                raw = (rec.metadata_series or '').strip()
+                if not raw:
+                    continue
+                clean = _strip_author_suffix(raw)
+                base = self._normalize_series_for_consensus(clean).lower().replace('ё', 'е')
+                if not base:
+                    continue
+                if base not in meta_votes:
+                    meta_votes[base] = [clean, 0]
+                meta_votes[base][1] += 1
+
+            if not meta_votes:
+                continue
+
+            # Выбираем лидирующую базу
+            best_base, (best_clean, best_count) = max(meta_votes.items(), key=lambda kv: kv[1][1])
+
+            # Применяем только если она встречается у большинства файлов
+            if best_count < max(2, len(grp) * 0.5):
+                continue
+
+            for rec in grp:
+                current_base = self._normalize_series_for_consensus(
+                    rec.proposed_series or ''
+                ).lower().replace('ё', 'е')
+                if current_base == best_base:
+                    continue  # уже правильно
+                # Применяем только если у файла есть metadata_series совпадающая с базой
+                rec_meta_raw = (rec.metadata_series or '').strip()
+                if not rec_meta_raw:
+                    continue  # нет метаданных — не трогаем (может быть не из этой серии)
+                rec_meta_base = self._normalize_series_for_consensus(
+                    _strip_author_suffix(rec_meta_raw)
+                ).lower().replace('ё', 'е')
+                if rec_meta_base != best_base:
+                    continue  # метаданные указывают на другую серию
+                # Исправляем
+                rec.proposed_series = best_clean
+                rec.series_source = "folder_meta_consensus"
+                folder_meta_correction_count += 1
+
+        self.logger.log(f"[PASS 4] Folder metadata consensus corrections: {folder_meta_correction_count}")
 
