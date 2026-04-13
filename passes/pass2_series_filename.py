@@ -587,7 +587,7 @@ class Pass2SeriesFilename:
                     _is_in_parens = bool(_re.search(r'\(\s*' + _re.escape(_cand_lower), _fn_stem_lower))
                     # Кандидат + номер в имени файла: "... - Серия N." или "... - Серия N "
                     _is_numbered_series = bool(_re.search(
-                        _re.escape(_cand_lower.replace('ё', 'е')) + r'\s+\d+[\s.]',
+                        _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.]+\d+[\s.]',
                         _fn_stem_lower.replace('ё', 'е')
                     ))
                     if not _is_confirmed_by_meta and not _is_in_parens and not _is_numbered_series and (

@@ -437,10 +437,20 @@ class BlockLevelPatternMatcher:
         
         for position, (fname_block, pblock) in enumerate(zip(filename_blocks, pattern_blocks)):
             max_score += 1.0 + 0.1  # 1.0 for type match, 0.1 for potential delimiter bonus
-            
-            # Match parenthesization
-            if fname_block.is_parenthesized == pblock['parenthesized']:
-                score += 0.5
+
+            # Hard rule: parenthesization must match exactly
+            # If pattern expects block in parentheses but filename has none (or vice versa) — reject
+            if fname_block.is_parenthesized != pblock['parenthesized']:
+                return 0.0, pattern, None, None
+
+            # Hard rule: guillemets «» must match exactly
+            # If pattern has «Series» but filename block has no guillemets — reject
+            pattern_has_guillemets = '«' in pblock['text']
+            filename_has_guillemets = '«' in fname_block.text
+            if pattern_has_guillemets != filename_has_guillemets:
+                return 0.0, pattern, None, None
+
+            score += 0.5  # Structural markers (parenthesization + guillemets) match
             
             # Match block type expectation
             expected_type = pblock['type']
@@ -464,13 +474,15 @@ class BlockLevelPatternMatcher:
             else:
                 fname_type = self._guess_block_type(fname_block.text)
             
-            # Context-aware type adjustment
-            # If previous block in pattern was "service_words" and this block would be  some wrong type,
-            # but pattern expects "Series", prefer "Series" classification
-            if (position > 0 and expected_type == "Series" and 
+            # Context-aware type adjustment: Series names often look like book titles.
+            # If pattern expects Series at this position and block looks like a Title → treat as Series.
+            if expected_type == "Series" and fname_type == "Title":
+                fname_type = "Series"
+            # Also: after service_words block, force Series (original logic kept as fallback)
+            if (position > 0 and expected_type == "Series" and
                 pattern_blocks[position - 1]['type'] == "service_words" and
-                fname_type in ("Title", "Author")):  # Override both Title and Author guesses
-                fname_type = "Series"  # Override: after service_words, expect Series
+                fname_type == "Author"):  # Only override Author guesses now (Title already covered above)
+                fname_type = "Series"
             
             # Check delimiter match
             delimiter_match = fname_block.delimiter == pblock['delimiter']
@@ -521,14 +533,13 @@ class BlockLevelPatternMatcher:
         # This is important for patterns like "Author. service_words «Series»"
         for word in self.service_words:
             if word in text_lower:
-                # If the block is JUST a service word (or mostly service word), mark as service_words type
-                # This helps match patterns like "Author. Цикл «Series»" where Цикл is the service word
-                block_words = set(text_lower.split())
-                if len(block_words) == 1 and word in block_words:
-                    # Single word that's a service word
+                block_words = text_lower.split()
+                # All tokens are either a service word or a number → pure numbering block
+                # e.g. "1 часть", "часть 2", "книга 3", "том 1"
+                if all(w in self.service_words or re.match(r'^\d+$', w) for w in block_words):
                     return "service_words"
                 else:
-                    # Contains service word among other text
+                    # Contains service word among other text → Series label
                     return "Series"
         
         # Check for number patterns (1-3, 1, vol. 2, etc.)

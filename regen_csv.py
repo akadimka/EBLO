@@ -596,9 +596,27 @@ class RegenCSVService:
             # Backslash (\) сохраняем в series — это разделитель иерархии "Серия\Подсерия".
             _ILLEGAL_AUTHOR = re.compile(r'[\\/:*?"<>=|]')
             _ILLEGAL_SERIES = re.compile(r'[/:*?"<>=|]')   # без backslash
+
+            def _replace_colon_in_series(s: str) -> str:
+                """Replace ':' with '. ' and capitalize the next word."""
+                def _repl(m):
+                    rest = m.string[m.end():]
+                    # Find next non-space character
+                    stripped = rest.lstrip(' ')
+                    if stripped:
+                        capitalized = stripped[0].upper() + stripped[1:]
+                        return '. ' + capitalized[:len(stripped)]
+                    return '. '
+                # Replace colon + optional spaces with ". " + capitalized next char
+                result = re.sub(r':\s*([^\s]?)', lambda m: '. ' + m.group(1).upper() if m.group(1) else '.', s)
+                return result
+
             for rec in self.records:
                 if rec.proposed_series:
-                    rec.proposed_series = _ILLEGAL_SERIES.sub('', rec.proposed_series).strip()
+                    # First replace ':' with '. Capitalized'
+                    rec.proposed_series = _replace_colon_in_series(rec.proposed_series)
+                    # Then strip remaining illegal chars (excluding ':' already handled)
+                    rec.proposed_series = re.sub(r'[/*?"<>=|]', '', rec.proposed_series).strip()
                 if rec.proposed_author:
                     rec.proposed_author = _ILLEGAL_AUTHOR.sub('', rec.proposed_author).strip()
             self.logger.log("[OK] Final sanitization applied")
