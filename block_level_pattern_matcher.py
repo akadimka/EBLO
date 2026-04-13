@@ -410,7 +410,17 @@ class BlockLevelPatternMatcher:
         # Hard rule: # of blocks must match
         if len(filename_blocks) != len(pattern_blocks):
             return 0.0, pattern, None, None
-        
+
+        # Hard rule: разделитель между автором (блок 0) и остальным текстом (блок 1)
+        # должен совпадать — " - " и ". " несовместимы.
+        if len(filename_blocks) >= 2 and len(pattern_blocks) >= 2:
+            f_sep = (filename_blocks[1].delimiter or '').strip()
+            p_sep = (pattern_blocks[1]['delimiter'] or '').strip()
+            f_is_dash = f_sep == '-'
+            p_is_dash = p_sep == '-'
+            if f_is_dash != p_is_dash:
+                return 0.0, pattern, None, None
+
         # CRITICAL: Check if first block contains known author names
         first_block_is_known_author = False
         if self.known_author_names and filename_blocks:
@@ -464,7 +474,7 @@ class BlockLevelPatternMatcher:
             
             # Check delimiter match
             delimiter_match = fname_block.delimiter == pblock['delimiter']
-            
+
             if fname_type == expected_type:
                 score += 0.5  # Type matches!
                 
