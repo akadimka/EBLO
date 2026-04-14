@@ -1122,56 +1122,51 @@ class MainWindow(tk.Tk):
 
     def _on_folder_tree_right_click(self, event):
         """Обработчик ПКМ на Treeview элемент."""
-        # Выбрать элемент в точке клика
         item = self.folder_tree.identify('item', event.x, event.y)
         if item:
-            self.folder_tree.selection_set(item)
+            # Если кликнули по уже выделенному элементу — не трогать выделение
+            if item not in self.folder_tree.selection():
+                self.folder_tree.selection_set(item)
             self.selected_tree_item = item
             # Показать контекстное меню
             self.folder_tree_context_menu.post(event.x_root, event.y_root)
     
     def _assign_genre_to_folder(self):
-        """Присвоить жанр выбранной папке/файлу."""
-        if not hasattr(self, 'selected_tree_item'):
+        """Присвоить жанр выбранным папкам/файлам."""
+        selected_items = self.folder_tree.selection()
+        if not selected_items:
             messagebox.showwarning('Предупреждение', 'Ничего не выбрано')
             return
-        
-        item = self.selected_tree_item
-        
-        # Получить путь элемента
-        try:
-            path_text = self.folder_tree.item(item, 'text')
-        except:
-            messagebox.showerror('Ошибка', 'Не удалось получить информацию об элементе')
+
+        folder_paths = []
+        path_texts = []
+        for it in selected_items:
+            try:
+                tags = self.folder_tree.item(it, 'tags')
+                if not tags:
+                    continue
+                fp = str(tags[0]).strip()
+                if not os.path.isabs(fp):
+                    fp = os.path.abspath(fp)
+                folder_paths.append(fp)
+                path_texts.append(self.folder_tree.item(it, 'text'))
+            except Exception:
+                pass
+
+        if not folder_paths:
+            messagebox.showerror('Ошибка', 'Не удалось получить пути папок')
             return
-        
-        # Показать диалог выбора жанра
-        self._open_genre_assignment_dialog(path_text, item)
+
+        label = path_texts[0] if len(path_texts) == 1 else f'{len(path_texts)} папок'
+        self._open_genre_assignment_dialog(label, list(selected_items), folder_paths)
     
-    def _open_genre_assignment_dialog(self, path_text: str, tree_item: str):
+    def _open_genre_assignment_dialog(self, path_text: str, tree_items: list, folder_paths: list):
         """Открыть диалог присвоения жанра."""
         # Получить список всех доступных жанров
         genres = self.genres_manager.get_all_genres()
         
         if not genres:
             messagebox.showwarning('Внимание', 'Список жанров пуст')
-            return
-        
-        # Получить полный путь к папке из дерева
-        try:
-            tags = self.folder_tree.item(tree_item, 'tags')
-            
-            if not tags or len(tags) == 0:
-                messagebox.showerror('Ошибка', 'Не удалось получить путь папки')
-                return
-            
-            folder_path = str(tags[0]).strip()
-            
-            # Убедиться, что путь абсолютный
-            if not os.path.isabs(folder_path):
-                folder_path = os.path.abspath(folder_path)
-        except (IndexError, ValueError, AttributeError) as e:
-            messagebox.showerror('Ошибка', 'Не удалось получить путь папки')
             return
         
         # Создать окно выбора
@@ -1311,15 +1306,19 @@ class MainWindow(tk.Tk):
             
             # Скрыть диалог выбора
             dialog.withdraw()
-            
-            # Запустить присвоение жанра в отдельном потоке
-            assign_genre_threaded(
-                folder_path,
-                selected_genre,
-                progress_callback=update_progress,
-                completion_callback=on_completion,
-                logger=self.logger  # Передаем логгер приложения
-            )
+
+            def _run_all_folders():
+                """Последовательно обрабатываем все выбранные папки."""
+                from genre_assign import GenreAssignmentService
+                service = GenreAssignmentService(logger=self.logger)
+                total_count = 0
+                for fp in folder_paths:
+                    count = service.assign_genre_to_folder(fp, selected_genre, update_progress, None)
+                    total_count += count
+                on_completion(total_count)
+
+            import threading as _t
+            _t.Thread(target=_run_all_folders, daemon=True).start()
         
         selected_genre = None  # Variable для использования в on_completion
         
