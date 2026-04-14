@@ -1,4 +1,7 @@
 import os
+import hashlib
+import threading
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -6,6 +9,22 @@ try:
     from .window_persistence import setup_window_persistence
 except ImportError:
     from window_persistence import setup_window_persistence
+
+
+def _file_hash(path: Path, chunk_size: int = 65536) -> str:
+    """SHA-256 первых 256 КБ файла (быстро и достаточно точно)."""
+    h = hashlib.sha256()
+    try:
+        with open(path, 'rb') as f:
+            for _ in range(4):  # 4 × 64 КБ = 256 КБ
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                h.update(chunk)
+    except OSError:
+        return ''
+    return h.hexdigest()
+
 
 class DuplicateFinderWindow:
     def __init__(self, parent=None, settings_manager=None):
@@ -15,180 +34,322 @@ class DuplicateFinderWindow:
             self.window.transient(parent)  # Сделать окно зависимым от главного
             self.window.grab_set()  # Перехватить фокус - окно модальное
         self.settings_manager = settings_manager
-        
-        # Настройка сохранения размера и позиции окна
+        self.search_path = tk.StringVar()
+        self._duplicates: list = []
+        self._searching = False
+
         if settings_manager:
-            setup_window_persistence(self.window, 'duplicate_finder', settings_manager, '1400x900+350+300')
+            setup_window_persistence(self.window, 'duplicate_finder', settings_manager, '1100x700+200+150')
         else:
-            self.window.geometry("1400x900")
-        
-        # Переменные
-        self.library_path = tk.StringVar()
-        self.library_path.set("C:/Users/dmitriy.murov/Downloads/TriblerDownloads/EBook Library")
-        
-        self.work_path = tk.StringVar()
-        self.work_path.set("C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1")
-        
-        self.status_text = tk.StringVar()
-        self.status_text.set("Готово")
-        
-        # Создание GUI
-        self.create_widgets()
-        
-    def create_widgets(self):
-        # Главный контейнер
-        main_frame = ttk.Frame(self.window, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Верхняя часть - пути к папкам
-        paths_frame = ttk.Frame(main_frame)
-        paths_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Библиотека
-        lib_frame = ttk.Frame(paths_frame)
-        lib_frame.pack(fill=tk.X, pady=5)
-        
-        ttk.Label(lib_frame, text="Библиотека:", font=('Arial', 9, 'bold')).pack(anchor=tk.W, pady=2)
-        lib_entry = ttk.Entry(lib_frame, textvariable=self.library_path)
-        lib_entry.pack(fill=tk.X, pady=2)
-        
-        # Рабочая папка
-        work_frame = ttk.Frame(paths_frame)
-        work_frame.pack(fill=tk.X, pady=5)
-        
-        ttk.Label(work_frame, text="Рабочая папка:", font=('Arial', 9, 'bold')).pack(anchor=tk.W, pady=2)
-        work_entry = ttk.Entry(work_frame, textvariable=self.work_path)
-        work_entry.pack(fill=tk.X, pady=2)
-        
-        # Разделитель
-        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-        
-        # Заголовок для списков дубликатов
-        ttk.Label(main_frame, text="Дубликаты (файлы, найденные в обеих папках):", 
-                 font=('Arial', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
-        
-        # Контейнер для двух списков
-        lists_frame = ttk.Frame(main_frame)
-        lists_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
-        # Левый список - "Путь в библиотеке"
-        left_frame = ttk.Frame(lists_frame)
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        
-        ttk.Label(left_frame, text="Путь в библиотеке").pack(anchor=tk.W, pady=2)
-        
-        left_scroll_y = ttk.Scrollbar(left_frame, orient=tk.VERTICAL)
-        left_scroll_x = ttk.Scrollbar(left_frame, orient=tk.HORIZONTAL)
-        
-        self.left_listbox = tk.Listbox(
-            left_frame,
-            yscrollcommand=left_scroll_y.set,
-            xscrollcommand=left_scroll_x.set,
-            bg='white',
-            font=('Arial', 9)
-        )
-        
-        left_scroll_y.config(command=self.left_listbox.yview)
-        left_scroll_x.config(command=self.left_listbox.xview)
-        
-        self.left_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        left_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        left_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        # Правый список - "Путь в рабочей папке"
-        right_frame = ttk.Frame(lists_frame)
-        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        
-        ttk.Label(right_frame, text="Путь в рабочей папке").pack(anchor=tk.W, pady=2)
-        
-        right_scroll_y = ttk.Scrollbar(right_frame, orient=tk.VERTICAL)
-        right_scroll_x = ttk.Scrollbar(right_frame, orient=tk.HORIZONTAL)
-        
-        self.right_listbox = tk.Listbox(
-            right_frame,
-            yscrollcommand=right_scroll_y.set,
-            xscrollcommand=right_scroll_x.set,
-            bg='white',
-            font=('Arial', 9)
-        )
-        
-        right_scroll_y.config(command=self.right_listbox.yview)
-        right_scroll_x.config(command=self.right_listbox.xview)
-        
-        self.right_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        right_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        right_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        # Нижний разделитель
-        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-        
-        # Прогресс-бар
-        self.progress = ttk.Progressbar(main_frame, mode='determinate', length=300)
-        self.progress.pack(fill=tk.X, pady=(0, 10))
-        
-        # Статус
-        status_frame = ttk.Frame(main_frame)
-        status_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        status_label = ttk.Label(status_frame, textvariable=self.status_text, 
-                                font=('Arial', 9))
-        status_label.pack(anchor=tk.W)
-        
-        # Кнопки внизу
-        buttons_frame = ttk.Frame(main_frame)
-        buttons_frame.pack(fill=tk.X)
-        
-        ttk.Button(buttons_frame, text="Сравнить", 
-                  command=self.compare_folders).pack(side=tk.LEFT, padx=5)
-        ttk.Button(buttons_frame, text="Отмена", 
-                  command=self.close_window).pack(side=tk.LEFT, padx=5)
-        
-    def compare_folders(self):
-        lib = self.library_path.get().strip()
-        work = self.work_path.get().strip()
+            self.window.geometry("1100x700")
 
-        if not lib or not os.path.isdir(lib):
-            messagebox.showerror("Ошибка", f"Папка библиотеки не найдена:\n{lib}")
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
+
+    def _build_ui(self):
+        root = self.window
+
+        # ── Верхняя панель: папка ────────────────────────────────────
+        top = ttk.Frame(root, padding='8 6 8 4')
+        top.pack(fill=tk.X)
+
+        ttk.Label(top, text='Папка для поиска:').pack(side=tk.LEFT)
+        ttk.Entry(top, textvariable=self.search_path, width=70).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        ttk.Button(top, text='Обзор…', command=self._browse).pack(side=tk.LEFT)
+
+        ttk.Separator(root, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=8)
+
+        # ── Основная область: два списка ─────────────────────────────
+        mid = ttk.Frame(root, padding='8 4 8 4')
+        mid.pack(fill=tk.BOTH, expand=True)
+        mid.columnconfigure(0, weight=1)
+        mid.columnconfigure(1, weight=1)
+        mid.rowconfigure(1, weight=1)
+
+        ttk.Label(mid, text='Исходные файлы', font=('', 9, 'bold')).grid(
+            row=0, column=0, sticky='w', padx=(0, 6))
+        ttk.Label(mid, text='Дубликаты  (отметьте для удаления)',
+                  font=('', 9, 'bold')).grid(row=0, column=1, sticky='w')
+
+        # Левый список — исходники
+        lf = ttk.Frame(mid)
+        lf.grid(row=1, column=0, sticky='nsew', padx=(0, 6))
+        lf.rowconfigure(0, weight=1)
+        lf.columnconfigure(0, weight=1)
+
+        self.src_list = tk.Listbox(lf, selectmode=tk.EXTENDED,
+                                   bg='white', font=('', 9), activestyle='none')
+        vsb_l = ttk.Scrollbar(lf, command=self.src_list.yview)
+        hsb_l = ttk.Scrollbar(lf, orient=tk.HORIZONTAL, command=self.src_list.xview)
+        self.src_list.configure(yscrollcommand=vsb_l.set, xscrollcommand=hsb_l.set)
+        self.src_list.grid(row=0, column=0, sticky='nsew')
+        vsb_l.grid(row=0, column=1, sticky='ns')
+        hsb_l.grid(row=1, column=0, sticky='ew')
+
+        # Правый список — дубликаты (Treeview с чекбоксами)
+        rf = ttk.Frame(mid)
+        rf.grid(row=1, column=1, sticky='nsew')
+        rf.rowconfigure(0, weight=1)
+        rf.columnconfigure(0, weight=1)
+
+        self.dup_tree = ttk.Treeview(
+            rf, columns=('check', 'path', 'size'),
+            show='headings', selectmode='none')
+        self.dup_tree.heading('check', text='✓', anchor='center')
+        self.dup_tree.heading('path',  text='Путь',  anchor='w',
+                              command=lambda: self._sort_dup('path'))
+        self.dup_tree.heading('size',  text='Размер', anchor='e',
+                              command=lambda: self._sort_dup('size'))
+        self.dup_tree.column('check', width=30,  stretch=False, anchor='center')
+        self.dup_tree.column('path',  width=460, stretch=True)
+        self.dup_tree.column('size',  width=80,  stretch=False, anchor='e')
+        self.dup_tree.tag_configure('checked',   background='#ffe0e0')
+        self.dup_tree.tag_configure('unchecked', background='white')
+        self.dup_tree.bind('<Button-1>', self._toggle_check)
+
+        vsb_r = ttk.Scrollbar(rf, command=self.dup_tree.yview)
+        hsb_r = ttk.Scrollbar(rf, orient=tk.HORIZONTAL, command=self.dup_tree.xview)
+        self.dup_tree.configure(yscrollcommand=vsb_r.set, xscrollcommand=hsb_r.set)
+        self.dup_tree.grid(row=0, column=0, sticky='nsew')
+        vsb_r.grid(row=0, column=1, sticky='ns')
+        hsb_r.grid(row=1, column=0, sticky='ew')
+
+        # ── Прогресс + статус ────────────────────────────────────────
+        bot_top = ttk.Frame(root, padding='8 2 8 2')
+        bot_top.pack(fill=tk.X)
+        self.progress = ttk.Progressbar(bot_top, mode='determinate')
+        self.progress.pack(fill=tk.X)
+        self.status_var = tk.StringVar(value='Готово')
+        ttk.Label(bot_top, textvariable=self.status_var,
+                  font=('', 9), foreground='#444').pack(anchor='w', pady=2)
+
+        ttk.Separator(root, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=8)
+
+        # ── Нижние кнопки ────────────────────────────────────────────
+        bot = ttk.Frame(root, padding='8 4 8 6')
+        bot.pack(fill=tk.X)
+
+        self.btn_search = ttk.Button(bot, text='Поиск', command=self._start_search)
+        self.btn_search.pack(side=tk.LEFT, padx=4)
+
+        self.btn_check_all = ttk.Button(bot, text='Отметить все',
+                                        command=self._check_all, state=tk.DISABLED)
+        self.btn_check_all.pack(side=tk.LEFT, padx=4)
+
+        self.btn_delete = ttk.Button(bot, text='Удалить отмеченные',
+                                     command=self._delete_checked, state=tk.DISABLED)
+        self.btn_delete.pack(side=tk.LEFT, padx=4)
+
+        ttk.Button(bot, text='Закрыть',
+                   command=self.window.destroy).pack(side=tk.RIGHT, padx=4)
+
+    # ------------------------------------------------------------------
+    # Handlers
+    # ------------------------------------------------------------------
+
+    def _browse(self):
+        folder = filedialog.askdirectory(
+            parent=self.window,
+            initialdir=self.search_path.get() or os.path.expanduser('~'))
+        if folder:
+            self.search_path.set(folder)
+
+    def _toggle_check(self, event):
+        if self.dup_tree.identify_region(event.x, event.y) != 'cell':
             return
-        if not work or not os.path.isdir(work):
-            messagebox.showerror("Ошибка", f"Рабочая папка не найдена:\n{work}")
+        if self.dup_tree.identify_column(event.x) != '#1':
+            return
+        iid = self.dup_tree.identify_row(event.y)
+        if not iid:
+            return
+        vals = list(self.dup_tree.item(iid, 'values'))
+        if vals[0] == '✓':
+            vals[0] = ''
+            self.dup_tree.item(iid, values=vals, tags=('unchecked',))
+        else:
+            vals[0] = '✓'
+            self.dup_tree.item(iid, values=vals, tags=('checked',))
+        self._update_delete_btn()
+
+    def _check_all(self):
+        for iid in self.dup_tree.get_children():
+            vals = list(self.dup_tree.item(iid, 'values'))
+            vals[0] = '✓'
+            self.dup_tree.item(iid, values=vals, tags=('checked',))
+        self._update_delete_btn()
+
+    def _update_delete_btn(self):
+        checked = sum(
+            1 for iid in self.dup_tree.get_children()
+            if self.dup_tree.item(iid, 'values')[0] == '✓')
+        if checked:
+            self.btn_delete.configure(state=tk.NORMAL,
+                                      text=f'Удалить отмеченные ({checked})')
+        else:
+            self.btn_delete.configure(state=tk.DISABLED, text='Удалить отмеченные')
+
+    def _sort_dup(self, col):
+        items = [(self.dup_tree.item(i, 'values'), i)
+                 for i in self.dup_tree.get_children()]
+        idx = {'path': 1, 'size': 2}[col]
+        reverse = getattr(self, '_sort_rev', False)
+        self._sort_rev = not reverse
+        items.sort(key=lambda x: x[0][idx], reverse=reverse)
+        for pos, (_, iid) in enumerate(items):
+            self.dup_tree.move(iid, '', pos)
+
+    # ------------------------------------------------------------------
+    # Search
+    # ------------------------------------------------------------------
+
+    def _start_search(self):
+        if self._searching:
+            return
+        folder = self.search_path.get().strip()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showerror('Ошибка', f'Папка не найдена:\n{folder}',
+                                 parent=self.window)
             return
 
-        from pathlib import Path
-        lib_count = sum(1 for _ in Path(lib).rglob('*.fb2'))
-        work_count = sum(1 for _ in Path(work).rglob('*.fb2'))
-        if lib_count == 0 and work_count == 0:
-            messagebox.showwarning("Папки пусты", "В обеих папках нет FB2-файлов")
-            return
-        if lib_count == 0:
-            messagebox.showwarning("Папка пуста", f"В папке библиотеки нет FB2-файлов:\n{lib}")
-            return
-        if work_count == 0:
-            messagebox.showwarning("Папка пуста", f"В рабочей папке нет FB2-файлов:\n{work}")
-            return
-        self.status_text.set("Выполняется поиск дубликатов...")
+        self.src_list.delete(0, tk.END)
+        for iid in self.dup_tree.get_children():
+            self.dup_tree.delete(iid)
+        self.btn_delete.configure(state=tk.DISABLED, text='Удалить отмеченные')
+        self.btn_check_all.configure(state=tk.DISABLED)
+        self.btn_search.configure(state=tk.DISABLED)
         self.progress['value'] = 0
-        
-        # Имитация процесса
-        for i in range(101):
-            self.progress['value'] = i
-            self.window.update_idletasks()
-            self.window.after(10)
-        
-        self.status_text.set("Готово. Дубликаты не найдены.")
-        messagebox.showinfo("Информация", "Поиск завершен")
-        
-    def close_window(self):
-        self.window.destroy()
-        
+        self.status_var.set('Сканирование…')
+        self._searching = True
+
+        threading.Thread(target=self._search_worker,
+                         args=(folder,), daemon=True).start()
+
+    def _search_worker(self, folder: str):
+        try:
+            files = list(Path(folder).rglob('*.fb2'))
+            total = len(files)
+            if total == 0:
+                self.window.after(0, lambda: self._on_done({}, total))
+                return
+
+            hash_map: dict = {}
+            for i, path in enumerate(files, 1):
+                h = _file_hash(path)
+                if h:
+                    hash_map.setdefault(h, []).append(path)
+                if i % 20 == 0 or i == total:
+                    pct = int(i / total * 100)
+                    msg = f'Проверено: {i} / {total}'
+                    self.window.after(0, lambda p=pct, m=msg: (
+                        self.progress.__setitem__('value', p),
+                        self.status_var.set(m)
+                    ))
+            self.window.after(0, lambda: self._on_done(hash_map, total))
+        except Exception as e:
+            self.window.after(0, lambda: self._on_error(str(e)))
+
+    def _on_done(self, hash_map: dict, total: int):
+        self._searching = False
+        self.btn_search.configure(state=tk.NORMAL)
+        self.progress['value'] = 100
+
+        sources = []
+        duplicates = []
+        for paths in hash_map.values():
+            if len(paths) < 2:
+                continue
+            paths_sorted = sorted(paths)
+            sources.append(paths_sorted[0])
+            duplicates.extend(paths_sorted[1:])
+
+        for p in sorted(sources):
+            self.src_list.insert(tk.END, str(p))
+
+        dup_size_total = 0
+        for p in sorted(duplicates):
+            sz = p.stat().st_size if p.exists() else 0
+            dup_size_total += sz
+            sz_str = f'{sz // 1024} КБ' if sz < 1_048_576 else f'{sz / 1_048_576:.1f} МБ'
+            self.dup_tree.insert('', tk.END,
+                values=('✓', str(p), sz_str), tags=('checked',))
+
+        if duplicates:
+            mb = dup_size_total / 1_048_576
+            self.status_var.set(
+                f'Найдено {len(duplicates)} дубликат(а/ов) из {total} файлов'
+                f' — можно освободить {mb:.1f} МБ')
+            self.btn_check_all.configure(state=tk.NORMAL)
+            self._update_delete_btn()
+        else:
+            self.status_var.set(f'Дубликаты не найдены ({total} файлов проверено)')
+
+    def _on_error(self, msg: str):
+        self._searching = False
+        self.btn_search.configure(state=tk.NORMAL)
+        self.status_var.set(f'Ошибка: {msg}')
+        messagebox.showerror('Ошибка', msg, parent=self.window)
+
+    # ------------------------------------------------------------------
+    # Delete
+    # ------------------------------------------------------------------
+
+    def _delete_checked(self):
+        to_delete = [
+            self.dup_tree.item(iid, 'values')[1]
+            for iid in self.dup_tree.get_children()
+            if self.dup_tree.item(iid, 'values')[0] == '✓'
+        ]
+        if not to_delete:
+            return
+
+        if not messagebox.askyesno(
+            'Подтверждение',
+            f'Удалить {len(to_delete)} файл(а/ов)?\nДействие необратимо.',
+            parent=self.window
+        ):
+            return
+
+        failed = []
+        deleted = []
+        for path_str in to_delete:
+            try:
+                Path(path_str).unlink(missing_ok=True)
+                deleted.append(path_str)
+            except OSError as e:
+                failed.append(f'{path_str}: {e}')
+
+        deleted_set = set(deleted)
+        for iid in list(self.dup_tree.get_children()):
+            if self.dup_tree.item(iid, 'values')[1] in deleted_set:
+                self.dup_tree.delete(iid)
+
+        remaining = len(self.dup_tree.get_children())
+        self.status_var.set(
+            f'Удалено {len(deleted)} файл(а/ов).'
+            + (f' Осталось: {remaining}.' if remaining else ' Все дубликаты удалены.')
+            + (f' Ошибок: {len(failed)}.' if failed else '')
+        )
+        self._update_delete_btn()
+        if not remaining:
+            self.btn_check_all.configure(state=tk.DISABLED)
+
+        if failed:
+            messagebox.showwarning(
+                'Ошибки при удалении',
+                '\n'.join(failed[:10]) + ('\n…' if len(failed) > 10 else ''),
+                parent=self.window)
+
     def run(self):
         self.window.mainloop()
 
-# Для запуска как отдельного окна
-if __name__ == "__main__":
-    app = DuplicateFinderWindow()
-    app.run()
 
-# Для запуска из другого приложения
-def open_duplicate_finder(parent=None):
-    DuplicateFinderWindow(parent)
+def open_duplicate_finder(parent=None, settings_manager=None):
+    DuplicateFinderWindow(parent, settings_manager)
+
+
+if __name__ == '__main__':
+    DuplicateFinderWindow().run()
