@@ -44,10 +44,6 @@ class WindowManager:
             window_id = id(child)
             self._window_callbacks[window_id] = on_close
         
-        # Установить модальность
-        child.grab_set()
-        child.transient(parent)
-        
         # Перенести фокус на новое окно
         child.focus_set()
         child.lift()
@@ -86,11 +82,6 @@ class WindowManager:
         if self._window_stack:
             previous_window = self._window_stack[-1]
             try:
-                # Release grab from closed window first
-                previous_window.grab_release()
-                # Set grab on previous window
-                previous_window.grab_set()
-                # Set focus
                 previous_window.focus_set()
                 previous_window.lift()
             except tk.TclError:
