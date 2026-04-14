@@ -44,6 +44,7 @@ class DuplicateFinderWindow:
             self.window.geometry("1100x700")
 
         self.search_path.trace_add('write', self._save_search_path)
+        self._build_ui()
 
     def _save_search_path(self, *_):
         if self.settings_manager:
