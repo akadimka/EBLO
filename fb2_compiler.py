@@ -355,6 +355,11 @@ class FB2CompilerService:
             # --- Извлекаем метаданные из первой (или лучшей) книги ---
             meta = self._extract_metadata(group.books[0])
 
+            # --- Имя выходного файла и clean_series ---
+            clean_series = self._clean_series_name(group.series)
+            safe_author = re.sub(r'[\\/:*?"<>|]', '_', group.author)
+            safe_series = re.sub(r'[\\/:*?"<>|]', '_', clean_series)
+
             # --- Собираем итоговый XML ---
             volume_range = group.volume_range or self._compute_volume_range(group.books)
             output_xml = self._build_fb2(
@@ -366,9 +371,6 @@ class FB2CompilerService:
             )
 
             # --- Имя выходного файла ---
-            clean_series = self._clean_series_name(group.series)
-            safe_author = re.sub(r'[\\/:*?"<>|]', '_', group.author)
-            safe_series = re.sub(r'[\\/:*?"<>|]', '_', clean_series)
             suffix = self._series_suffix(len(group.books), volume_range)
             fname = f"{safe_author} - {safe_series} ({suffix}).fb2"
 
