@@ -54,6 +54,11 @@ class CompilationGroup:
     books: List[CompilationBook]
     order_determined: bool  # False если хотя бы у одной книги ambiguous
     volume_range: str       # "1-7" или ""
+    duplicate_paths: List[Path] = None  # Файлы-дубликаты для автоматического удаления
+
+    def __post_init__(self):
+        if self.duplicate_paths is None:
+            self.duplicate_paths = []
 
 
 @dataclass
@@ -189,13 +194,18 @@ class FB2CompilerService:
             # Дедупликация: убираем книги с одинаковым title (нормализованным)
             # Из дублей оставляем первый по алфавиту путь (детерминированный выбор)
             seen_titles: Dict[str, CompilationBook] = {}
+            duplicate_paths: List[Path] = []
             for book in sorted(books, key=lambda b: str(b.abs_path)):
                 title_key = (book.record.file_title or book.abs_path.stem).strip().lower()
                 if title_key not in seen_titles:
                     seen_titles[title_key] = book
+                else:
+                    duplicate_paths.append(book.abs_path)
             books = list(seen_titles.values())
 
             if len(books) < 2:
+                # Даже если группа не идёт на компиляцию, дубликаты запомняем для удаления
+                # (но они будут обработаны отдельно, если потребуется)
                 continue
             books_sorted, order_determined = self._sort_books(books)
 
@@ -207,6 +217,7 @@ class FB2CompilerService:
                 books=books_sorted,
                 order_determined=order_determined,
                 volume_range=volume_range,
+                duplicate_paths=duplicate_paths,
             ))
 
         groups.sort(key=lambda g: (g.author.lower(), g.series.lower()))
@@ -401,6 +412,11 @@ class FB2CompilerService:
             output_path.write_text(output_xml, encoding='utf-8')
 
             self._log(f"  ✓ Создан файл: {output_path.name}")
+
+            # --- Удаляем дубликаты (всегда, безусловно) ---
+            if group.duplicate_paths:
+                self._delete_sources(group.duplicate_paths)
+                self._log(f"   ♻ Удалено {len(group.duplicate_paths)} дубликатах")
 
             # --- Удаляем исходники ---
             source_paths = [b.abs_path for b in group.books]
