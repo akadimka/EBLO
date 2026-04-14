@@ -120,8 +120,6 @@ class IntegrityCheckWindow:
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
         self.window.title("Глубокая проверка FB2")
         self.window.minsize(800, 450)
-        if parent:
-            self.window.transient(parent)
 
         if settings_manager:
             setup_window_persistence(self.window, 'integrity_check', settings_manager,

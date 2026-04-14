@@ -26,8 +26,6 @@ class NewBooksWindow:
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
         self.window.title("Новые книги")
         self.window.minsize(700, 450)
-        if parent:
-            self.window.transient(parent)
 
         if settings_manager:
             setup_window_persistence(self.window, 'new_books', settings_manager, '950x550+160+120')

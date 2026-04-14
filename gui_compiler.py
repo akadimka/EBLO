@@ -52,8 +52,6 @@ class CompilerDialog:
 
         self._win = tk.Toplevel(parent)
         self._win.title('Компиляция серий')
-        self._win.transient(parent)
-        self._win.grab_set()
         self._win.resizable(True, True)
         self._win.geometry('900x620')
 

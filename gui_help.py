@@ -783,8 +783,6 @@ class HelpWindow:
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
         self.window.title("Справка — EBook Library Organizer")
         self.window.minsize(800, 500)
-        if parent:
-            self.window.transient(parent)
 
         if settings_manager:
             setup_window_persistence(self.window, 'help', settings_manager,

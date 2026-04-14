@@ -23,8 +23,6 @@ class SeriesGapsWindow:
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
         self.window.title("Серии с пробелами")
         self.window.minsize(750, 450)
-        if parent:
-            self.window.transient(parent)
 
         if settings_manager:
             setup_window_persistence(self.window, 'series_gaps', settings_manager, '900x550+160+120')

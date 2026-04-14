@@ -484,8 +484,6 @@ class FemaleAuthorsDialog:
         self.top = tk.Toplevel(parent)
         self.top.title("Великомученницы")
         self.top.geometry("1000x500")
-        self.top.transient(parent)
-        self.top.grab_set()
         self._build_ui()
 
     def _build_ui(self):
@@ -1335,8 +1333,6 @@ class CSVNormalizerApp:
         # Создаем новое окно логов
         self.log_window = tk.Toplevel(self.root)
         self.log_window.title("Логи нормализации")
-        self.log_window.transient(self.root)  # Сделать окно зависимым от главного
-        self.log_window.grab_set()  # Перехватить фокус - окно модальное
         self.log_window.geometry("800x400")
         
         # Frame с Text и Scrollbar

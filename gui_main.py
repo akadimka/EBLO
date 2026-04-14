@@ -460,8 +460,6 @@ class MainWindow(tk.Tk):
         
         win = tk.Toplevel(self)
         win.title('Лог')
-        win.transient(self)  # Сделать окно зависимым от главного
-        win.grab_set()  # Перехватить фокус - окно модальное
         win.withdraw()  # Скрыть окно изначально
         
         # Настройка сохранения размера и позиции окна
@@ -919,8 +917,6 @@ class MainWindow(tk.Tk):
         db_window = tk.Toplevel(self)
         db_window.title('База данных - Просмотр')
         db_window.minsize(1000, 500)
-        db_window.transient(self)  # Сделать окно зависимым от главного
-        db_window.grab_set()  # Перехватить фокус - окно модальное
         
         # Notebook для вкладок (books и series)
         notebook = ttk.Notebook(db_window)

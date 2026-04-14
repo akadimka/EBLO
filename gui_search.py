@@ -37,8 +37,6 @@ class SearchWindow:
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
         self.window.title("Поиск по библиотеке")
         self.window.minsize(800, 500)
-        if parent:
-            self.window.transient(parent)
 
         if settings_manager:
             setup_window_persistence(self.window, 'search', settings_manager,

@@ -28,8 +28,6 @@ class SettingsWindow(tk.Toplevel):
     def __init__(self, master, settings_manager):
         super().__init__(master)
         self.title('Настройки')
-        self.transient(master)  # Сделать окно зависимым от главного
-        self.grab_set()  # Перехватить фокус - окно модальное
         self.settings_manager = settings_manager
         self.master_window = master
         self.result = None

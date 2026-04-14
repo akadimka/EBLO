@@ -16,8 +16,6 @@ class GenresManagerWindow(tk.Toplevel):
     def __init__(self, root, genres_manager, logger=None, settings_manager=None, update_callback=None):
         super().__init__(root)
         self.title('Управление жанрами')
-        self.transient(root)  # Сделать окно зависимым от главного
-        self.grab_set()  # Перехватить фокус - окно модальное
         self.genres_manager = genres_manager
         if hasattr(root, 'master'):
             master_attr = root.master
