@@ -858,7 +858,9 @@ class CSVNormalizerApp:
     
     def _process_csv_thread(self, folder_path: str):
         """Обработка CSV в отдельном потоке."""
-        # Сохраняем оригинальный stdout
+        # Создаём свежий экземпляр сервиса перед каждым запуском
+        # (как при вызове python regen_csv.py — читает актуальный config.json)
+        self.csv_service = RegenCSVService()
         original_stdout = sys.stdout
         
         try:
