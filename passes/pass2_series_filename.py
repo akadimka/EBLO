@@ -597,8 +597,9 @@ class Pass2SeriesFilename:
                     # ИСКЛЮЧЕНИЕ 3: если в имени файла кандидат стоит перед номером тома
                     # "Чисто шведские убийства 1. Отпуск в раю" → кандидат явно является серией,
                     # даже если file_title тоже начинается с него (1-я книга = имя серии + подзаголовок)
-                    _meta_lower = record.metadata_series.lower().replace('ё', 'е') if record.metadata_series else ''
-                    _cand_lower_norm = _cand_lower.replace('ё', 'е')
+                    _meta_raw = (record.metadata_series or '').replace('\u2026', '...')
+                    _meta_lower = _meta_raw.lower().replace('ё', 'е') if _meta_raw else ''
+                    _cand_lower_norm = _cand_lower.replace('ё', 'е').replace('\u2026', '...')
                     _is_confirmed_by_meta = bool(_meta_lower and _cand_lower_norm == _meta_lower)
                     # ИСКЛЮЧЕНИЕ: кандидат является ПРЕФИКСОМ metadata_series
                     # "Воронцов" → metadata "Воронцов. Перезагрузка" → кандидат реальная серия,
@@ -1752,7 +1753,7 @@ class Pass2SeriesFilename:
                     # ✅ ДОБАВЛЕНО: Подтверждение результата с помощью metadata
                     # Если есть metadata_series - проверяем совпадает ли она с найденной
                     # Но сначала отбрасываем metadata_series если это blacklist-слово (издатель/серия-обёртка)
-                    _effective_metadata_series = metadata_series
+                    _effective_metadata_series = metadata_series.replace('\u2026', '...') if metadata_series else metadata_series
                     if _effective_metadata_series and self.filename_blacklist:
                         _ms_lower = _effective_metadata_series.lower()
                         if any(bl.lower() in _ms_lower for bl in self.filename_blacklist):
@@ -1786,9 +1787,13 @@ class Pass2SeriesFilename:
                                     else:
                                         return series_from_block_cleaned
                             elif best_score >= 0.85 and series_from_block_cleaned:
-                                # ✅ Очень высокий score паттерна (≥0.9) — уверены в правильности иерархии
-                                # даже если metadata не совпадает (metadata может быть названием издательства)
-                                # Пример: metadata="Fantasy World" (издатель), но иерархия "Земной круг\Первый закон" верна
+                                # Высокий score, но metadata не подтвердила иерархию
+                                # Без подтверждения subseries опасно — возвращаем только root
+                                # Пример: metadata="Джони" (мусор), hierarchy="Флибер\Другая жизнь" → "Флибер"
+                                if '\\' in series_from_block_cleaned:
+                                    root = series_from_block_cleaned.split('\\')[0].strip()
+                                    if root:
+                                        return root
                                 return series_from_block_cleaned
                             # ВНИМАНИЕ: Результат BlockLevelPatternMatcher не совпадает с metadata!
                             # Это может быть ошибка распознавания (例: "1-2 книги" вместо "Император из стали")
@@ -2914,6 +2919,12 @@ class Pass2SeriesFilename:
         # Случай: «СССР-2023» 2 → strip « → СССР-2023» 2 → strip number → СССР-2023» → strip »
         text = re.sub(r'^«\s*', '', text).strip()
         text = re.sub(r'\s*»$', '', text).strip()
+
+        # Правило 7: Удалить завершающую одиночную точку
+        # "Араб." → "Араб"  (метатег в FB2 может содержать точку в конце)
+        # НЕ удалять троеточие: "Муля, не нервируй..." → без изменений
+        if text.endswith('.') and not text.endswith('..') and not text.endswith('\u2026'):
+            text = text[:-1].strip()
         
         return text if text else original
 

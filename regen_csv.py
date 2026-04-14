@@ -611,14 +611,23 @@ class RegenCSVService:
                 result = re.sub(r':\s*([^\s]?)', lambda m: '. ' + m.group(1).upper() if m.group(1) else '.', s)
                 return result
 
+            def _strip_trailing_dot(s: str) -> str:
+                """Strip trailing punctuation (dots, commas, ellipsis, etc.) but keep '!'."""
+                return s.rstrip('.,…;: \t').rstrip('.')
+
             for rec in self.records:
                 if rec.proposed_series:
                     # First replace ':' with '. Capitalized'
                     rec.proposed_series = _replace_colon_in_series(rec.proposed_series)
                     # Then strip remaining illegal chars (excluding ':' already handled)
                     rec.proposed_series = re.sub(r'[/*?"<>=|]', '', rec.proposed_series).strip()
+                    rec.proposed_series = _strip_trailing_dot(rec.proposed_series)
+                    # Capitalize first letter
+                    if rec.proposed_series:
+                        rec.proposed_series = rec.proposed_series[0].upper() + rec.proposed_series[1:]
                 if rec.proposed_author:
                     rec.proposed_author = _ILLEGAL_AUTHOR.sub('', rec.proposed_author).strip()
+                    rec.proposed_author = _strip_trailing_dot(rec.proposed_author)
             self.logger.log("[OK] Final sanitization applied")
             
             # ===== Save CSV =====
