@@ -4,15 +4,129 @@ PASS 1: Read FB2 files and determine initial authors from folder hierarchy.
 
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import concurrent.futures
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
+import tqdm
 
 try:
     from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+    from fb2_sax_extractor import FB2SAXExtractor
 except ImportError:
     from ..extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+    from ..fb2_sax_extractor import FB2SAXExtractor
+
+
+def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
+                       author_folder_cache: Dict, folder_parse_limit: int,
+                       settings_dict: Dict, use_cache: bool = True, use_sax_parser: bool = True) -> Optional[Tuple]:
+    """
+    Module-level worker function for multiprocessing.
+    Must be serializable and import all needed dependencies.
+    """
+    try:
+        from pathlib import Path
+        from fb2_author_extractor import FB2AuthorExtractor
+        from settings_manager import SettingsManager
+        from metadata_cache import MetadataCache
+
+        fb2_file = Path(fb2_file_path_str)
+        work_dir = Path(work_dir_str)
+
+        # Reconstruct extractor
+        if use_sax_parser:
+            extractor = FB2SAXExtractor()
+        else:
+            extractor = FB2AuthorExtractor()
+        if hasattr(extractor, 'settings') and settings_dict:
+            extractor.settings.settings = settings_dict
+
+        # Try cache first
+        cache = MetadataCache() if use_cache else None
+        meta = None
+        if cache:
+            meta = cache.get_cached_metadata(fb2_file)
+
+        if not meta:
+            # Parse file
+            meta = extractor._extract_all_metadata_at_once(fb2_file)
+            # Cache the metadata
+            if cache:
+                cache.cache_metadata(fb2_file, meta)
+
+        author, author_source = _get_author_for_file_worker(
+            fb2_file, work_dir, author_folder_cache, folder_parse_limit)
+
+        # Validation logic
+        if author_source == "folder_dataset" and author and meta.get('authors'):
+            import re as _re_p1
+            author_words = set(author.lower().split())
+            meta_words = set(_re_p1.sub(r'[;,]', ' ', meta['authors'].lower()).split())
+            if author_words and meta_words and not (author_words & meta_words):
+                author = ""
+                author_source = ""
+
+        # Create record
+        record = BookRecord(
+            file_path=str(fb2_file.relative_to(work_dir)),
+            file_title=meta['title'] or "[no title]",
+            metadata_authors=meta['authors'] or "[unknown]",
+            proposed_author=author or "",
+            author_source=author_source or "",
+            metadata_series=meta['series'] or "",
+            series_number=meta.get('series_number', ''),
+            proposed_series="",
+            series_source="",
+            metadata_genre=meta['genre'] or "",
+            needs_filename_fallback=(author == ""),
+        )
+
+        return record.to_tuple()
+
+    except Exception as e:
+        print(f"[WORKER ERROR] {fb2_file_path_str}: {e}")
+        return None
+
+
+def _get_author_for_file_worker(fb2_file: Path, work_dir: Path,
+                              author_folder_cache: Dict, folder_parse_limit: int) -> Tuple[str, str]:
+    """Simplified author extraction for worker"""
+    current_dir = fb2_file.parent
+    parse_levels = 0
+    last_hit = ""
+
+    while parse_levels < folder_parse_limit:
+        if current_dir == work_dir:
+            break
+
+        # Skip extension folders
+        if current_dir.name.lower() in FILE_EXTENSION_FOLDER_NAMES:
+            try:
+                parent_dir = current_dir.parent
+                if parent_dir == current_dir:
+                    break
+                current_dir = parent_dir
+            except Exception:
+                break
+            continue
+
+        if current_dir in author_folder_cache:
+            author_name, confidence = author_folder_cache[current_dir]
+            last_hit = author_name
+
+        try:
+            parent_dir = current_dir.parent
+            if parent_dir == current_dir:
+                break
+            current_dir = parent_dir
+            parse_levels += 1
+        except Exception:
+            break
+
+    return (last_hit, "folder_dataset") if last_hit else ("", "")
 
 
 @dataclass
@@ -44,6 +158,24 @@ class BookRecord:
             self.file_title,
             self.metadata_genre,
             self.series_number,
+        )
+
+    @classmethod
+    def from_tuple(cls, data):
+        """Reconstruct from tuple for multiprocessing."""
+        return cls(
+            file_path=data[0],
+            file_title=data[7],  # file_title is at index 7
+            metadata_authors=data[1],
+            proposed_author=data[2],
+            author_source=data[3],
+            metadata_series=data[4],
+            proposed_series=data[5],
+            series_source=data[6],
+            metadata_genre=data[8],
+            series_number=data[9],
+            extracted_series_candidate="",  # defaults
+            needs_filename_fallback=(data[2] == ""),  # based on proposed_author
         )
 
 
@@ -86,61 +218,53 @@ class Pass1ReadFiles:
 
         print(f"[PASS 1] Found {total} files, processing in parallel...")
 
-        lock = threading.Lock()
-        processed_count = [0]
+        # Serialize cache for workers
+        author_folder_cache_serialized = {}
+        for path, (author, conf) in self.author_folder_cache.items():
+            author_folder_cache_serialized[str(path)] = (author, conf)
 
-        def process_file(fb2_file: Path):
-            try:
-                meta = self.extractor._extract_all_metadata_at_once(fb2_file)
-                author, author_source = self._get_author_for_file(fb2_file)
+        settings_dict = getattr(self.extractor.settings, 'settings', {}) if hasattr(self.extractor, 'settings') else {}
+        use_cache = settings_dict.get('performance', {}).get('enable_caching', True)
+        use_sax_parser = settings_dict.get('performance', {}).get('use_sax_parser', True)
 
-                # ВАЛИДАЦИЯ FOLDER_DATASET: если автор из кэша папок не подтверждён
-                # метаданными файла (ни одно слово не пересекается), это скорее всего
-                # ярлык серии/издательства (например «Питер» из «Мировой криминальный
-                # бестселлер (Питер)»), а не реальный автор. Сбрасываем — pass2 доберёт
-                # автора из имени файла или метаданных.
-                if author_source == "folder_dataset" and author and meta.get('authors'):
-                    import re as _re_p1
-                    author_words = set(author.lower().split())
-                    meta_words = set(_re_p1.sub(r'[;,]', ' ', meta['authors'].lower()).split())
-                    if author_words and meta_words and not (author_words & meta_words):
-                        author = ""
-                        author_source = ""
+        # Use ProcessPoolExecutor for CPU-bound XML parsing
+        max_workers = min(multiprocessing.cpu_count() or 4, max(1, total // 20))
+        print(f"[PASS 1] Using {max_workers} processes for CPU-bound XML parsing...")
+        if use_cache:
+            print(f"[PASS 1] Metadata caching enabled")
+        print(f"[PASS 1] Using {'SAX' if use_sax_parser else 'ElementTree'} parser")
 
-                rel_path = str(fb2_file.relative_to(self.work_dir))
-
-                record = BookRecord(
-                    file_path=rel_path,
-                    file_title=meta['title'] or "[no title]",
-                    metadata_authors=meta['authors'] or "[unknown]",
-                    proposed_author=author or "",
-                    author_source=author_source or "",
-                    metadata_series=meta['series'] or "",
-                    series_number=meta.get('series_number', ''),
-                    proposed_series="",
-                    series_source="",
-                    metadata_genre=meta['genre'] or "",
-                    needs_filename_fallback=(author == ""),
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_file = {}
+            for fb2_file in fb2_files:
+                future = executor.submit(
+                    process_file_worker,
+                    str(fb2_file),
+                    str(self.work_dir),
+                    author_folder_cache_serialized,
+                    self.folder_parse_limit,
+                    settings_dict,
+                    use_cache,
+                    use_sax_parser
                 )
+                future_to_file[future] = fb2_file
 
-                with lock:
-                    processed_count[0] += 1
-                    count = processed_count[0]
-                if count <= 5 or count % 50 == 0:
-                    print(f"  [{count:4d}/{total}] {rel_path}")
-                if count % 100 == 0:
-                    self.logger.log(f"[PASS 1] Processed {count}/{total} files...")
+            # Process results with progress bar
+            records = []
+            with tqdm.tqdm(total=total, desc="Processing FB2 files", unit="file") as pbar:
+                for future in concurrent.futures.as_completed(future_to_file):
+                    fb2_file = future_to_file[future]
+                    try:
+                        result_tuple = future.result()
+                        if result_tuple:
+                            record = BookRecord.from_tuple(result_tuple)
+                            records.append(record)
+                    except Exception as e:
+                        self.logger.log(f"[PASS 1] Error processing {fb2_file}: {e}")
 
-                return record
-            except Exception as e:
-                self.logger.log(f"[PASS 1] Error reading {fb2_file}: {e}")
-                return None
+                    pbar.update(1)
 
-        max_workers = min(8, total, os.cpu_count() or 4)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = list(executor.map(process_file, fb2_files))
-
-        records = [r for r in results if r is not None]
         self.logger.log(f"[PASS 1] Read {len(records)} files")
         return records
     

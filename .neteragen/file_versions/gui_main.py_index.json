@@ -1,0 +1,33 @@
+{
+  "file_name": "gui_main.py",
+  "revisions": [
+    {
+      "revision_id": "f9562a99-5623-4f4e-81ff-b085ee91b309",
+      "metadata": {
+        "timestamp": "2026-04-14T14:49:49.012725",
+        "type": "cache_version",
+        "source": "external_edit",
+        "size": 58557,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": "External edit"
+      },
+      "saved_at": "2026-04-14T14:51:09.038600"
+    },
+    {
+      "revision_id": "3e5c6c00-71b8-4845-8ae4-c85178ebac84",
+      "metadata": {
+        "timestamp": "2026-04-14T14:41:40.166271",
+        "type": "cache_version",
+        "source": "initial_from_disk",
+        "size": 58557,
+        "is_reverted": false,
+        "git_branch_name": "master",
+        "agent_name": "Cody",
+        "description": null
+      },
+      "saved_at": "2026-04-14T14:41:40.169613"
+    }
+  ]
+}

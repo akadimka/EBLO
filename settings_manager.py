@@ -29,7 +29,12 @@ class SettingsManager:
             'genres_file_path': 'genres.xml',  # Путь к файлу жанров
             'genre_association_method': 'context_menu',
             'window_sizes': {},  # Для хранения размеров окон
-            'generate_csv': False  # Флаг генерации CSV файла
+            'generate_csv': False,  # Флаг генерации CSV файла
+            'performance': {
+                'enable_caching': True,  # Enable metadata caching
+                'max_cache_age_days': 30,  # Cache validity period
+                'use_sax_parser': True,  # Use SAX parser by default (faster)
+            }
         }
         self._loaded_settings = None  # Для отслеживания оригинальных значений
         self.load()
