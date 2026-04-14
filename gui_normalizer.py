@@ -826,7 +826,7 @@ class CSVNormalizerApp:
         
         if not folder or not os.path.isdir(folder):
             self._log(f"ОШИБКА: Папка не существует или не указана: {folder}")
-            messagebox.showerror("Ошибка", "Укажите корректную папку")
+            messagebox.showerror("Ошибка", "Укажите корректную папку", parent=self.root)
             return
 
         # Проверить наличие FB2-файлов до запуска потока
@@ -836,13 +836,14 @@ class CSVNormalizerApp:
             messagebox.showwarning(
                 "Папка пуста",
                 f"В папке нет FB2-файлов:\n{folder}\n\n"
-                "Укажите папку с FB2-файлами."
+                "Укажите папку с FB2-файлами.",
+                parent=self.root
             )
             return
         
         if self.processing:
             self._log("ОШИБКА: Обработка уже в процессе")
-            messagebox.showwarning("Внимание", "Обработка уже в процессе")
+            messagebox.showwarning("Внимание", "Обработка уже в процессе", parent=self.root)
             return
         
         # Запустить обработку в отдельном потоке
@@ -907,7 +908,8 @@ class CSVNormalizerApp:
                 0,
                 lambda: messagebox.showinfo(
                     "Готово",
-                    f"Обработано {len(records)} файлов\nТаблица обновлена"
+                    f"Обработано {len(records)} файлов\nТаблица обновлена",
+                    parent=self.root
                 )
             )
             self._log(f"Обработка завершена успешно: {len(records)} файлов")
@@ -918,7 +920,8 @@ class CSVNormalizerApp:
                 0,
                 lambda: messagebox.showerror(
                     "Ошибка",
-                    f"Ошибка при обработке: {str(e)}"
+                    f"Ошибка при обработке: {str(e)}",
+                    parent=self.root
                 )
             )
             self.root.after(0, lambda: self.progress_var.set("ОШИБКА"))
