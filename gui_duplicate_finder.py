@@ -37,10 +37,18 @@ class DuplicateFinderWindow:
 
         if settings_manager:
             setup_window_persistence(self.window, 'duplicate_finder', settings_manager, '1100x700+200+150')
+            saved = settings_manager.settings.get('duplicate_finder_path', '')
+            if saved and os.path.isdir(saved):
+                self.search_path.set(saved)
         else:
             self.window.geometry("1100x700")
 
-        self._build_ui()
+        self.search_path.trace_add('write', self._save_search_path)
+
+    def _save_search_path(self, *_):
+        if self.settings_manager:
+            self.settings_manager.settings['duplicate_finder_path'] = self.search_path.get()
+            self.settings_manager.save()
 
     # ------------------------------------------------------------------
     # UI
