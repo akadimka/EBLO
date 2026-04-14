@@ -185,6 +185,18 @@ class FB2CompilerService:
             series = recs[0].proposed_series.strip()
 
             books = [self._make_book(rec, work_dir) for rec in recs]
+
+            # Дедупликация: убираем книги с одинаковым title (нормализованным)
+            # Из дублей оставляем первый по алфавиту путь (детерминированный выбор)
+            seen_titles: Dict[str, CompilationBook] = {}
+            for book in sorted(books, key=lambda b: str(b.abs_path)):
+                title_key = (book.record.file_title or book.abs_path.stem).strip().lower()
+                if title_key not in seen_titles:
+                    seen_titles[title_key] = book
+            books = list(seen_titles.values())
+
+            if len(books) < 2:
+                continue
             books_sorted, order_determined = self._sort_books(books)
 
             volume_range = self._compute_volume_range(books_sorted) if order_determined else ''
