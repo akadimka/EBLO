@@ -63,21 +63,24 @@ class DuplicateFinderWindow:
 
         ttk.Separator(root, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=8)
 
-        # ── Основная область: два списка ─────────────────────────────
-        mid = ttk.Frame(root, padding='8 4 8 4')
-        mid.pack(fill=tk.BOTH, expand=True)
-        mid.columnconfigure(0, weight=1)
-        mid.columnconfigure(1, weight=1)
-        mid.rowconfigure(1, weight=1)
+        # ── Основная область: два списка со смещаемой перегородкой ──
+        mid_wrap = ttk.Frame(root, padding='8 4 8 4')
+        mid_wrap.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(mid, text='Исходные файлы', font=('', 9, 'bold')).grid(
-            row=0, column=0, sticky='w', padx=(0, 6))
-        ttk.Label(mid, text='Дубликаты  (отметьте для удаления)',
-                  font=('', 9, 'bold')).grid(row=0, column=1, sticky='w')
+        paned = ttk.PanedWindow(mid_wrap, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True)
 
-        # Левый список — исходники
-        lf = ttk.Frame(mid)
-        lf.grid(row=1, column=0, sticky='nsew', padx=(0, 6))
+        # Левая панель — исходники
+        left_pane = ttk.Frame(paned)
+        paned.add(left_pane, weight=1)
+        left_pane.rowconfigure(1, weight=1)
+        left_pane.columnconfigure(0, weight=1)
+
+        ttk.Label(left_pane, text='Исходные файлы', font=('', 9, 'bold')).grid(
+            row=0, column=0, columnspan=2, sticky='w', padx=(0, 6), pady=(0, 2))
+
+        lf = ttk.Frame(left_pane)
+        lf.grid(row=1, column=0, sticky='nsew')
         lf.rowconfigure(0, weight=1)
         lf.columnconfigure(0, weight=1)
 
@@ -90,9 +93,18 @@ class DuplicateFinderWindow:
         vsb_l.grid(row=0, column=1, sticky='ns')
         hsb_l.grid(row=1, column=0, sticky='ew')
 
-        # Правый список — дубликаты (Treeview с чекбоксами)
-        rf = ttk.Frame(mid)
-        rf.grid(row=1, column=1, sticky='nsew')
+        # Правая панель — дубликаты (Treeview с чекбоксами)
+        right_pane = ttk.Frame(paned)
+        paned.add(right_pane, weight=1)
+        right_pane.rowconfigure(1, weight=1)
+        right_pane.columnconfigure(0, weight=1)
+
+        ttk.Label(right_pane, text='Дубликаты  (отметьте для удаления)',
+                  font=('', 9, 'bold')).grid(
+            row=0, column=0, columnspan=2, sticky='w', pady=(0, 2))
+
+        rf = ttk.Frame(right_pane)
+        rf.grid(row=1, column=0, sticky='nsew')
         rf.rowconfigure(0, weight=1)
         rf.columnconfigure(0, weight=1)
 
