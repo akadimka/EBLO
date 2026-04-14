@@ -660,9 +660,20 @@ class Pass4Consensus:
                 # Не конвертируем числовые суффиксы ("Серия. 1" → просто "Серия")
                 if subseries.isdigit():
                     record.proposed_series = base
-                else:
+                    hierarchical_unification_count += 1
+                # Не конвертируем неполные фрагменты: подсерия должна быть самостоятельным
+                # значимым словом (≥4 символов) или содержать хотя бы 3 слова.
+                # "Назад в" — фрагмент (2 слова, последнее — предлог), не подсерия.
+                elif len(subseries) >= 4 and (
+                    len(subseries.split()) >= 3 or
+                    (len(subseries.split()) >= 1 and len(subseries.split()[-1]) >= 4)
+                ):
                     record.proposed_series = f"{base}\\{subseries}"
-                hierarchical_unification_count += 1
+                    hierarchical_unification_count += 1
+                # Иначе оставляем только базовую серию
+                else:
+                    record.proposed_series = base
+                    hierarchical_unification_count += 1
 
         self.logger.log(f"[PASS 4] Unified {hierarchical_unification_count} hierarchical series variants")
 
