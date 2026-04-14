@@ -11,7 +11,7 @@
     },
     "genres_manager": "700x456+690+361",
     "log": {
-      "geometry": "1150x400+100+100",
+      "geometry": "1150x711+100+100",
       "state": "normal"
     },
     "duplicates_window": {
@@ -47,7 +47,7 @@
       "state": "normal"
     },
     "duplicate_finder": {
-      "geometry": "1400x900+350+300",
+      "geometry": "1324x804+93+49",
       "state": "normal"
     },
     "broken_files": {
@@ -219,6 +219,10 @@
     "pentalogy",
     "гексалогия",
     "hexalogy",
+    "гепталогия",
+    "окталогия",
+    "ноналогия",
+    "декалогия",
     "цикл"
   ],
   "special_series_values": [
@@ -609,6 +613,7 @@
     "Morten",
     "Rafel",
     "RedDetonator",
+    "Zampolit",
     "Woo",
     "Абрахам",
     "Августин",
@@ -1297,5 +1302,6 @@
     "ла",
     "мак",
     "о"
-  ]
+  ],
+  "duplicate_finder_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1"
 }
