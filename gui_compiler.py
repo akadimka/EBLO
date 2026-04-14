@@ -140,26 +140,16 @@ class CompilerDialog:
         bot = ttk.Frame(self._win, padding='5 3 5 5')
         bot.pack(fill=tk.X, side=tk.BOTTOM)
 
-        # Папка вывода
-        ttk.Label(bot, text='Папка результата:').grid(
-            row=0, column=0, sticky='w', pady=2)
-        self._out_var = tk.StringVar(value=str(self._work_dir))
-        ttk.Entry(bot, textvariable=self._out_var, width=55).grid(
-            row=0, column=1, sticky='ew', padx=4)
-        ttk.Button(bot, text='…', width=3,
-                   command=self._browse_output).grid(row=0, column=2)
-        bot.columnconfigure(1, weight=1)
-
         # Чекбокс удаления исходников
         self._delete_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             bot, text='Удалять исходники сразу после компиляции',
             variable=self._delete_var,
-        ).grid(row=1, column=0, columnspan=3, sticky='w', pady=2)
+        ).grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
 
         # Кнопки
         btn_frm = ttk.Frame(bot)
-        btn_frm.grid(row=2, column=0, columnspan=3, sticky='e', pady=4)
+        btn_frm.grid(row=1, column=0, columnspan=2, sticky='e', pady=4)
 
         self._sel_all_btn = ttk.Button(btn_frm, text='Выбрать все',
                                        command=self._select_all)
@@ -265,14 +255,6 @@ class CompilerDialog:
         """Выделить все строки в таблице групп."""
         self._tree.selection_set(self._tree.get_children())
 
-    def _browse_output(self):
-        from tkinter import filedialog
-        folder = filedialog.askdirectory(
-            parent=self._win, initialdir=self._out_var.get()
-        )
-        if folder:
-            self._out_var.set(folder)
-
     # ------------------------------------------------------------------
     # Запуск компиляции
     # ------------------------------------------------------------------
@@ -298,17 +280,6 @@ class CompilerDialog:
             )
             return
 
-        out_dir_str = self._out_var.get().strip()
-        # Пустое поле или не указана директория → сохранять рядом с исходниками
-        if not out_dir_str:
-            out_dir = None
-        else:
-            out_dir = Path(out_dir_str)
-            if not out_dir.is_dir():
-                messagebox.showerror('Ошибка', f'Папка результата не найдена:\n{out_dir}',
-                                     parent=self._win)
-                return
-
         delete_now = self._delete_var.get()
 
         msg = f'Скомпилировать {len(to_compile)} групп(ы)?'
@@ -326,7 +297,7 @@ class CompilerDialog:
         def worker():
             results = []
             for g in to_compile:
-                r = self._service.compile_group(g, out_dir, delete_sources=delete_now)
+                r = self._service.compile_group(g, None, delete_sources=delete_now)
                 results.append(r)
             self._win.after(0, lambda: self._on_compile_done(results, skipped, delete_now))
 
