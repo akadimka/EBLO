@@ -714,8 +714,11 @@ class MainWindow(tk.Tk):
             done = 0
             errors = []
             total = len(fb2_files)
+            size_before = 0
+            size_after = 0
             for idx, fb2_path in enumerate(fb2_files, 1):
                 try:
+                    fb2_size = fb2_path.stat().st_size
                     zip_path = fb2_path.with_name(fb2_path.name + '.zip')
                     # Имя внутри архива — только имя файла (без пути)
                     with _zipfile.ZipFile(
@@ -724,8 +727,11 @@ class MainWindow(tk.Tk):
                         compresslevel=6
                     ) as zf:
                         zf.write(fb2_path, arcname=fb2_path.name)
+                    zip_size = zip_path.stat().st_size
                     fb2_path.unlink()
                     done += 1
+                    size_before += fb2_size
+                    size_after += zip_size
                 except Exception as e:
                     errors.append(f'{fb2_path.name}: {e}')
 
@@ -734,25 +740,42 @@ class MainWindow(tk.Tk):
                     self.after(0, lambda n=idx, t=total, p=pct:
                         self.progress_var.set(f'Архивирование... {n}/{t} ({p}%)'))
 
-            self.after(0, lambda: _finish(done, errors, total))
+            self.after(0, lambda: _finish(done, errors, total, size_before, size_after))
 
-        def _finish(done, errors, total):
+        def _finish(done, errors, total, size_before, size_after):
+            def _fmt(b):
+                if b >= 1_073_741_824:
+                    return f'{b / 1_073_741_824:.2f} ГБ'
+                if b >= 1_048_576:
+                    return f'{b / 1_048_576:.1f} МБ'
+                return f'{b // 1024} КБ'
+
+            saved = size_before - size_after
+            ratio = (saved / size_before * 100) if size_before else 0
+            stats = (
+                f'Обработано файлов: {done} из {total}\n'
+                f'До архивации:   {_fmt(size_before)}\n'
+                f'После архивации: {_fmt(size_after)}\n'
+                f'Сжато:           {_fmt(saved)} ({ratio:.1f}%)'
+            )
+
             msg = f'Архивирование завершено: {done}/{total} файлов'
             self.progress_var.set(msg)
             if self._status_bar:
                 self._status_bar.set(msg, 'ok')
             self.logger.log(msg)
+            self.logger.log(stats)
             if errors:
                 self.logger.log(f'Ошибок: {len(errors)}')
                 for e in errors[:10]:
                     self.logger.log(f'  {e}')
                 messagebox.showwarning(
                     'Завершено с ошибками',
-                    f'{msg}\nОшибок: {len(errors)}\n\nПервые ошибки:\n' +
+                    f'{stats}\n\nОшибок: {len(errors)}\n\nПервые ошибки:\n' +
                     '\n'.join(errors[:5])
                 )
             else:
-                messagebox.showinfo('Готово', msg)
+                messagebox.showinfo('Архивирование завершено', stats)
 
         threading.Thread(target=_archive_worker, daemon=True).start()
 
