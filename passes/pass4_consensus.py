@@ -962,8 +962,11 @@ class Pass4Consensus:
             # Выбираем лидирующую базу
             best_base, (best_clean, best_count) = max(meta_votes.items(), key=lambda kv: kv[1][1])
 
-            # Применяем только если она встречается у большинства файлов
-            if best_count < max(2, len(grp) * 0.5):
+            # Применяем только если она встречается у большинства файлов.
+            # max(1, ...) вместо max(2, ...) позволяет применять к 2-файловым папкам
+            # где лишь 1 файл имеет metadata_series (но inner-проверки всё равно
+            # защищают от ложного применения — stem-check и meta-check).
+            if best_count < max(1, len(grp) * 0.5):
                 continue
 
             for rec in grp:

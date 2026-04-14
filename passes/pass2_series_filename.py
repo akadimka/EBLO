@@ -476,8 +476,14 @@ class Pass2SeriesFilename:
                         _part_words = re.split(r'[\s.\-]+', _part_no_parens) if _part_no_parens else re.split(r'[\s.\-]+', part.strip())
                         _part_last_word = _part_words[-1].lower().replace('ё', 'е') if _part_words else ''
                         _author_words = set(w.lower().replace('ё', 'е') for w in author_name.split() if len(w) > 2)
-                        _folder_ends_with_author = bool(_part_last_word and _part_last_word in _author_words)
-                        if _folder_ends_with_author:
+                        # Check if ANY word in the folder (>2 chars) matches an author word.
+                        # This covers "Таннер А" where the FIRST word "Таннер" is the surname,
+                        # not just the last word (the old check only caught endings like "Куанг").
+                        _folder_contains_author = any(
+                            w.lower().replace('ё', 'е') in _author_words
+                            for w in _part_words if len(w) > 2
+                        )
+                        if _folder_contains_author:
                             pass  # Не устанавливаем серию из папки → идём дальше к filename extraction
                         else:
                             series_name = self._extract_series_from_folder_name(part)
@@ -549,15 +555,23 @@ class Pass2SeriesFilename:
                 # Запятая-разделитель авторов стоит перед словом с заглавной буквы
                 # ("Иванов, Петров"), грамматическая — перед строчной ("Игрок, забравшийся").
                 if ',' in series_candidate:
-                    # Считаем это списком авторов только если после каждой запятой
-                    # идёт слово с заглавной буквы (или инициал)
-                    parts_after_comma = [p.strip() for p in series_candidate.split(',')[1:]]
-                    all_capitalized = all(
-                        p and (p[0].isupper() or (len(p) >= 2 and p[1] == '.'))
-                        for p in parts_after_comma
+                    # ИСКЛЮЧЕНИЕ: если кандидат совпадает с metadata_series →
+                    # запятая является частью настоящего названия серии ("Мы, Мигель Мартинес")
+                    _meta_confirms_comma = (
+                        record.metadata_series and
+                        series_candidate.lower().replace('ё', 'е') ==
+                        record.metadata_series.strip().lower().replace('ё', 'е')
                     )
-                    if all_capitalized:
-                        series_candidate = None  # Список авторов
+                    if not _meta_confirms_comma:
+                        # Считаем это списком авторов только если после каждой запятой
+                        # идёт слово с заглавной буквы (или инициал)
+                        parts_after_comma = [p.strip() for p in series_candidate.split(',')[1:]]
+                        all_capitalized = all(
+                            p and (p[0].isupper() or (len(p) >= 2 and p[1] == '.'))
+                            for p in parts_after_comma
+                        )
+                        if all_capitalized:
+                            series_candidate = None  # Список авторов
                 # ВАЖНО: проверки ниже — независимые (не elif), чтобы срабатывать
                 # даже когда кандидат прошёл comma-check (например "о том, как")
                 if series_candidate and self._is_author_surname(series_candidate, record.proposed_author):
@@ -584,7 +598,31 @@ class Pass2SeriesFilename:
                     # "Чисто шведские убийства 1. Отпуск в раю" → кандидат явно является серией,
                     # даже если file_title тоже начинается с него (1-я книга = имя серии + подзаголовок)
                     _meta_lower = record.metadata_series.lower().replace('ё', 'е') if record.metadata_series else ''
-                    _is_confirmed_by_meta = bool(_meta_lower and _cand_lower.replace('ё', 'е') == _meta_lower)
+                    _cand_lower_norm = _cand_lower.replace('ё', 'е')
+                    _is_confirmed_by_meta = bool(_meta_lower and _cand_lower_norm == _meta_lower)
+                    # ИСКЛЮЧЕНИЕ: кандидат является ПРЕФИКСОМ metadata_series
+                    # "Воронцов" → metadata "Воронцов. Перезагрузка" → кандидат реальная серия,
+                    # title просто начинается с первого слова серии.
+                    _is_meta_prefix = bool(
+                        _meta_lower and not _is_confirmed_by_meta and
+                        (_meta_lower.startswith(_cand_lower_norm + '.') or
+                         _meta_lower.startswith(_cand_lower_norm + ' '))
+                    )
+                    # ИСКЛЮЧЕНИЕ: кандидат = metadata_series + суффикс из служебных слов
+                    # "Честное пионерское! Часть" → meta "Честное пионерское!" → кандидат начинается
+                    # с подтверждённой серии, хвост — только мусор/служебные слова.
+                    # Проверяем: candidates начинается с meta И хвост = только \W + цифры/SW-слова.
+                    _is_meta_with_service_suffix = bool(
+                        _meta_lower and not _is_confirmed_by_meta and not _is_meta_prefix and
+                        _cand_lower_norm.startswith(_meta_lower) and
+                        _re.match(r'^[\W\s]*(|(\w+\s*)+)$',
+                                  _cand_lower_norm[len(_meta_lower):].strip())
+                        and all(
+                            w in self.service_words or w.isdigit()
+                            for w in _cand_lower_norm[len(_meta_lower):].split()
+                            if w.isalpha()
+                        )
+                    )
                     _fn_stem_lower = Path(record.file_path).stem.lower()
                     _is_in_parens = bool(_re.search(r'\(\s*' + _re.escape(_cand_lower), _fn_stem_lower))
                     # ИСКЛЮЧЕНИЕ 4: серия получена блок-матчером с score=1.0 — это структурное совпадение,
@@ -595,7 +633,7 @@ class Pass2SeriesFilename:
                         _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.]+\d+[\s.]',
                         _fn_stem_lower.replace('ё', 'е')
                     ))
-                    if not _is_confirmed_by_meta and not _is_in_parens and not _is_numbered_series and not _is_block_matcher_confident and (
+                    if not _is_confirmed_by_meta and not _is_meta_prefix and not _is_meta_with_service_suffix and not _is_in_parens and not _is_numbered_series and not _is_block_matcher_confident and (
                        (_title_lower and _cand_lower == _title_lower) or \
                        (_title_np_lower and _cand_lower == _title_np_lower) or \
                        (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
@@ -2562,7 +2600,10 @@ class Pass2SeriesFilename:
         if any(kw in text_lower for kw in _award_keywords):
             return False
         # Год со знаком тире в конце (после снятия кавычек) — тоже признак номинации/премии
-        if re.search(r'[–—\-]\s*\d{4}\s*[»"\']*\s*$', text):
+        # ИСКЛЮЧЕНИЕ: дефис БЕЗ пробела как часть составного слова (СССР-2023 — не премия).
+        # Отвергаем только: пробел перед любым тире, или длинное тире (– —) без пробела.
+        if re.search(r'\s[–—\-]\s*\d{4}\s*[»"\']*\s*$', text) or \
+           re.search(r'[–—]\s*\d{4}\s*[»"\']*\s*$', text):
             return False
 
         # ПРОВЕРКА -0.5: Исключить иерархические серии где любой сегмент — одна буква.
@@ -2798,6 +2839,13 @@ class Pass2SeriesFilename:
         
         original = text.strip()
         
+        # Правило -2: Удалить обрамляющие кавычки-ёлочки «» — они обозначают серию в имени файла,
+        # но не должны быть частью итогового названия: «СССР-2023» → СССР-2023
+        text = re.sub(r'^«\s*', '', text).strip()
+        text = re.sub(r'\s*»$', '', text).strip()
+        if not text:
+            return original
+        
         # Правило -1: Удалить ведущий дефис/тире (артефакт разбиения по ". " в паттернах "Author - Series")
         # Пример: "- Сказания Тремейна" → "Сказания Тремейна"
         text = re.sub(r'^[-–—]\s*', '', text).strip()
@@ -2843,6 +2891,11 @@ class Pass2SeriesFilename:
             # Пример: НЕ удаляем "т" из "Адъютант" даже если "т" в service_words
             pattern = r'\s*[\-–—]?\s*\b' + re.escape(service_word) + r'\b\s*$'
             text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+        
+        # Правило 6: Повторно удалить обрамляющие кавычки-ёлочки после всех остальных правил
+        # Случай: «СССР-2023» 2 → strip « → СССР-2023» 2 → strip number → СССР-2023» → strip »
+        text = re.sub(r'^«\s*', '', text).strip()
+        text = re.sub(r'\s*»$', '', text).strip()
         
         return text if text else original
 
