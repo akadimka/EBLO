@@ -298,11 +298,16 @@ class CompilerDialog:
             )
             return
 
-        out_dir = Path(self._out_var.get().strip())
-        if not out_dir.is_dir():
-            messagebox.showerror('Ошибка', f'Папка результата не найдена:\n{out_dir}',
-                                 parent=self._win)
-            return
+        out_dir_str = self._out_var.get().strip()
+        # Пустое поле или не указана директория → сохранять рядом с исходниками
+        if not out_dir_str:
+            out_dir = None
+        else:
+            out_dir = Path(out_dir_str)
+            if not out_dir.is_dir():
+                messagebox.showerror('Ошибка', f'Папка результата не найдена:\n{out_dir}',
+                                     parent=self._win)
+                return
 
         delete_now = self._delete_var.get()
 
