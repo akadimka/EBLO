@@ -317,7 +317,14 @@ class MainWindow(tk.Tk):
         
         # Панель с деревом папок
         self.folder_tree_frame = ttk.LabelFrame(self.main_pane, text='Структура папок', padding=5)
-        self.folder_tree = ttk.Treeview(self.folder_tree_frame)
+        self.folder_tree = ttk.Treeview(
+            self.folder_tree_frame,
+            columns=('genre_mark',),
+            selectmode='extended'
+        )
+        self.folder_tree.column('#0', stretch=True)
+        self.folder_tree.column('genre_mark', width=24, minwidth=24, stretch=False, anchor='center')
+        self.folder_tree.heading('genre_mark', text='✓')
         if stripe_treeview:
             stripe_treeview(self.folder_tree)
         self.folder_tree.pack(fill='both', expand=True, side='left')
@@ -1227,6 +1234,15 @@ class MainWindow(tk.Tk):
             self.progress_var.set(f'Жанр изменен у {count} файлов')
             
             self.logger.log(f'Жанр "{selected_genre}" присвоен {count} файлам в "{path_text}"')
+
+            # Проставить галочки в столбце жанра
+            def _mark():
+                for it in tree_items:
+                    try:
+                        self.folder_tree.set(it, 'genre_mark', '✓')
+                    except Exception:
+                        pass
+            self.after(0, _mark)
             
             dialog.destroy()
         
