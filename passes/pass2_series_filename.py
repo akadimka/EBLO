@@ -1771,9 +1771,20 @@ class Pass2SeriesFilename:
                             # Пример: metadata="Хроники Кайлара", hierarchy="Кодекс ка'кари\Хроники Кайлара"
                             hierarchy_components = [c.strip().lower() for c in series_from_block_cleaned.split('\\') if c.strip()]
                             if metadata_cleaned.lower() in hierarchy_components:
-                                # ✅ Metadata подтвердила один уровень иерархии → возвращаем полную цепочку
+                                # ✅ Metadata подтвердила один уровень иерархии
+                                # Если metadata = ROOT компонент → возвращаем только root (безопасно)
+                                # Если metadata = более глубокий уровень → полная цепочка подтверждена
+                                # Пример (root): metadata="Третий Рим", hierarchy="Третий Рим\Последний натиск..."
+                                #   → root подтверждён, но subseries не подтверждена → вернуть "Третий Рим"
+                                # Пример (deep): metadata="Хроники Кайлара", hierarchy="Кодекс ка'кари\Хроники Кайлара"
+                                #   → глубокий уровень подтверждён → вернуть полную цепочку
                                 if series_from_block_cleaned:
-                                    return series_from_block_cleaned
+                                    root_cmp = hierarchy_components[0] if hierarchy_components else ''
+                                    if metadata_cleaned.lower() == root_cmp:
+                                        # Root совпадает → subseries не подтверждена, возвращаем только root
+                                        return series_from_block_cleaned.split('\\')[0].strip()
+                                    else:
+                                        return series_from_block_cleaned
                             elif best_score >= 0.85 and series_from_block_cleaned:
                                 # ✅ Очень высокий score паттерна (≥0.9) — уверены в правильности иерархии
                                 # даже если metadata не совпадает (metadata может быть названием издательства)
@@ -1796,6 +1807,13 @@ class Pass2SeriesFilename:
                         #   "Варлок 1-3" → "Варлок"
                         processed_series = self._extract_main_series_from_multi_level(series_from_block)
                         if processed_series:
+                            # Без metadata нельзя подтвердить многоуровневую иерархию
+                            # Возвращаем только root-компонент для безопасности
+                            # Пример: "Третий Рим\Последний натиск на восток ч" → "Третий Рим"
+                            if '\\' in processed_series:
+                                root = processed_series.split('\\')[0].strip()
+                                if root:
+                                    processed_series = root
                             # Mark: this result came from block matcher with high confidence (score=1.0)
                             # so title-as-series guard in caller should not discard it
                             self._last_from_block_matcher = (best_score >= 0.99)
