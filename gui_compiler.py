@@ -19,11 +19,13 @@ except ImportError:
 
 
 _SORT_SOURCE_LABEL = {
-    'series_number': 'Номер тома (мета)',
-    'filename':      'Номер в имени файла',
-    'title_date':    'Год написания (мета)',
-    'publish_date':  'Год издания (мета)',
-    'unknown':       '⚠ Не определён',
+    'series_number':  'Номер тома (мета)',
+    'filename':       'Номер в имени файла',
+    'filename_range': 'Диапазон в имени файла',
+    'inline_title':   'Номер в названии',
+    'title_date':     'Год написания (мета)',
+    'publish_date':   'Год издания (мета)',
+    'unknown':        '⚠ Не определён',
 }
 
 _ORDER_OK_COLOR   = '#DFF0D8'   # бледно-зелёный
@@ -236,7 +238,7 @@ class CompilerDialog:
         for pos, book in enumerate(group.books, 1):
             title     = (book.record.file_title or '').strip() or book.abs_path.stem
             sort_lbl  = _SORT_SOURCE_LABEL.get(book.sort_source, book.sort_source)
-            sn        = (book.record.series_number or '').strip() or '—'
+            sn = book.volume_label or ('?' if book.order_ambiguous else '—')
             warn      = ' ⚠' if book.order_ambiguous else ''
             self._det_tree.insert(
                 '', tk.END,

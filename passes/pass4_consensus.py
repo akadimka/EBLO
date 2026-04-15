@@ -953,6 +953,11 @@ class Pass4Consensus:
 
         folder_meta_correction_count = 0
         for folder, grp in _folder_groups_meta.items():
+            # Если в папке уже есть файл с авторитетной серией из иерархии папок —
+            # folder_meta_consensus не применяется: имя папки важнее метаданных.
+            if any(r.series_source in ("folder_hierarchy", "folder_dataset") for r in grp):
+                continue
+
             # Собираем нормализованные metadata_series
             meta_votes: dict = {}  # normalized_base → (clean_display_name, count)
             for rec in grp:

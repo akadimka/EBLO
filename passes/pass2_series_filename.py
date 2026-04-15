@@ -1057,9 +1057,9 @@ class Pass2SeriesFilename:
 
         Правило: папка — единица доверия. Если хотя бы один файл в папке получил
         series_source='folder_hierarchy', значит именно папка является источником
-        серии для ВСЕЙ папки. Все файлы с series_source='folder_metadata_confirmed'
-        в той же папке повышаются до 'folder_hierarchy', и их proposed_series
-        унифицируется до значения из folder_hierarchy-файла.
+        серии для ВСЕЙ папки. Все остальные файлы в папке получают ту же серию,
+        если только у них нет собственного folder_hierarchy/folder_dataset источника
+        с другой серией.
 
         ИСКЛЮЧЕНИЕ: если в папке файлы от НЕСКОЛЬКИХ авторов — это коллекция,
         унификация не применяется (иначе имя коллекции становится «серией»).
@@ -1090,10 +1090,12 @@ class Pass2SeriesFilename:
                 series_counts[r.proposed_series] = series_counts.get(r.proposed_series, 0) + 1
             canonical_series = max(series_counts, key=series_counts.get)
 
-            # Применяем ко ВСЕМ файлам в папке с более слабым источником серии
-            WEAK_SOURCES = {"folder_metadata_confirmed", "metadata", "consensus", "", "filename"}
+            # Применяем ко ВСЕМ файлам в папке, у которых источник НЕ является
+            # авторитетным (т.е. не folder_hierarchy и не folder_dataset).
+            # Любой другой источник — слабее явного имени папки.
+            STRONG_SOURCES = {"folder_hierarchy", "folder_dataset"}
             for record in group:
-                if record.series_source in WEAK_SOURCES:
+                if record.series_source not in STRONG_SOURCES:
                     record.proposed_series = canonical_series
                     record.series_source = "folder_hierarchy"
 
@@ -2517,10 +2519,17 @@ class Pass2SeriesFilename:
         """
         if not text or not self.filename_blacklist:
             return text
-        
+
         text_lower = text.lower()
+
+        # Если текст начинается с collection_keyword (например "Сборник авторов"),
+        # весь блок — маркер коллекции, не название серии — отвергаем целиком.
+        for kw in (self.collection_keywords or []):
+            if text_lower.startswith(kw.lower()):
+                return ""
+
         original_text = text
-        
+
         # Проходим по каждому слову в blacklist
         for bl_word in self.filename_blacklist:
             bl_word_lower = bl_word.lower().strip()

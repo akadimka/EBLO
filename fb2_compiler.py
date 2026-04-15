@@ -44,6 +44,7 @@ class CompilationBook:
     sort_key: Tuple         # (sort_level 0-3, value) — для сортировки
     sort_source: str        # "series_number" | "filename" | "title_date" | "publish_date"
     order_ambiguous: bool   # True если порядок не определён
+    volume_label: str = ''  # Отображаемый номер тома: "1", "1-3", "Свиток 1" и т.п.
 
 
 @dataclass
@@ -191,17 +192,74 @@ class FB2CompilerService:
 
             books = [self._make_book(rec, work_dir) for rec in recs]
 
-            # Дедупликация: убираем книги с одинаковым title (нормализованным)
+            duplicate_paths: List[Path] = []
+
+            # --- Фильтр 1: обработка заранее скомпилированных файлов ----------
+            # Признак: stem/title содержит сервисное слово (Трилогия …) или
+            # series_number — диапазон вида "1-3".
+            #
+            # Логика:
+            #   • Если предкомпиляция охватывает ВСЕ тома группы (count равен
+            #     числу обычных книг) → компиляция уже сделана: сохраняем
+            #     предкомпиляцию, отдельные тома помечаем на удаление, группу
+            #     пропускаем.
+            #   • Если предкомпиляция охватывает МЕНЬШЕ томов → она устарела:
+            #     исключаем её из новой компиляции (помечаем на удаление),
+            #     компилируем обычные книги заново.
+            precompiled: List[Tuple[CompilationBook, int]] = []  # (book, covered_count)
+            regular_books: List[CompilationBook] = []
+            for book in books:
+                covered = self._precompiled_count(book, series)
+                if covered > 0:
+                    precompiled.append((book, covered))
+                else:
+                    regular_books.append(book)
+
+            if precompiled:
+                regular_count = len(regular_books)
+                # Берём предкомпиляцию с максимальным охватом
+                best_pre, best_count = max(precompiled, key=lambda t: t[1])
+                if best_count >= regular_count:
+                    # Предкомпиляция актуальна — остальные файлы лишние
+                    for book in regular_books:
+                        duplicate_paths.append(book.abs_path)
+                    for book, _ in precompiled:
+                        if book is not best_pre:
+                            duplicate_paths.append(book.abs_path)
+                    # Группу пропускаем — компиляция уже существует
+                    groups.append(CompilationGroup(
+                        author=author,
+                        series=series,
+                        books=[best_pre],
+                        order_determined=True,
+                        volume_range='',
+                        duplicate_paths=duplicate_paths,
+                    ))
+                    continue
+                else:
+                    # Предкомпиляция устарела — исключаем её
+                    for book, _ in precompiled:
+                        duplicate_paths.append(book.abs_path)
+            books = regular_books
+
+            # --- Фильтр 2: дедупликация по title (нормализованному) ----------
             # Из дублей оставляем первый по алфавиту путь (детерминированный выбор)
             seen_titles: Dict[str, CompilationBook] = {}
-            duplicate_paths: List[Path] = []
             for book in sorted(books, key=lambda b: str(b.abs_path)):
-                title_key = (book.record.file_title or book.abs_path.stem).strip().lower()
+                title_key = self._normalize_title_key(
+                    book.record.file_title or book.abs_path.stem, series
+                )
                 if title_key not in seen_titles:
                     seen_titles[title_key] = book
                 else:
                     duplicate_paths.append(book.abs_path)
             books = list(seen_titles.values())
+
+            # --- Фильтр 3: дедупликация по позиции тома ----------------------
+            # Если после title-дедупликации остались книги с одинаковым sort_key
+            # на уровнях 0 (series_number) или 1 (filename number), оставляем
+            # первую по алфавиту, остальные помечаем как дубликаты.
+            books = self._dedup_by_position(books, duplicate_paths)
 
             if len(books) < 2:
                 # Даже если группа не идёт на компиляцию, дубликаты запомняем для удаления
@@ -227,46 +285,203 @@ class FB2CompilerService:
     def _make_book(self, rec, work_dir: Path) -> CompilationBook:
         """Создать CompilationBook из BookRecord."""
         abs_path = work_dir / rec.file_path
-        sort_key, sort_source, ambiguous = self._determine_sort_key(rec, abs_path)
+        sort_key, sort_source, ambiguous, volume_label = self._determine_sort_key(rec, abs_path)
         return CompilationBook(
             record=rec,
             abs_path=abs_path,
             sort_key=sort_key,
             sort_source=sort_source,
             order_ambiguous=ambiguous,
+            volume_label=volume_label,
         )
+
+    # ------------------------------------------------------------------
+    # Вспомогательные методы фильтрации
+    # ------------------------------------------------------------------
+
+    # Regex для диапазонного series_number вида "1-3", "1–7"
+    _RANGE_NUM_RE = re.compile(r'^\d+\s*[-–—]\s*\d+$')
+
+    # Ключевые слова, указывающие на номер тома внутри названия
+    # Порядок важен: более специфичные — первыми
+    _VOLUME_KEYWORDS_RE = re.compile(
+        r'(?:свиток|том|книга|часть|выпуск|арка|цикл|эпизод|volume|book|part|vol\.?)'
+        r'\s*[.:-]?\s*(\d{1,4})\b',
+        re.IGNORECASE | re.UNICODE,
+    )
+
+    @classmethod
+    def _extract_inline_volume_number(cls, title: str, stem: str) -> Optional[int]:
+        """Извлечь номер тома из ключевых слов внутри названия.
+
+        Ищет паттерны «Свиток 1», «Том 3», «Книга 2», «Часть 4» и т.п.
+        Возвращает число или None, если паттерн не найден.
+
+        Проверяет как file_title, так и stem файла.
+        """
+        for text in (title, stem):
+            if not text:
+                continue
+            m = cls._VOLUME_KEYWORDS_RE.search(text)
+            if m:
+                return int(m.group(1))
+        return None
+
+    def _precompiled_count(self, book: CompilationBook, series: str) -> int:
+        """Определить, является ли файл заранее скомпилированным сборником серии.
+
+        Возвращает количество томов, охватываемых этим файлом, или 0 если файл
+        не является предкомпиляцией.
+
+        Критерии определения предкомпиляции:
+        1. series_number — диапазон вида "1-3": возвращает (max - min + 1).
+        2. stem/title содержит сервисное слово серии (Трилогия → 3 и т.п.)
+           в сочетании с именем серии.
+        """
+        # Критерий 1: series_number — диапазон "N-M"
+        sn = (book.record.series_number or '').strip()
+        if sn:
+            m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', sn)
+            if m:
+                lo, hi = int(m.group(1)), int(m.group(2))
+                if hi > lo:
+                    return hi - lo + 1
+
+        # Критерий 2: stem/title содержит сервисное слово + признак серии
+        text = (book.record.file_title or book.abs_path.stem).lower()
+        series_lower = series.lower()
+        series_words = [w for w in series_lower.split() if len(w) >= 4]
+        for idx, kw in enumerate(self._SERIES_WORDS):
+            if kw and kw.lower() in text:
+                # Проверяем связь с текущей серией
+                if not series_words or any(w in text for w in series_words):
+                    return idx  # индекс == количество томов
+
+        return 0
+
+    @classmethod
+    def _normalize_title_key(cls, raw_title: str, series: str) -> str:
+        """Нормализовать заголовок для дедупликации.
+
+        Убирает возможный префикс в виде «<Серия>. » или «<Серия> » перед
+        собственно названием книги, чтобы «Аквилон. Маг воды. Том 3» и
+        «Маг воды. Том 3» воспринимались как один и тот же том.
+        """
+        key = raw_title.strip().lower()
+        # Попробовать отрезать префикс вида "<серия>. " или "<серия> "
+        series_prefix = series.strip().lower()
+        for sep in ('. ', ' '):
+            candidate = series_prefix + sep
+            if key.startswith(candidate):
+                key = key[len(candidate):]
+                break
+        return key
+
+    def _dedup_by_position(
+        self,
+        books: List[CompilationBook],
+        duplicate_paths: List[Path],
+    ) -> List[CompilationBook]:
+        """Убрать книги-дубликаты с одинаковой позицией тома.
+
+        После title-дедупликации может остаться несколько книг с одним и тем же
+        sort_key на уровне 0 (series_number) или 1 (filename number).  Из таких
+        дублей оставляем первую по алфавиту (det. выбор), остальные идут в
+        duplicate_paths.
+
+        Книги с ambiguous sort_key (уровень 9) из этого фильтра исключены —
+        для них позиция неизвестна, они останутся до проверки order_determined.
+        """
+        # Для книг с одинаковой позицией тома оставляем наиболее свежую версию.
+        # Для книг с одинаковой позицией тома выбираем наиболее свежую версию.
+        # Критерии (по убыванию надёжности):
+        #   1. Дата из тега <date> в title-info FB2 — самый достоверный признак
+        #   2. Явные ключевые слова "свежести" в имени файла или title
+        #   3. Алфавитный порядок пути (детерминированный fallback)
+        _FRESH_KEYWORDS = re.compile(
+            r'новый?\s+вариант|новая?\s+редакц|переработан|updated?|revision|new\s+ver',
+            re.IGNORECASE | re.UNICODE,
+        )
+
+        def _book_freshness(book: CompilationBook):
+            """Ключ сортировки: чем свежее — тем меньше (идёт первым)."""
+            # 1. Дата из FB2 <date> — лексикографически сравниваем, инвертируем
+            date_str = self._extract_date_from_fb2(book.abs_path) or ''
+            date_key = tuple(-int(x) for x in date_str.split('-')) if date_str else (0,)
+
+            # 2. Ключевые слова в имени/названии
+            text = f"{book.abs_path.stem} {book.record.file_title or ''}"
+            kw_key = 0 if _FRESH_KEYWORDS.search(text) else 1
+
+            return (date_key, kw_key, str(book.abs_path))
+
+        sorted_books = sorted(books, key=_book_freshness)
+        seen_positions: Dict[Tuple, CompilationBook] = {}
+        result: List[CompilationBook] = []
+        for book in sorted_books:
+            level = book.sort_key[0]
+            if level == 0:
+                pos_key = book.sort_key  # (0, num, 0)
+                if pos_key not in seen_positions:
+                    seen_positions[pos_key] = book
+                    result.append(book)
+                else:
+                    duplicate_paths.append(book.abs_path)
+            else:
+                result.append(book)
+        return result
 
     def _determine_sort_key(
         self, rec, abs_path: Path
-    ) -> Tuple[Tuple, str, bool]:
+    ) -> Tuple[Tuple, str, bool, str]:
         """Многоуровневое определение порядка книги.
 
         Returns:
-            (sort_key_tuple, source_name, is_ambiguous)
+            (sort_key_tuple, source_name, is_ambiguous, volume_label)
+            volume_label — отображаемый номер/диапазон: "1", "1-3", "2021" и т.п.
         """
-        # Уровень 1: series_number — целое число или диапазон «1-4» (компиляция)
+        stem = Path(rec.file_path).stem
+
+        # Источник А: series_number из FB2-метаданных.
+        # Пропускаем для подсерий (proposed_series содержит '\') — там series_number
+        # относится к родительской серии и не отражает позицию внутри подсерии.
+        is_subseries = '\\' in (rec.proposed_series or '')
         sn = (rec.series_number or '').strip()
-        if sn:
+        if sn and not is_subseries:
             if re.match(r'^\d+$', sn):
-                return (0, int(sn), 0), 'series_number', False
+                return (0, int(sn), 0), 'series_number', False, sn
             rng = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', sn)
             if rng:
-                # Для компиляции используем MIN для сортировки
-                return (0, int(rng.group(1)), 0), 'series_number', False
+                return (0, int(rng.group(1)), 0), 'series_number', False, sn
 
-        # Уровень 2: число в начале имени файла
-        stem = Path(rec.file_path).stem
+        # Источник Б: число в начале имени файла
         num_m = self._STEM_NUM_RE.match(stem) or re.search(
             r'(?:^|[-–\s])(\d{1,4})\.\s+[А-ЯЁA-Z]', stem
         )
         if num_m:
             num = int(next(g for g in num_m.groups() if g is not None))
-            return (1, num, 0), 'filename', False
+            return (0, num, 0), 'filename', False, str(num)
+
+        # Источник В: диапазон томов в скобках внутри stem — «(Серия 1-3)», «(4-6)»
+        # Используем MIN как позицию сортировки: файл (1-3) → 1, файл (4-6) → 4
+        range_m = re.search(
+            r'\((?:[^()]*?\s)?(\d{1,4})\s*[-–—]\s*(\d{1,4})\)', stem
+        )
+        if range_m:
+            lo, hi = range_m.group(1), range_m.group(2)
+            return (0, int(lo), 0), 'filename_range', False, f'{lo}-{hi}'
+
+        # Источник Г: ключевое слово внутри title/stem («Свиток 1», «Том 3» …)
+        inline = self._extract_inline_volume_number(
+            rec.file_title or stem, stem
+        )
+        if inline is not None:
+            return (0, inline, 0), 'inline_title', False, str(inline)
 
         # Уровень 3: дата из FB2 title-info
         year = self._extract_year_from_fb2(abs_path, section='title-info')
         if year:
-            return (2, year, 0), 'title_date', False
+            return (2, year, 0), 'title_date', False, str(year)
 
         # Уровень 4: дата из publish-info
         year = self._extract_year_from_fb2(abs_path, section='publish-info')
@@ -274,7 +489,49 @@ class FB2CompilerService:
             return (3, year, 0), 'publish_date', False
 
         # Порядок не определён
-        return (9, 0, 0), 'unknown', True
+        return (9, 0, 0), 'unknown', True, ''
+
+    def _extract_date_from_fb2(self, path: Path, section: str = 'title-info') -> Optional[str]:
+        """Извлечь дату из <date> внутри указанной секции FB2.
+
+        Возвращает строку вида 'YYYY-MM-DD' или 'YYYY' — пригодную для
+        лексикографического сравнения (более поздняя дата > ранняя).
+        Возвращает None если дата не найдена или файл недоступен.
+        """
+        try:
+            if not path.exists():
+                return None
+            chunk = path.read_bytes()[:8192]
+            try:
+                text = chunk.decode('utf-8', errors='replace')
+            except Exception:
+                text = chunk.decode('cp1251', errors='replace')
+
+            sec_m = re.search(
+                rf'<(?:fb:)?{re.escape(section)}>(.*?)</(?:fb:)?{re.escape(section)}>',
+                text, re.DOTALL | re.IGNORECASE,
+            )
+            if not sec_m:
+                return None
+            sec_text = sec_m.group(1)
+
+            # Предпочитаем атрибут value="YYYY-MM-DD" как наиболее точный
+            m = re.search(
+                r'<(?:fb:)?date[^>]*value=["\'](\d{4}(?:-\d{2}(?:-\d{2})?)?)["\']',
+                sec_text, re.IGNORECASE,
+            )
+            if m:
+                return m.group(1)
+            # Fallback: текстовое содержимое тега <date>YYYY-MM-DD</date>
+            m = re.search(
+                r'<(?:fb:)?date[^>]*>(\d{4}(?:-\d{2}(?:-\d{2})?)?)</(?:fb:)?date>',
+                sec_text, re.IGNORECASE,
+            )
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
+        return None
 
     def _extract_year_from_fb2(self, path: Path, section: str) -> Optional[int]:
         """Извлечь год из <date> внутри указанной секции FB2."""
@@ -326,7 +583,7 @@ class FB2CompilerService:
         for b in books:
             level = b.sort_key[0]
             val = b.sort_key[1]
-            if level <= 1 and isinstance(val, int):
+            if level == 0 and isinstance(val, int):
                 nums.append(val)
 
         # Также из series_number самой записи (может быть уже диапазоном "1-3")
@@ -507,7 +764,6 @@ class FB2CompilerService:
         first_name = _html.escape(' '.join(parts[1:])) if len(parts) > 1 else ''
 
         safe_series = _html.escape(series)
-        safe_series_range = _html.escape(volume_range) if volume_range else ''
         n_books = len(bodies)
         suffix = self._series_suffix(n_books, volume_range)
         book_title = f"{safe_series} ({suffix})"
@@ -521,9 +777,12 @@ class FB2CompilerService:
         if not genre_tag:
             genre_tag = '  <genre>other</genre>\n'
 
-        sequence_attr = f'name="{safe_series}"'
-        if volume_range:
-            sequence_attr += f' number="{safe_series_range}"'
+        # <sequence number> всегда содержит последовательный диапазон 1-N,
+        # а не исходные номера томов из sort_key — иначе подсерии, чьи книги
+        # пронумерованы 7 и 8 в родительской серии, ошибочно получали бы
+        # number="7-8" вместо "1-2".
+        seq_range = '1' if n_books == 1 else f'1-{n_books}'
+        sequence_attr = f'name="{safe_series}" number="{seq_range}"'
 
         # Описание
         description = (
