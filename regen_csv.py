@@ -415,8 +415,13 @@ class RegenCSVService:
                     if _meta_key(r.metadata_authors.strip()) == dominant_key
                 )
 
-                # proposed_author должен быть усечённой формой одного из авторов в meta
+                # proposed_author должен быть усечённой формой одного из авторов в meta.
+                # ВАЖНО: Pass 2.5 предназначен только для ОДНОСЛОВНЫХ усечённых форм
+                # (e.g. "Войлошниковы" → "Войлошников Тим"). Если proposed_author уже
+                # содержит 2+ слов — это полное имя, расширение не нужно.
                 proposed = filename_recs[0].proposed_author
+                if len(proposed.split()) >= 2:
+                    continue  # Уже полное имя — пропускаем
                 proposed_stem = _stem25(proposed)
                 if len(proposed_stem) < 4:
                     continue
