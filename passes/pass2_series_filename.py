@@ -1814,10 +1814,12 @@ class Pass2SeriesFilename:
                         #   "Варлок 1-3" → "Варлок"
                         processed_series = self._extract_main_series_from_multi_level(series_from_block)
                         if processed_series:
-                            # Без metadata нельзя подтвердить многоуровневую иерархию
-                            # Возвращаем только root-компонент для безопасности
-                            # Пример: "Третий Рим\Последний натиск на восток ч" → "Третий Рим"
-                            if '\\' in processed_series:
+                            # Без metadata нельзя подтвердить многоуровневую иерархию.
+                            # Исключение: паттерн явно содержит SubSeries — иерархия описана
+                            # намеренно, доверяем всей строке даже без подтверждения metadata.
+                            # Пример: "Author - Series. SubSeries (service_words)" при score=1.0
+                            pattern_has_subseries = 'SubSeries' in pattern_str
+                            if '\\' in processed_series and not pattern_has_subseries:
                                 root = processed_series.split('\\')[0].strip()
                                 if root:
                                     processed_series = root
@@ -2343,8 +2345,20 @@ class Pass2SeriesFilename:
         # Используем \b для границ слов, чтобы не путать "Серия Альфа" со служебным "Серия"
         service_words_pattern = r'\b(?:Дилогия|Трилогия|Тетралогия|Пентагония|внецикл|дополнение|прелюдия|эпилог)\b'
         
-        # Разделяем по точке+пробел (это разделитель уровней или служебной информации)
-        parts = content.split('. ')
+        # Если контент уже содержит '\' (результат BlockLevelPatternMatcher с SubSeries),
+        # разбиваем по '\', а каждый компонент дополнительно чистим от номеров через '. '.
+        # Иначе разбиваем по '. ' как обычно.
+        if '\\' in content:
+            raw_parts = []
+            for chunk in content.split('\\'):
+                # Внутри компонента может быть ". " — берём только первую часть (до точки)
+                sub = chunk.split('. ')[0].strip()
+                if sub:
+                    raw_parts.append(sub)
+            parts = raw_parts
+        else:
+            # Разделяем по точке+пробел (это разделитель уровней или служебной информации)
+            parts = content.split('. ')
         
         if not parts:
             return ""

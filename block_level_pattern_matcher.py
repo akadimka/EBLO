@@ -370,6 +370,8 @@ class BlockLevelPatternMatcher:
         
         if 'author' in text_lower:
             return "Author"
+        elif text_lower == 'subseries' or text_lower.startswith('subseries'):
+            return "SubSeries"
         elif 'series' in text_lower:
             return "Series"
         elif 'title' in text_lower:
@@ -432,8 +434,9 @@ class BlockLevelPatternMatcher:
         score = 0.0
         max_score = 0.0
         author_block = None
-        series_blocks = []  # Collect ALL series blocks for multi-level hierarchies
-        type_match_count = 0  # Count how many blocks had correct type match
+        series_blocks = []     # Collect Series blocks
+        subseries_blocks = []  # Collect SubSeries blocks (joined with \ into hierarchy)
+        type_match_count = 0   # Count how many blocks had correct type match
         
         for position, (fname_block, pblock) in enumerate(zip(filename_blocks, pattern_blocks)):
             max_score += 1.0 + 0.1  # 1.0 for type match, 0.1 for potential delimiter bonus
@@ -475,9 +478,9 @@ class BlockLevelPatternMatcher:
                 fname_type = self._guess_block_type(fname_block.text)
             
             # Context-aware type adjustment: Series names often look like book titles.
-            # If pattern expects Series at this position and block looks like a Title → treat as Series.
-            if expected_type == "Series" and fname_type == "Title":
-                fname_type = "Series"
+            # If pattern expects Series/SubSeries at this position and block looks like Title → accept.
+            if expected_type in ("Series", "SubSeries") and fname_type == "Title":
+                fname_type = expected_type
             # Also: after service_words block, force Series (original logic kept as fallback)
             if (position > 0 and expected_type == "Series" and
                 pattern_blocks[position - 1]['type'] == "service_words" and
@@ -500,11 +503,22 @@ class BlockLevelPatternMatcher:
                 if expected_type == "Author":
                     author_block = fname_block.text
                 elif expected_type == "Series":
-                    series_blocks.append(fname_block.text)  # Collect all series blocks
+                    series_blocks.append(fname_block.text)
+                elif expected_type == "SubSeries":
+                    subseries_blocks.append(fname_block.text)
 
         
-        # Reconstruct full series hierarchy from all blocks (e.g., "Сид 1. Принцип талиона 1. Геката 1")
-        series_block = '. '.join(series_blocks) if series_blocks else None
+        # Reconstruct series hierarchy:
+        # - Series blocks joined with '. ' (flat multi-word series name)
+        # - SubSeries blocks appended via '\' (hierarchical subseries)
+        # Example: Series="Цена победы", SubSeries="Горе победителям"
+        #          → "Цена победы\Горе победителям"
+        base_series = '. '.join(series_blocks) if series_blocks else None
+        if subseries_blocks:
+            sub_part = '\\'.join(subseries_blocks)
+            series_block = f'{base_series}\\{sub_part}' if base_series else sub_part
+        else:
+            series_block = base_series
         
         normalized_score = score / max_score if max_score > 0 else 0.0
         # Store type_match_count as attribute on return value for tie-breaking

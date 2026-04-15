@@ -6,7 +6,7 @@
   "window_sizes": {
     "settings": "708x466+250+200",
     "main": {
-      "geometry": "1000x700+402+89",
+      "geometry": "1000x700+100+50",
       "state": "normal"
     },
     "genres_manager": "700x456+690+361",
@@ -377,11 +377,11 @@
       "example": "Анисимов. Вариант «Бис» 2. Год мертвой змеи.fb2"
     },
     {
-      "pattern": "Author. Series. Series. service_words. Title",
+      "pattern": "Author. Series. SubSeries. service_words. Title",
       "example": "Корносенко Валера. Новая Россия 1. Экстрасенс. Назад в прошлое. Россия 2006.fb2"
     },
     {
-      "pattern": "Author. Series. Series. Title",
+      "pattern": "Author. Series. SubSeries. Title",
       "example": "Автор. Серия 1. Подсерия 2. Название.fb2"
     },
     {
@@ -393,16 +393,20 @@
       "example": "Садов Сергей - Горе победителям (Дилогия).fb2"
     },
     {
-      "pattern": "Author - Series. Series (service_words)",
+      "pattern": "Author - Series. SubSeries (service_words)",
       "example": "Садов Сергей - Цена победы. Горе победителям (Дилогии).fb2"
     },
     {
-      "pattern": "Author - Series. Series. Title",
+      "pattern": "Author - Series. SubSeries. Title",
       "example": "Уикс Брент - Кодекс ка'кари 2. Хроники Кайлара 1. Немезида ночного ангела.fb2"
     },
     {
-      "pattern": "Author - Series. Series. service_words. Title",
+      "pattern": "Author - Series. SubSeries. service_words. Title",
       "example": "Клавелл Джеймс - Азиатская сага 04. Роман о Гонконге. Книга 1. На краю пропасти.fb2"
+    },
+    {
+      "pattern": "Author, Author - Series service_words. SubSeries.  Title",
+      "example": "Емельянов Антон, Савинов Сергей - Второй Сибирский 1. Японская война. 1904.fb2"
     }
   ],
   "series_patterns_in_metadata": [
