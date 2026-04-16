@@ -216,7 +216,14 @@ class FB2SAXExtractor:
                 elif encoding in ['utf-8', 'utf8']:
                     return 'utf-8'
                 else:
-                    return encoding
+                    # Объявлена нестандартная кодировка (latin-1 и т.п.).
+                    # Проверяем: если содержимое является валидным UTF-8 —
+                    # используем UTF-8 (объявление ошибочное, файл реально в UTF-8).
+                    try:
+                        raw.decode('utf-8', errors='strict')
+                        return 'utf-8'
+                    except (UnicodeDecodeError, ValueError):
+                        return encoding
 
             # По умолчанию пробуем utf-8
             return 'utf-8'
@@ -1228,10 +1235,25 @@ class FB2SAXExtractor:
             if not encoding:
                 encoding = 'utf-8'
 
+            raw_bytes = fb2_path.read_bytes()
+
+            # Если объявленная кодировка — не UTF-8, но байты валидны как UTF-8,
+            # патчим XML-декларацию чтобы SAX-парсер не переключился на latin-1/etc.
+            if encoding == 'utf-8':
+                raw_bytes = re.sub(
+                    rb'(<\?xml[^>]*encoding\s*=\s*["\'])([^"\']+)(["\'])',
+                    rb'\1utf-8\3',
+                    raw_bytes[:256],
+                ) + raw_bytes[256:]
+
             parser = xml.sax.make_parser()
             parser.setContentHandler(handler)
-            with open(fb2_path, 'r', encoding=encoding, errors='ignore') as f:
-                parser.parse(f)
+            try:
+                xml.sax.parseString(raw_bytes, handler)
+            except xml.sax.SAXParseException:
+                # Файл может содержать частичные UTF-8 последовательности в теле,
+                # но метаданные в начале файла уже успели извлечься — используем их.
+                pass
 
             # Формируем строку авторов (с дедупликацией)
             authors_parts = []
