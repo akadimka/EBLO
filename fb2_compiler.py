@@ -347,14 +347,30 @@ class FB2CompilerService:
                 if hi > lo:
                     return hi - lo + 1
 
-        # Критерий 2: stem/title содержит сервисное слово + признак серии
-        text = (book.record.file_title or book.abs_path.stem).lower()
         series_lower = series.lower()
         series_words = [w for w in series_lower.split() if len(w) >= 4]
+
+        def _has_series_link(txt: str) -> bool:
+            tl = txt.lower()
+            return not series_words or any(w in tl for w in series_words)
+
+        # Критерий 2: диапазон "N-M" в имени файла (stem) или title
+        # Паттерны: "Варяг 1-3", "Книги 1-5", "Книги 6-14", "Компиляция. Книги 6-14"
+        _RANGE_RE = re.compile(r'(\d+)\s*[-–—]\s*(\d+)', re.UNICODE)
+        for candidate in (book.abs_path.stem, book.record.file_title or ''):
+            if not _has_series_link(candidate):
+                continue
+            m = _RANGE_RE.search(candidate)
+            if m:
+                lo, hi = int(m.group(1)), int(m.group(2))
+                if hi > lo:
+                    return hi - lo + 1
+
+        # Критерий 3: stem/title содержит сервисное слово + признак серии
+        text = (book.record.file_title or book.abs_path.stem).lower()
         for idx, kw in enumerate(self._SERIES_WORDS):
             if kw and kw.lower() in text:
-                # Проверяем связь с текущей серией
-                if not series_words or any(w in text for w in series_words):
+                if _has_series_link(text):
                     return idx  # индекс == количество томов
 
         return 0
