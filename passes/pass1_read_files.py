@@ -60,15 +60,6 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
         author, author_source = _get_author_for_file_worker(
             fb2_file, work_dir, author_folder_cache, folder_parse_limit)
 
-        # Validation logic
-        if author_source == "folder_dataset" and author and meta.get('authors'):
-            import re as _re_p1
-            author_words = set(author.lower().split())
-            meta_words = set(_re_p1.sub(r'[;,]', ' ', meta['authors'].lower()).split())
-            if author_words and meta_words and not (author_words & meta_words):
-                author = ""
-                author_source = ""
-
         # Create record
         record = BookRecord(
             file_path=str(fb2_file.relative_to(work_dir)),

@@ -230,6 +230,10 @@ class Pass2Filename:
                 for author in fb2_authors:
                     if not author:
                         continue
+                    # Пропускаем малформированные записи с запятой внутри имени автора
+                    # (запятая — разделитель соавторов, не часть имени)
+                    if ',' in author:
+                        continue
                     author_lower = author.lower().strip()
                     # Cache full name
                     self.author_cache[author_lower] = author
@@ -700,38 +704,28 @@ class Pass2Filename:
         test_count = 0
         
         for i, record in enumerate(records):
-            # Skip files with folder_dataset source ONLY if:
-            # 1. NOT a fallback situation (folder extraction found something valid)
-            # 2. AND filename doesn'tcontain multi-author pattern (comma in non-extension parts)
-            
-            is_multiauthor_pattern = False
-            filename_for_check = record.file_path.replace('\\', '/').split('/')[-1]  # basename only
-            if '. ' in filename_for_check:
-                before_extension = filename_for_check.rsplit('.', 1)[0]  # remove .fb2
-                # Check if there's a comma indicating multi-author pattern
-                if ', ' in before_extension:
-                    is_multiauthor_pattern = True
-            
-            # Skip if folder_dataset source AND not a fallback AND single-author filename
-            if (record.author_source == "folder_dataset" and 
-                not getattr(record, 'needs_filename_fallback', False) and
-                not is_multiauthor_pattern):
+            # Папка — абсолютный приоритет. folder_dataset пропускается всегда,
+            # кроме случая needs_filename_fallback (папка не дала автора).
+            if (record.author_source == "folder_dataset" and
+                    not getattr(record, 'needs_filename_fallback', False)):
                 skipped_count += 1
                 continue
-            
+
             # CHECK: Is this file a collection/anthology or co-authored book?
             # Rule: 3+ authors in metadata → either "Сборник" (if keywords in filename/title)
             #                               or "Соавторство" (regular multi-author book)
-            author_count = self._count_authors(record.metadata_authors)
-            if author_count >= 3:
-                if self._is_collection(record.file_path, getattr(record, 'file_title', '')):
-                    record.proposed_author = "Сборник"
-                else:
-                    record.proposed_author = "Соавторство"
-                record.author_source = "collection"
-                record.needs_filename_fallback = False
-                processed_count += 1
-                continue  # Skip regular filename parsing for collections/co-authored
+            # IMPORTANT: не перезаписываем folder_dataset — папка авторитетнее метаданных.
+            if record.author_source != "folder_dataset":
+                author_count = self._count_authors(record.metadata_authors)
+                if author_count >= 3:
+                    if self._is_collection(record.file_path, getattr(record, 'file_title', '')):
+                        record.proposed_author = "Сборник"
+                    else:
+                        record.proposed_author = "Соавторство"
+                    record.author_source = "collection"
+                    record.needs_filename_fallback = False
+                    processed_count += 1
+                    continue  # Skip regular filename parsing for collections/co-authored
             
             # Try to extract from filename (NOT full path!)
             # Handle both Windows (\) and Unix (/) path separators

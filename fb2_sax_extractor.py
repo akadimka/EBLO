@@ -171,8 +171,9 @@ class FB2SAXExtractor:
             with open(fb2_path, 'r', encoding=encoding, errors='ignore') as f:
                 parser.parse(f)
 
-            # Формируем список авторов
+            # Формируем список авторов (с дедупликацией)
             authors_list = []
+            seen_lower: set = set()
             for author in handler.authors:
                 parts = []
                 if author.get('first_name', '').strip():
@@ -183,7 +184,10 @@ class FB2SAXExtractor:
                     parts.append(author['last_name'].strip())
 
                 if parts:
-                    authors_list.append(' '.join(parts))
+                    name = ' '.join(parts)
+                    if name.lower() not in seen_lower:
+                        authors_list.append(name)
+                        seen_lower.add(name.lower())
 
             return authors_list, handler.series_name
 
@@ -1229,8 +1233,9 @@ class FB2SAXExtractor:
             with open(fb2_path, 'r', encoding=encoding, errors='ignore') as f:
                 parser.parse(f)
 
-            # Формируем строку авторов
+            # Формируем строку авторов (с дедупликацией)
             authors_parts = []
+            seen_lower: set = set()
             for author in handler.authors:
                 parts = [
                     author.get('first_name', '').strip(),
@@ -1238,8 +1243,9 @@ class FB2SAXExtractor:
                     author.get('last_name', '').strip(),
                 ]
                 name = ' '.join(p for p in parts if p)
-                if name:
+                if name and name.lower() not in seen_lower:
                     authors_parts.append(name)
+                    seen_lower.add(name.lower())
             authors_str = '; '.join(authors_parts)
 
             return {

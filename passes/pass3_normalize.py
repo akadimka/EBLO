@@ -46,6 +46,16 @@ class Pass3Normalize:
             if not record.proposed_author or record.proposed_author == "Сборник":
                 continue
 
+            # Дедупликация авторов: "Гаусс Максим, Гаусс Максим" → "Гаусс Максим"
+            sep = '; ' if '; ' in record.proposed_author else ', '
+            _parts = [a.strip() for a in record.proposed_author.replace(';', ',').split(',')]
+            _seen: list = []
+            for _p in _parts:
+                if _p and _p.lower() not in [x.lower() for x in _seen]:
+                    _seen.append(_p)
+            if len(_seen) < len(_parts):
+                record.proposed_author = sep.join(_seen)
+
             # Если среди авторов есть "Коллектив авторов" → это антология, ставим Сборник
             _authors_to_check = record.proposed_author.replace(';', ',')
             if any(a.strip().lower().replace('ё', 'е') == 'коллектив авторов'
@@ -261,5 +271,22 @@ class Pass3Normalize:
                 sanitized = _SANITIZE_RE.sub('', record.proposed_author).strip()
                 if sanitized != record.proposed_author:
                     record.proposed_author = sanitized
+
+        # Повторная дедупликация ПОСЛЕ нормализации:
+        # нормализация может привести "Максим Гаусс" → "Гаусс Максим",
+        # создав дубль если рядом уже было "Гаусс Максим".
+        for record in records:
+            if not record.proposed_author or record.proposed_author in ("Сборник", "Соавторство"):
+                continue
+            if ', ' not in record.proposed_author and '; ' not in record.proposed_author:
+                continue
+            sep = '; ' if '; ' in record.proposed_author else ', '
+            _parts = [a.strip() for a in record.proposed_author.replace(';', ',').split(',')]
+            _seen: list = []
+            for _p in _parts:
+                if _p and _p.lower() not in [x.lower() for x in _seen]:
+                    _seen.append(_p)
+            if len(_seen) < len(_parts):
+                record.proposed_author = sep.join(_seen)
 
         self.logger.log(f"[PASS 3] Normalized {normalized_count} author names")
