@@ -1069,6 +1069,10 @@ class Pass2SeriesFilename:
                 r for r in group
                 if r.author_source == "folder_dataset" and r.proposed_author
             ]
+            confirmed_records = [
+                r for r in group
+                if r.author_source == "metadata_folder_confirmed" and r.proposed_author
+            ]
             if folder_dataset_records:
                 # Большинство среди folder_dataset
                 author_counts: dict = {}
@@ -1077,10 +1081,6 @@ class Pass2SeriesFilename:
                 canonical_author = max(author_counts, key=author_counts.get)
             else:
                 # Fallback: большинство среди metadata_folder_confirmed
-                confirmed_records = [
-                    r for r in group
-                    if r.author_source == "metadata_folder_confirmed" and r.proposed_author
-                ]
                 if not confirmed_records:
                     continue
                 author_counts = {}
@@ -1089,12 +1089,13 @@ class Pass2SeriesFilename:
                 canonical_author = max(author_counts, key=author_counts.get)
 
             # Применяем ко всем файлам в папке с source='metadata', 'metadata_folder_confirmed'
-            # или 'filename' (если канонический автор из folder_dataset).
+            # или 'filename' (если канонический автор из folder_dataset или из большинства
+            # metadata_folder_confirmed — это тоже авторитетный источник).
             # folder_dataset не трогаем — они уже точно определены.
             # 'filename': автор мог быть ошибочно извлечён из имени файла (напр. из названия
-            # серии в паттерне "Серия - Подсерия"), переопределяем авторитетным folder_dataset.
+            # серии в паттерне "Серия - Подсерия"), переопределяем авторитетным источником.
             _overrideable = {"metadata", "metadata_folder_confirmed"}
-            if folder_dataset_records:
+            if folder_dataset_records or confirmed_records:
                 _overrideable.add("filename")
             for record in group:
                 if record.author_source in _overrideable and record.proposed_author:
