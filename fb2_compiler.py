@@ -198,35 +198,38 @@ class FB2CompilerService:
             # Признак: stem/title содержит сервисное слово (Трилогия …) или
             # series_number — диапазон вида "1-3".
             #
-            # Логика:
-            #   • Если предкомпиляция охватывает ВСЕ тома группы (count равен
-            #     числу обычных книг) → компиляция уже сделана: сохраняем
-            #     предкомпиляцию, отдельные тома помечаем на удаление, группу
-            #     пропускаем.
-            #   • Если предкомпиляция охватывает МЕНЬШЕ томов → она устарела:
-            #     исключаем её из новой компиляции (помечаем на удаление),
-            #     компилируем обычные книги заново.
-            precompiled: List[Tuple[CompilationBook, int]] = []  # (book, covered_count)
+            # Три состояния:
+            #   1. АКТУАЛЬНА (best_count >= regular_count): компиляция уже
+            #      сделана — сохраняем предкомпиляцию, отдельные тома на удаление.
+            #   2. ЧАСТИЧНО УСТАРЕЛА (best_count < regular_count, но предкомпиляция
+            #      содержит тома которых нет отдельно, например том 1): включаем
+            #      предкомпиляцию как источник + добавляем недостающие тома.
+            #      Тома, уже покрытые предкомпиляцией, помечаем на удаление.
+            #   3. ПОЛНОСТЬЮ УСТАРЕЛА (все тома предкомпиляции есть и по отдельности):
+            #      удаляем предкомпиляцию, компилируем из отдельных томов.
+            precompiled: List[Tuple[CompilationBook, int, int]] = []  # (book, lo, hi)
             regular_books: List[CompilationBook] = []
             for book in books:
-                covered = self._precompiled_count(book, series)
-                if covered > 0:
-                    precompiled.append((book, covered))
+                lo, hi = self._precompiled_range(book, series)
+                if hi > lo:
+                    precompiled.append((book, lo, hi))
                 else:
                     regular_books.append(book)
 
             if precompiled:
                 regular_count = len(regular_books)
                 # Берём предкомпиляцию с максимальным охватом
-                best_pre, best_count = max(precompiled, key=lambda t: t[1])
+                best_pre, best_lo, best_hi = max(precompiled, key=lambda t: t[2] - t[1])
+                best_count = best_hi - best_lo + 1
+                # Прочие предкомпиляции (менее полные) — на удаление
+                for book, _, _ in precompiled:
+                    if book is not best_pre:
+                        duplicate_paths.append(book.abs_path)
+
                 if best_count >= regular_count:
-                    # Предкомпиляция актуальна — остальные файлы лишние
+                    # 1. АКТУАЛЬНА — отдельные тома лишние
                     for book in regular_books:
                         duplicate_paths.append(book.abs_path)
-                    for book, _ in precompiled:
-                        if book is not best_pre:
-                            duplicate_paths.append(book.abs_path)
-                    # Группу пропускаем — компиляция уже существует
                     groups.append(CompilationGroup(
                         author=author,
                         series=series,
@@ -237,10 +240,35 @@ class FB2CompilerService:
                     ))
                     continue
                 else:
-                    # Предкомпиляция устарела — исключаем её
-                    for book, _ in precompiled:
-                        duplicate_paths.append(book.abs_path)
-            books = regular_books
+                    # Определяем, какие тома предкомпиляции присутствуют отдельно
+                    def _vol_num(b: CompilationBook) -> Optional[int]:
+                        """Номер тома из sort_key[1] если источник надёжен."""
+                        if b.sort_key and b.sort_key[0] == 0:
+                            return b.sort_key[1]
+                        return None
+
+                    pre_covered_individually = all(
+                        any(_vol_num(r) == v for r in regular_books)
+                        for v in range(best_lo, best_hi + 1)
+                    )
+
+                    if pre_covered_individually:
+                        # 3. ПОЛНОСТЬЮ УСТАРЕЛА — все её тома есть по отдельности
+                        duplicate_paths.append(best_pre.abs_path)
+                        books = regular_books
+                    else:
+                        # 2. ЧАСТИЧНО УСТАРЕЛА — включаем предкомпиляцию как источник,
+                        # тома, уже покрытые ею, помечаем как дубликаты
+                        covered_individually = [
+                            r for r in regular_books
+                            if (n := _vol_num(r)) is not None and best_lo <= n <= best_hi
+                        ]
+                        for r in covered_individually:
+                            duplicate_paths.append(r.abs_path)
+                        remaining = [r for r in regular_books if r not in covered_individually]
+                        books = [best_pre] + remaining
+            else:
+                books = regular_books
 
             # --- Фильтр 2: дедупликация по title (нормализованному) ----------
             # Из дублей оставляем первый по алфавиту путь (детерминированный выбор)
@@ -327,16 +355,16 @@ class FB2CompilerService:
                 return int(m.group(1))
         return None
 
-    def _precompiled_count(self, book: CompilationBook, series: str) -> int:
-        """Определить, является ли файл заранее скомпилированным сборником серии.
+    def _precompiled_range(self, book: CompilationBook, series: str) -> Tuple[int, int]:
+        """Определить диапазон томов, охватываемых предкомпилированным файлом.
 
-        Возвращает количество томов, охватываемых этим файлом, или 0 если файл
-        не является предкомпиляцией.
+        Возвращает (lo, hi) где lo и hi — первый и последний тома включительно.
+        Если файл не является предкомпиляцией, возвращает (0, 0).
 
         Критерии определения предкомпиляции:
-        1. series_number — диапазон вида "1-3": возвращает (max - min + 1).
-        2. stem/title содержит сервисное слово серии (Трилогия → 3 и т.п.)
-           в сочетании с именем серии.
+        1. series_number — диапазон вида "1-3": возвращает (1, 3).
+        2. Диапазон "N-M" в stem/title с привязкой к серии.
+        3. stem/title содержит сервисное слово (Трилогия → 3 тома) — lo=1, hi=count.
         """
         # Критерий 1: series_number — диапазон "N-M"
         sn = (book.record.series_number or '').strip()
@@ -345,7 +373,7 @@ class FB2CompilerService:
             if m:
                 lo, hi = int(m.group(1)), int(m.group(2))
                 if hi > lo:
-                    return hi - lo + 1
+                    return lo, hi
 
         series_lower = series.lower()
         series_words = [w for w in series_lower.split() if len(w) >= 4]
@@ -355,7 +383,6 @@ class FB2CompilerService:
             return not series_words or any(w in tl for w in series_words)
 
         # Критерий 2: диапазон "N-M" в имени файла (stem) или title
-        # Паттерны: "Варяг 1-3", "Книги 1-5", "Книги 6-14", "Компиляция. Книги 6-14"
         _RANGE_RE = re.compile(r'(\d+)\s*[-–—]\s*(\d+)', re.UNICODE)
         for candidate in (book.abs_path.stem, book.record.file_title or ''):
             if not _has_series_link(candidate):
@@ -364,16 +391,21 @@ class FB2CompilerService:
             if m:
                 lo, hi = int(m.group(1)), int(m.group(2))
                 if hi > lo:
-                    return hi - lo + 1
+                    return lo, hi
 
         # Критерий 3: stem/title содержит сервисное слово + признак серии
         text = (book.record.file_title or book.abs_path.stem).lower()
         for idx, kw in enumerate(self._SERIES_WORDS):
             if kw and kw.lower() in text:
                 if _has_series_link(text):
-                    return idx  # индекс == количество томов
+                    return 1, idx  # сервисное слово → предполагаем lo=1
 
-        return 0
+        return 0, 0
+
+    def _precompiled_count(self, book: CompilationBook, series: str) -> int:
+        """Обёртка для обратной совместимости. Возвращает hi - lo + 1 или 0."""
+        lo, hi = self._precompiled_range(book, series)
+        return (hi - lo + 1) if hi > lo else 0
 
     @classmethod
     def _normalize_title_key(cls, raw_title: str, series: str) -> str:
