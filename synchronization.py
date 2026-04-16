@@ -758,10 +758,15 @@ class SynchronizationService:
                     self.stats['files_moved'] += 1
 
                     # Patch FB2 metadata: author, series, book-title.
-                    # Автор: перезаписываем всегда (proposed_author — результат пайплайна).
+                    # Автор: перезаписываем только если исходных авторов < 3
+                    # (коллективные сборники не трогаем).
                     # Заголовок: если file_title ошибочен (содержит имя автора) или
                     # отличается от реального — записываем правильный из имени файла.
-                    patch_author = record.proposed_author or None
+                    orig_auth_count = len([
+                        a for a in re.split(r'[;,]+', record.metadata_authors or '')
+                        if a.strip()
+                    ])
+                    patch_author = record.proposed_author if orig_auth_count < 3 else None
                     patch_title = None
                     derived = self._derive_title_from_filename(record)
                     if derived:
