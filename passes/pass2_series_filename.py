@@ -399,7 +399,17 @@ class Pass2SeriesFilename:
                 def _is_strong_match(author: str, folder: str) -> bool:
                     a = author.lower().replace('ё', 'е')
                     f = folder.lower().replace('ё', 'е')
-                    return a in f or f in a
+                    if a in f or f in a:
+                        return True
+                    # Handle name-order variation (metadata "Имя Фамилия" vs folder "Фамилия Имя")
+                    # and multi-author strings: check if all folder words match any single author
+                    f_words = set(re.sub(r'[^\w]', ' ', f).split())
+                    if f_words:
+                        for single_author in re.split(r'[;,]', a):
+                            sa_words = set(single_author.strip().split())
+                            if sa_words and f_words == sa_words:
+                                return True
+                    return False
 
                 author_folder_idx = None
                 for i, part in enumerate(path_parts[:-1]):
@@ -946,10 +956,14 @@ class Pass2SeriesFilename:
 
         def _parse_folder_author(folder_name: str) -> str:
             """Попытаться распознать автора из имени папки, вернуть '' если не удалось."""
-            # Быстрая проверка через filename_blacklist — слова издателей/серий
+            # Быстрая проверка через filename_blacklist — слова издателей/серий.
+            # Используем word-boundary matching чтобы короткие записи ("СИ", "ЛП" и т.п.)
+            # не давали ложных срабатываний внутри слов (напр. "СИ" в "макСИм").
             folder_lower = folder_name.lower()
             for bl in self.filename_blacklist:
-                if bl.lower() in folder_lower:
+                bl_lower = bl.lower()
+                if re.search(r'(?<![а-яёa-z])' + re.escape(bl_lower) + r'(?![а-яёa-z])',
+                             folder_lower):
                     return ''
             author = parse_author_from_folder_name(
                 folder_name,
@@ -1000,7 +1014,19 @@ class Pass2SeriesFilename:
                     # проверяем что хотя бы одно слово из parsed_author присутствует в мете.
                     # Это отсекает ложные «авторы» вроде «Питер» (издательство в скобках),
                     # когда мета однозначно указывает на других людей.
-                    if record.metadata_authors:
+                    # ВАЛИДАЦИЯ ПРОТИВ МЕТАДАННЫХ пропускается когда мета содержит только
+                    # коллективный термин («Соавторство», «Сборник» и т.п.) — папка является
+                    # единственным авторитетным источником в таких случаях.
+                    _COLLECTIVE_TERMS = {"соавторство", "сборник", "[unknown]", "коллектив авторов"}
+                    _meta_is_collective = (
+                        record.metadata_authors and
+                        record.metadata_authors.strip().lower().replace('ё', 'е') in _COLLECTIVE_TERMS
+                    )
+                    _proposed_is_collective = (
+                        record.proposed_author and
+                        record.proposed_author.strip().lower().replace('ё', 'е') in _COLLECTIVE_TERMS
+                    )
+                    if record.metadata_authors and not _meta_is_collective and not _proposed_is_collective:
                         author_words = set(parsed_author.lower().split())
                         meta_words = set(re.sub(r'[;,]', ' ', record.metadata_authors.lower()).split())
                         if author_words and meta_words and not (author_words & meta_words):
