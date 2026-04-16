@@ -37,11 +37,15 @@ class FB2SAXHandler(xml.sax.handler.ContentHandler):
         self.in_middle_name = False
         self.in_last_name = False
         self.in_sequence = False
+        self.in_book_title = False
+        self.in_genre = False
 
         self.authors = []
         self.current_author = {}
         self.series_name = ""
         self.series_number = ""
+        self.book_title = ""
+        self.genres = []
 
         self.current_element = ""
         self.element_stack = []
@@ -70,6 +74,10 @@ class FB2SAXHandler(xml.sax.handler.ContentHandler):
                 self.series_name = attrs.get('name', '')
             if 'number' in attrs:
                 self.series_number = attrs.get('number', '')
+        elif self.in_title_info and local_name == 'book-title':
+            self.in_book_title = True
+        elif self.in_title_info and local_name == 'genre':
+            self.in_genre = True
 
     def endElement(self, name):
         local_name = name.split(':', 1)[-1] if ':' in name else name
@@ -89,6 +97,10 @@ class FB2SAXHandler(xml.sax.handler.ContentHandler):
             self.in_last_name = False
         elif local_name == 'sequence':
             self.in_sequence = False
+        elif local_name == 'book-title':
+            self.in_book_title = False
+        elif local_name == 'genre':
+            self.in_genre = False
 
         if self.element_stack:
             self.element_stack.pop()
@@ -103,6 +115,12 @@ class FB2SAXHandler(xml.sax.handler.ContentHandler):
             self.current_author['middle_name'] = self.current_author.get('middle_name', '') + content
         elif self.in_last_name:
             self.current_author['last_name'] = self.current_author.get('last_name', '') + content
+        elif self.in_book_title:
+            self.book_title += content
+        elif self.in_genre:
+            g = content.strip()
+            if g and g not in self.genres:
+                self.genres.append(g)
 
 
 class FB2SAXExtractor:
@@ -1193,6 +1211,46 @@ class FB2SAXExtractor:
 
         # Больше 2 слов - сложное имя, оставить как есть (Мария-Антуанетта и т.п.)
         return author
+
+    def _extract_all_metadata_at_once(self, fb2_path: Path) -> dict:
+        """Извлечь все метаданные FB2 за один проход SAX парсера.
+
+        Returns:
+            dict с ключами: title, authors, series, series_number, genre
+        """
+        try:
+            handler = FB2SAXHandler()
+            encoding = self._detect_encoding(fb2_path)
+            if not encoding:
+                encoding = 'utf-8'
+
+            parser = xml.sax.make_parser()
+            parser.setContentHandler(handler)
+            with open(fb2_path, 'r', encoding=encoding, errors='ignore') as f:
+                parser.parse(f)
+
+            # Формируем строку авторов
+            authors_parts = []
+            for author in handler.authors:
+                parts = [
+                    author.get('first_name', '').strip(),
+                    author.get('middle_name', '').strip(),
+                    author.get('last_name', '').strip(),
+                ]
+                name = ' '.join(p for p in parts if p)
+                if name:
+                    authors_parts.append(name)
+            authors_str = '; '.join(authors_parts)
+
+            return {
+                'title': handler.book_title.strip() or '',
+                'authors': authors_str,
+                'series': handler.series_name.strip(),
+                'series_number': handler.series_number.strip(),
+                'genre': ', '.join(handler.genres),
+            }
+        except Exception:
+            return {'title': '', 'authors': '', 'series': '', 'series_number': '', 'genre': ''}
 
     def reload_config(self):
         """
