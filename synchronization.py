@@ -757,17 +757,23 @@ class SynchronizationService:
                     self._log(f"  ✓ Успешно перемещён")
                     self.stats['files_moved'] += 1
 
-                    # Patch FB2 metadata tags (author + series) in the moved file.
-                    # Books with >=3 original authors: do not touch author tags.
-                    orig_auth_count = len([
-                        a for a in re.split(r'[;,]+', record.metadata_authors or '')
-                        if a.strip()
-                    ])
-                    patch_author = record.proposed_author if orig_auth_count < 3 else None
+                    # Patch FB2 metadata: author, series, book-title.
+                    # Автор: перезаписываем всегда (proposed_author — результат пайплайна).
+                    # Заголовок: если file_title ошибочен (содержит имя автора) или
+                    # отличается от реального — записываем правильный из имени файла.
+                    patch_author = record.proposed_author or None
+                    patch_title = None
+                    derived = self._derive_title_from_filename(record)
+                    if derived:
+                        if self._is_title_erroneous(record.file_title, record.proposed_author):
+                            patch_title = derived
+                        elif (record.file_title or '').strip().lower() != derived.lower():
+                            patch_title = derived
                     self._patch_fb2_tags(
                         target_file,
                         patch_author,
                         record.proposed_series or "",
+                        patch_title,
                     )
 
                     # Update record with new path (relative to library_path)
@@ -1015,13 +1021,59 @@ class SynchronizationService:
     # FB2 tag patching
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _derive_title_from_filename(record) -> Optional[str]:
+        """Извлечь чистое название книги из имени файла.
+
+        Паттерны:
+        - "Автор - Название.fb2" → "Название"
+        - "01_Название.fb2" → "Название"
+        - "Название.fb2" → "Название"
+        """
+        import os
+        stem = os.path.splitext(os.path.basename(record.file_path))[0]
+
+        # Убираем ведущий числовой префикс: "01_", "1. ", "01 - "
+        stem = re.sub(r'^\d{1,4}[\s._\-]+', '', stem).strip()
+
+        # Если есть паттерн "Автор - Название", берём часть после " - "
+        if ' - ' in stem:
+            parts = stem.split(' - ', 1)
+            candidate = parts[1].strip()
+            if candidate:
+                return candidate
+
+        return stem.strip() if stem.strip() else None
+
+    @staticmethod
+    def _is_title_erroneous(file_title: str, proposed_author: str) -> bool:
+        """Определить, является ли <book-title> ошибочным (содержит имя автора).
+
+        Сравниваем нормализованные слова: если слова из proposed_author
+        покрывают большинство слов title — это не настоящий заголовок.
+        """
+        if not file_title or not proposed_author:
+            return False
+
+        def _norm(s: str) -> set:
+            return {w.lower().replace('ё', 'е') for w in re.split(r'\W+', s) if len(w) >= 3}
+
+        title_words = _norm(file_title)
+        author_words = _norm(proposed_author)
+        if not title_words:
+            return False
+        overlap = title_words & author_words
+        # Если ≥70% слов заголовка совпадают со словами автора — заголовок ошибочный
+        return len(overlap) / len(title_words) >= 0.7
+
     def _patch_fb2_tags(
         self,
         fb2_path: Path,
         proposed_author: Optional[str],
         proposed_series: str,
+        proposed_title: Optional[str] = None,
     ) -> None:
-        """Overwrite <author> and <sequence> tags in a FB2 file.
+        """Overwrite <author>, <sequence> and <book-title> tags in a FB2 file.
 
         The file is read and written back with its **original** encoding
         (detected from the XML declaration or trial-decoded).
@@ -1032,8 +1084,10 @@ class SynchronizationService:
                              ``None`` — leave existing <author> tags untouched.
             proposed_series: Series name to write into <sequence name="…"/>.
                              Empty string — leave existing <sequence> untouched.
+            proposed_title:  Book title to write into <book-title>.
+                             ``None`` — leave existing <book-title> untouched.
         """
-        if proposed_author is None and not proposed_series:
+        if proposed_author is None and not proposed_series and proposed_title is None:
             return
 
         try:
@@ -1167,6 +1221,21 @@ class SynchronizationService:
                     ti_body = ti_body[:seq_m.start()] + new_seq + ti_body[seq_m.end():]
                 else:
                     ti_body = ti_body.rstrip() + '\n    ' + new_seq + '\n  '
+
+            # ---- 3. patch book-title tag ----
+            if proposed_title:
+                import html as _html_mod
+                safe_title = _html_mod.escape(proposed_title)
+                bt_m = re.search(
+                    r'<(?:fb:)?book-title>.*?</(?:fb:)?book-title>',
+                    ti_body, re.DOTALL,
+                )
+                new_bt = f'<{ns}book-title>{safe_title}</{ns}book-title>'
+                if bt_m:
+                    ti_body = ti_body[:bt_m.start()] + new_bt + ti_body[bt_m.end():]
+                else:
+                    # Вставляем после блока авторов
+                    ti_body = ti_body.rstrip() + '\n    ' + new_bt + '\n  '
 
             # ---- reconstruct content ----
             new_ti = ti_open + ti_body + ti_close
