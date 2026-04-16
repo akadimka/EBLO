@@ -843,6 +843,12 @@ class Pass2SeriesFilename:
         # то ВСЕ файлы в этой папке должны получить одинаковую серию из папки
         self._apply_folder_consensus(records)
         
+        # 🔑 УНИФИКАЦИЯ АВТОРА внутри папки
+        # Если в папке есть файлы с folder_dataset — их автор применяется ко всем
+        # файлам в папке с source='metadata_folder_confirmed' (исправляет файлы
+        # с испорченными метаданными, которые не смогли пройти валидацию propagate).
+        self._unify_folder_author_source(records)
+
         # 🔑 УНИФИКАЦИЯ источника серии внутри папки
         # Если хотя бы один файл в папке получил folder_hierarchy — значит папка
         # является авторитетом для всей папки. Все metadata_folder_confirmed файлы
@@ -1057,21 +1063,33 @@ class Pass2SeriesFilename:
 
         for folder, group in folder_groups.items():
             # Ищем файлы, подтверждённые папкой
-            confirmed_records = [
+            # Наивысший приоритет: folder_dataset — явно распознанная папка автора.
+            # Если в папке есть хотя бы один такой файл, используем его автора как канонического.
+            folder_dataset_records = [
                 r for r in group
-                if r.author_source == "metadata_folder_confirmed" and r.proposed_author
+                if r.author_source == "folder_dataset" and r.proposed_author
             ]
-            if not confirmed_records:
-                continue
-
-            # Берём канонического автора из подтверждённых записей (режим большинства)
-            author_counts: dict = {}
-            for r in confirmed_records:
-                author_counts[r.proposed_author] = author_counts.get(r.proposed_author, 0) + 1
-            canonical_author = max(author_counts, key=author_counts.get)
+            if folder_dataset_records:
+                # Большинство среди folder_dataset
+                author_counts: dict = {}
+                for r in folder_dataset_records:
+                    author_counts[r.proposed_author] = author_counts.get(r.proposed_author, 0) + 1
+                canonical_author = max(author_counts, key=author_counts.get)
+            else:
+                # Fallback: большинство среди metadata_folder_confirmed
+                confirmed_records = [
+                    r for r in group
+                    if r.author_source == "metadata_folder_confirmed" and r.proposed_author
+                ]
+                if not confirmed_records:
+                    continue
+                author_counts = {}
+                for r in confirmed_records:
+                    author_counts[r.proposed_author] = author_counts.get(r.proposed_author, 0) + 1
+                canonical_author = max(author_counts, key=author_counts.get)
 
             # Применяем ко всем файлам в папке с source='metadata' или 'metadata_folder_confirmed'
-            # (чтобы выровнять и уже подтверждённые папкой, но с разными формами имени)
+            # (folder_dataset не трогаем — они уже точно определены)
             for record in group:
                 if record.author_source in ("metadata", "metadata_folder_confirmed") and record.proposed_author:
                     record.proposed_author = canonical_author
@@ -1102,24 +1120,23 @@ class Pass2SeriesFilename:
             if len(authors_in_folder) > 1:
                 continue
 
-            # Ищем файлы, у которых папка переопределила мету (авторитетные источники)
+            # Ищем файлы, у которых папка переопределила мету (авторитетные источники).
+            # folder_metadata_confirmed также считается авторитетным: папка и мета согласны.
+            STRONG_SOURCES = {"folder_hierarchy", "folder_dataset", "folder_metadata_confirmed"}
             folder_hierarchy_records = [
                 r for r in group
-                if r.series_source in ("folder_hierarchy", "folder_dataset") and r.proposed_series
+                if r.series_source in STRONG_SOURCES and r.proposed_series
             ]
             if not folder_hierarchy_records:
                 continue
 
-            # Каноническая серия — из folder_hierarchy/folder_dataset файлов (мажоритарное голосование)
+            # Каноническая серия — из авторитетных источников (мажоритарное голосование)
             series_counts: dict = {}
             for r in folder_hierarchy_records:
                 series_counts[r.proposed_series] = series_counts.get(r.proposed_series, 0) + 1
             canonical_series = max(series_counts, key=series_counts.get)
 
-            # Применяем ко ВСЕМ файлам в папке, у которых источник НЕ является
-            # авторитетным (т.е. не folder_hierarchy и не folder_dataset).
-            # Любой другой источник — слабее явного имени папки.
-            STRONG_SOURCES = {"folder_hierarchy", "folder_dataset"}
+            # Применяем ко ВСЕМ файлам в папке, у которых источник не является авторитетным.
             for record in group:
                 if record.series_source not in STRONG_SOURCES:
                     record.proposed_series = canonical_series

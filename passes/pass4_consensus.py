@@ -329,8 +329,10 @@ class Pass4Consensus:
             for series_base, source_records in series_base_map.items():
                 # For each record without extracted_series_candidate
                 for target_record in author_records:
-                    if target_record.proposed_series and target_record.series_source not in ("metadata", "metadata_folder_confirmed", "folder_metadata_confirmed"):
-                        # Already has series from filename, other source, or previous consensus — skip
+                    if target_record.proposed_series and target_record.series_source not in ("metadata", "metadata_folder_confirmed"):
+                        # Already has series from a folder/filename/confirmed source — skip.
+                        # folder_metadata_confirmed = папка и мета согласны → авторитетный источник,
+                        # не перезаписываем author-consensus.
                         continue
                     
                     if target_record.extracted_series_candidate:
