@@ -1088,10 +1088,16 @@ class Pass2SeriesFilename:
                     author_counts[r.proposed_author] = author_counts.get(r.proposed_author, 0) + 1
                 canonical_author = max(author_counts, key=author_counts.get)
 
-            # Применяем ко всем файлам в папке с source='metadata' или 'metadata_folder_confirmed'
-            # (folder_dataset не трогаем — они уже точно определены)
+            # Применяем ко всем файлам в папке с source='metadata', 'metadata_folder_confirmed'
+            # или 'filename' (если канонический автор из folder_dataset).
+            # folder_dataset не трогаем — они уже точно определены.
+            # 'filename': автор мог быть ошибочно извлечён из имени файла (напр. из названия
+            # серии в паттерне "Серия - Подсерия"), переопределяем авторитетным folder_dataset.
+            _overrideable = {"metadata", "metadata_folder_confirmed"}
+            if folder_dataset_records:
+                _overrideable.add("filename")
             for record in group:
-                if record.author_source in ("metadata", "metadata_folder_confirmed") and record.proposed_author:
+                if record.author_source in _overrideable and record.proposed_author:
                     record.proposed_author = canonical_author
                     record.author_source = "metadata_folder_confirmed"
 
