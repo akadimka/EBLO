@@ -43,7 +43,13 @@ class MetadataCache:
                     metadata_json, cached_hash = row
                     # Verify hash hasn't changed (extra safety)
                     if self._calculate_hash(file_path) == cached_hash:
-                        return json.loads(metadata_json)
+                        meta = json.loads(metadata_json)
+                        # Не возвращать запись где и авторы и заголовок пустые —
+                        # это признак сбоя парсинга (битая кодировка и т.п.).
+                        # Такой файл будет перечитан и результат перекэширован.
+                        if not meta.get('authors') and not meta.get('title'):
+                            return None
+                        return meta
         except (OSError, json.JSONDecodeError):
             pass
         return None
