@@ -1263,13 +1263,14 @@ class MainWindow(tk.Tk):
             
             self.logger.log(f'Жанр "{selected_genre}" присвоен {count} файлам в "{path_text}"')
 
-            # Проставить галочки в столбце жанра
+            # Проставить галочки и сохранить genre_assignments
             def _mark():
-                for it in tree_items:
+                for it, fp in zip(tree_items, folder_paths):
                     try:
                         self.folder_tree.set(it, 'genre_mark', '✓')
                     except Exception:
                         pass
+                    self._store_genre_for_item(it, fp, selected_genre)
             self.after(0, _mark)
             
             dialog.destroy()
@@ -1398,20 +1399,9 @@ class MainWindow(tk.Tk):
     
     def _store_genre_for_item(self, tree_item: str, path: str, genre: str):
         """Сохранить выбранный жанр для элемента дерева."""
-        # Сохраняем в памяти приложения (можно расширить чтобы сохранять в конфиг)
         if not hasattr(self, 'genre_assignments'):
             self.genre_assignments = {}
-        
         self.genre_assignments[path] = genre
-        
-        # Обновить текст элемента в дереве (добавить жанр)
-        try:
-            current_text = self.folder_tree.item(tree_item, 'text')
-            if ' [' not in current_text:  # Если еще не добавили жанр
-                new_text = f"{current_text} [{genre}]"
-                self.folder_tree.item(tree_item, text=new_text)
-        except:
-            pass
 
     def _on_closing(self):
         """Обработчик закрытия окна."""
