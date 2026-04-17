@@ -1055,8 +1055,14 @@ class Pass2Filename:
         
         # Pattern 1: "(СИ)" or variations at the end
         cleaned = re.sub(r'\s*\(СИ\)\s*$', '', cleaned, flags=re.IGNORECASE)
-        
-        # Pattern 2: Other known meta-patterns that shouldn't create extra blocks
+
+        # Pattern 2: Collection/anthology markers at the end — "(сборник)", "(антология)" etc.
+        # These are informational tags that do NOT represent a separate meaningful block.
+        cleaned = re.sub(r'\s*\(сборник[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\(антология[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\(omnibus[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
+
+        # Pattern 3: Other known meta-patterns that shouldn't create extra blocks
         # Remove tags/meta in parens at the end
         cleaned = re.sub(r'\s*\([^)]*(?:издание|изд\.)[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*\(пер\.\s*[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
