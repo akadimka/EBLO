@@ -431,6 +431,9 @@ class MainWindow(tk.Tk):
 
     def _on_folder_changed(self, *args):
         """Обработчик изменения выбранной папки (дебаунс: 400 мс)."""
+        folder = self.selected_folder.get()
+        if folder and os.path.isdir(folder):
+            self.settings.set_last_scan_path(folder)
         # Отменить предыдущий отложенный вызов, если есть
         if hasattr(self, '_folder_change_after_id') and self._folder_change_after_id:
             self.after_cancel(self._folder_change_after_id)
