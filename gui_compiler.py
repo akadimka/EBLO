@@ -97,17 +97,20 @@ class CompilerDialog:
         ttk.Label(top, textvariable=self._status_var,
                   foreground='#0067C0').pack(side=tk.RIGHT, padx=5)
 
-        # ── Таблица групп ─────────────────────────────────────────────
-        frm = ttk.Frame(self._win, padding='5 2 5 0')
-        frm.pack(fill=tk.BOTH, expand=True)
-        frm.rowconfigure(0, weight=1)
-        frm.columnconfigure(0, weight=1)
+        # ── Перетаскиваемый разделитель между таблицами ───────────────
+        paned = ttk.PanedWindow(self._win, orient=tk.VERTICAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=(2, 0))
+
+        # ── Верхняя панель: таблица групп ────────────────────────────
+        top_frm = ttk.Frame(paned)
+        top_frm.rowconfigure(0, weight=1)
+        top_frm.columnconfigure(0, weight=1)
 
         cols = ('author', 'series', 'books', 'order', 'range')
         self._tree = ttk.Treeview(
-            frm, columns=cols, show='headings', selectmode='extended',
+            top_frm, columns=cols, show='headings', selectmode='extended',
         )
-        vsb = ttk.Scrollbar(frm, orient=tk.VERTICAL, command=self._tree.yview)
+        vsb = ttk.Scrollbar(top_frm, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
 
         self._tree.heading('author', text='Автор')
@@ -130,16 +133,18 @@ class CompilerDialog:
         vsb.grid(row=0, column=1, sticky='ns')
 
         self._tree.bind('<ButtonRelease-1>', self._on_select)
+        paned.add(top_frm, weight=3)
 
-        # ── Детали выбранной группы ───────────────────────────────────
-        det_lf = ttk.LabelFrame(self._win, text='Книги выбранной группы', padding=4)
-        det_lf.pack(fill=tk.BOTH, padx=5, pady=3, ipady=2)
+        # ── Нижняя панель: детали выбранной группы ───────────────────
+        bot_frm = ttk.LabelFrame(paned, text='Книги выбранной группы', padding=4)
+        bot_frm.rowconfigure(0, weight=1)
+        bot_frm.columnconfigure(0, weight=1)
 
         det_cols = ('num', 'title', 'file', 'sort_src', 'sn')
         self._det_tree = ttk.Treeview(
-            det_lf, columns=det_cols, show='headings', height=5,
+            bot_frm, columns=det_cols, show='headings',
         )
-        det_vsb = ttk.Scrollbar(det_lf, orient=tk.VERTICAL,
+        det_vsb = ttk.Scrollbar(bot_frm, orient=tk.VERTICAL,
                                  command=self._det_tree.yview)
         self._det_tree.configure(yscrollcommand=det_vsb.set)
 
@@ -155,8 +160,10 @@ class CompilerDialog:
         self._det_tree.column('sort_src', width=180, minwidth=120)
         self._det_tree.column('sn',       width=60,  minwidth=40, anchor='center')
 
-        self._det_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        det_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._det_tree.grid(row=0, column=0, sticky='nsew')
+        det_vsb.grid(row=0, column=1, sticky='ns')
+
+        paned.add(bot_frm, weight=1)
 
         # ── Нижняя панель: опции + кнопки ────────────────────────────
         bot = ttk.Frame(self._win, padding='5 3 5 5')
