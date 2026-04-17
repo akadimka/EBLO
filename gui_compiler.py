@@ -55,7 +55,28 @@ class CompilerDialog:
         self._win = tk.Toplevel(parent)
         self._win.title('Компиляция серий')
         self._win.resizable(True, True)
-        self._win.geometry('900x620')
+
+        # Позиционируем окно относительно родительского (тот же монитор)
+        try:
+            from window_persistence import setup_window_persistence
+            _W, _H = 900, 620
+            try:
+                _settings = getattr(parent, 'settings', None) or getattr(
+                    parent.master, 'settings', None)
+            except Exception:
+                _settings = None
+
+            if _settings is not None:
+                setup_window_persistence(
+                    self._win, 'compiler_dialog', _settings,
+                    f'{_W}x{_H}+100+100', parent_window=parent,
+                )
+            else:
+                # Нет settings — просто центрируем на родителе
+                from window_persistence import _default_geometry_near_parent
+                self._win.geometry(_default_geometry_near_parent(parent, _W, _H))
+        except Exception:
+            self._win.geometry('900x620')
 
         self._build_ui()
         self._win.after(100, self._load_groups)

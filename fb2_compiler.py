@@ -136,13 +136,20 @@ class FB2CompilerService:
     def _series_suffix(cls, book_count: int, volume_range: str) -> str:
         """Вернуть суффикс для имени файла компиляции.
 
-        - 2..10 книг: используем сервисное слово (Дилогия, Трилогия…)
+        - 2..10 конечных томов: используем сервисное слово (Дилогия, Трилогия…)
         - больше 10: «т. 1-17»
         - если volume_range пустой: просто «Сборник»
+
+        ВАЖНО: n вычисляется из диапазона томов (volume_range), а не из количества
+        исходных файлов (book_count), чтобы предкомпиляция, покрывающая несколько
+        томов, считалась корректно (например, файл 1-4 + отдельный том 5 = 5 томов,
+        а не 2 исходных файла → «Пенталогия», а не «Дилогия»).
         """
         if not volume_range:
             return 'Сборник'
-        n = book_count
+        # Количество конечных томов из диапазона
+        rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', volume_range.strip())
+        n = int(rng.group(2)) - int(rng.group(1)) + 1 if rng else book_count
         if 2 <= n < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n]:
             return cls._SERIES_WORDS[n]
         return f'т. {volume_range}'
@@ -227,17 +234,11 @@ class FB2CompilerService:
                         duplicate_paths.append(book.abs_path)
 
                 if best_count >= regular_count:
-                    # 1. АКТУАЛЬНА — отдельные тома лишние
+                    # 1. АКТУАЛЬНА — компиляция уже сделана, новая не нужна.
+                    # Отдельные тома, уже покрытые компиляцией, — на удаление.
+                    # В список компиляции НЕ добавляем: один файл ≠ задача компиляции.
                     for book in regular_books:
                         duplicate_paths.append(book.abs_path)
-                    groups.append(CompilationGroup(
-                        author=author,
-                        series=series,
-                        books=[best_pre],
-                        order_determined=True,
-                        volume_range='',
-                        duplicate_paths=duplicate_paths,
-                    ))
                     continue
                 else:
                     # Определяем, какие тома предкомпиляции присутствуют отдельно
