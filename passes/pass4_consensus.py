@@ -1017,6 +1017,19 @@ class Pass4Consensus:
                         stem = Path(rec.file_path).stem.lower().replace('ё', 'е')
                         if best_lower not in stem:
                             continue
+                # Не применяем если серия в blacklist (издательская/жанровая метка)
+                _bl_cands = [bl.lower() for bl in (self.settings.get_list('filename_blacklist') if self.settings else [])]
+                _best_lower_bl = best_clean.lower()
+                import re as _re_bl
+
+                def _bl_hit(bl, text):
+                    if len(bl) < 4:
+                        return bool(_re_bl.search(r'(?<![а-яёa-z])' + _re_bl.escape(bl) + r'(?![а-яёa-z])', text, _re_bl.IGNORECASE))
+                    return bl in text
+
+                if any(_bl_hit(bl, _best_lower_bl) for bl in _bl_cands):
+                    continue  # издательская серия — не применяем
+
                 # Исправляем
                 rec.proposed_series = best_clean
                 rec.series_source = "folder_meta_consensus"
