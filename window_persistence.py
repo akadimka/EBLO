@@ -64,8 +64,18 @@ def _register_app_window(window: tk.Tk) -> None:
 def _setup_taskbar(window: tk.Tk) -> None:
     """Гарантировать, что кнопка окна в Панели задач появится на мониторе окна.
 
-    Добавляет WS_EX_APPWINDOW и вызывает SetWindowPos(SWP_FRAMECHANGED) чтобы
-    Windows пересмотрел, к какому монитору отнести кнопку на Панели задач.
+    Стратегия:
+      1. Убираем owner-связь (GWL_HWNDPARENT = 0) — пока owner есть, Windows
+         всегда ставит кнопку на монитор owner'а, игнорируя позицию окна.
+      2. Добавляем WS_EX_APPWINDOW — окно получает собственную кнопку.
+      3. SWP_FRAMECHANGED — Shell Explorer обновляет запись о кнопке.
+
+    Вызывать ДО того как окно становится видимым (alpha=0 / withdrawn),
+    чтобы Shell зарегистрировал кнопку уже без owner'а и на нужном мониторе.
+
+    Групповое поведение (lift-all при фокусе) обеспечивается через
+    _register_app_window / FocusIn — owner для этого не нужен.
+
     Безопасно на не-Windows: исключения перехватываются.
     """
     try:
@@ -77,13 +87,17 @@ def _setup_taskbar(window: tk.Tk) -> None:
         window.update_idletasks()
         hwnd = int(window.wm_frame(), 16)
 
+        # 1. Убрать owner — без этого кнопка следует за owner'ом на его монитор
+        GWL_HWNDPARENT = -8
+        u32.SetWindowLongW(hwnd, GWL_HWNDPARENT, 0)
+
+        # 2. Добавить WS_EX_APPWINDOW — собственная кнопка в панели задач
         GWL_EXSTYLE     = -20
         WS_EX_APPWINDOW = 0x00040000
         current = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
         u32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_APPWINDOW)
 
-        # Принудительно обновить стиль — Windows переназначит кнопку
-        # на монитор, где фактически находится окно в данный момент.
+        # 3. Сообщить Shell'у об изменении стиля
         SWP_NOMOVE       = 0x0002
         SWP_NOSIZE       = 0x0001
         SWP_NOZORDER     = 0x0004
@@ -422,6 +436,9 @@ def setup_window_persistence(window: tk.Tk,
     restore_window_geometry(window, window_name, settings_manager,
                             default_geometry, parent_window=parent_window)
     window.update_idletasks()
+    # Убираем owner и ставим WS_EX_APPWINDOW пока окно прозрачное —
+    # Shell зарегистрирует кнопку без owner'а и на правильном мониторе.
+    _setup_taskbar(window)
     _register_app_window(window)
 
     # Показываем уже в правильной позиции
@@ -429,14 +446,10 @@ def setup_window_persistence(window: tk.Tk,
         import sys
         if sys.platform == 'win32':
             window.wm_attributes('-alpha', 1)
-            window.update_idletasks()
-            # После показа окна на целевом мониторе — обновляем кнопку панели задач
-            _setup_taskbar(window)
             return
     except Exception:
         pass
     window.deiconify()
-    _setup_taskbar(window)
 
     def on_close() -> None:
         save_window_geometry(window, window_name, settings_manager)
@@ -476,20 +489,17 @@ def create_toplevel_with_persistence(parent: tk.Tk,
     restore_window_geometry(dlg, window_name, settings_manager,
                             default_geometry, parent_window=parent)
     dlg.update_idletasks()
+    _setup_taskbar(dlg)
     _register_app_window(dlg)
 
     try:
         import sys
         if sys.platform == 'win32':
             dlg.wm_attributes('-alpha', 1)
-            dlg.update_idletasks()
-            _setup_taskbar(dlg)
         else:
             dlg.deiconify()
-            _setup_taskbar(dlg)
     except Exception:
         dlg.deiconify()
-        _setup_taskbar(dlg)
 
     def on_close() -> None:
         save_window_geometry(dlg, window_name, settings_manager)
