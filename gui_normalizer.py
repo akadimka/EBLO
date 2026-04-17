@@ -471,21 +471,23 @@ class NamesDialog:
 class FemaleAuthorsDialog:
     """Окно 'Великомученницы': файлы, у которых все авторы — женщины."""
 
-    def __init__(self, parent, rows, work_dir=None):
+    def __init__(self, parent, rows, work_dir=None, settings_manager=None):
         """
         Args:
             rows: список кортежей (file_path, proposed_author),
                   file_path — относительный путь от work_dir
             work_dir: Path — корневая рабочая папка (граница удаления)
+            settings_manager: SettingsManager для позиционирования окна
         """
         from pathlib import Path as _Path
         self.work_dir = _Path(work_dir) if work_dir else None
         self._rows = list(rows)
         self.top = tk.Toplevel(parent)
+        self.top.withdraw()
         self.top.title("Великомученницы")
         try:
             from window_persistence import setup_window_persistence
-            _settings = getattr(parent, 'settings', None) or getattr(
+            _settings = settings_manager or getattr(parent, 'settings', None) or getattr(
                 getattr(parent, 'master', None), 'settings', None)
             if _settings is not None:
                 setup_window_persistence(self.top, 'female_authors_dialog', _settings,
@@ -493,8 +495,10 @@ class FemaleAuthorsDialog:
             else:
                 from window_persistence import _default_geometry_near_parent
                 self.top.geometry(_default_geometry_near_parent(parent, 1000, 500))
+                self.top.deiconify()
         except Exception:
             self.top.geometry('1000x500')
+            self.top.deiconify()
         self._build_ui()
 
     def _build_ui(self):
@@ -1272,7 +1276,7 @@ class CSVNormalizerApp:
                     rows.append((rec.file_path, combined))
 
             self.root.after(0, lambda: self.progress_var.set("Готово"))
-            self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows, work_dir))
+            self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows, work_dir, settings_manager=self.settings_manager))
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -1317,7 +1321,7 @@ class CSVNormalizerApp:
 
             work_dir = self.folder_path.get()
             self.root.after(0, lambda: self.progress_var.set(f"Найдено: {len(rows)} файлов"))
-            self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows, work_dir))
+            self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows, work_dir, settings_manager=self.settings_manager))
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
