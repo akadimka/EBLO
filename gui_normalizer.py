@@ -93,9 +93,16 @@ class NamesDialog:
 
         # Полноценное окно (не диалог): без transient/grab_set → все кнопки хрома
         self.top = tk.Toplevel(parent)
+        self.top.withdraw()
         self.top.title("Имена авторов")
-        self.top.geometry("960x580")
         self.top.resizable(True, True)
+        try:
+            from window_persistence import setup_window_persistence
+            setup_window_persistence(self.top, 'names_dialog', settings_manager,
+                                     '960x580+100+100', parent_window=parent)
+        except Exception:
+            self.top.geometry('960x580')
+            self.top.deiconify()
 
         # Данные строк: (source, author, name_var, gender_var, file_path)
         self._row_data = []
