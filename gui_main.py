@@ -30,7 +30,7 @@ except Exception:
     from .genre_assign import assign_genre_threaded
 
 # Window persistence
-from window_persistence import save_window_geometry, restore_window_geometry
+from window_persistence import save_window_geometry, restore_window_geometry, _register_app_window
 from window_manager import get_window_manager
 
 # Тема
@@ -100,8 +100,9 @@ class MainWindow(tk.Tk):
         self.settings.auto_init_file_paths()
         
         # Восстановление позиции/размера окна
-        restore_window_geometry(self, 'main', self.settings, 
+        restore_window_geometry(self, 'main', self.settings,
                               default_geometry='1000x700+100+50')
+        _register_app_window(self)  # регистрируем в группе окон приложения
 
         # Загружаем файл жанров из конфига (если он там сохранен)
         genres_file = self.settings.get_genres_file_path()

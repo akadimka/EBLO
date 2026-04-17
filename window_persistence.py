@@ -14,15 +14,59 @@ from typing import Optional, Tuple
 # Virtual screen helpers (multi-monitor)
 # ---------------------------------------------------------------------------
 
-def _detach_from_owner(window: tk.Tk) -> None:
-    """Remove Win32 owner relationship so taskbar button appears on window's monitor.
+# ---------------------------------------------------------------------------
+# Application window group registry
+# ---------------------------------------------------------------------------
+# Все окна приложения регистрируются здесь в порядке открытия.
+# При активации любого окна все остальные поднимаются, активированное — наверх.
 
-    By default tkinter Toplevel windows are owned by the main Tk window, which
-    makes Windows place the taskbar button on the *owner's* monitor regardless
-    of where the child window is actually displayed.  Clearing GWL_HWNDPARENT
-    lets the Shell track the button to the window's own monitor.
+_app_windows: list = []
 
-    Safe to call on non-Windows: the try/except silences any errors.
+
+def _register_app_window(window: tk.Tk) -> None:
+    """Зарегистрировать окно в группе приложения."""
+    if window not in _app_windows:
+        _app_windows.append(window)
+
+    def on_focus_in(event) -> None:
+        # Реагируем только на фокус самого окна, не дочерних виджетов
+        if event.widget is not window:
+            return
+        # Переставить окно в конец (самое свежее)
+        try:
+            _app_windows.remove(window)
+        except ValueError:
+            pass
+        _app_windows.append(window)
+        # Поднять все окна снизу вверх: старые первые, новое последним (поверх)
+        for win in list(_app_windows):
+            try:
+                if win is not window and win.winfo_exists():
+                    win.lift()
+            except Exception:
+                pass
+        try:
+            window.lift()
+        except Exception:
+            pass
+
+    def on_destroy(event) -> None:
+        if event.widget is window:
+            try:
+                _app_windows.remove(window)
+            except ValueError:
+                pass
+
+    window.bind('<FocusIn>',  on_focus_in,  add=True)
+    window.bind('<Destroy>',  on_destroy,   add=True)
+
+
+def _setup_taskbar(window: tk.Tk) -> None:
+    """Гарантировать, что кнопка окна в Панели задач появится на мониторе окна.
+
+    Добавляет стиль WS_EX_APPWINDOW, не трогая owner-связь (она нужна для
+    группировки окон приложения при переключении через Панель задач).
+    Безопасно на не-Windows: исключения перехватываются.
     """
     try:
         import sys
@@ -30,10 +74,11 @@ def _detach_from_owner(window: tk.Tk) -> None:
             return
         import ctypes
         window.update_idletasks()
-        # wm_frame() returns the HWND of the top-level decoration frame as a hex string
         hwnd = int(window.wm_frame(), 16)
-        GWL_HWNDPARENT = -8
-        ctypes.windll.user32.SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, 0)
+        GWL_EXSTYLE    = -20
+        WS_EX_APPWINDOW = 0x00040000
+        current = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current | WS_EX_APPWINDOW)
     except Exception:
         pass
 
@@ -328,7 +373,8 @@ def setup_window_persistence(window: tk.Tk,
 
     restore_window_geometry(window, window_name, settings_manager,
                             default_geometry, parent_window=parent_window)
-    _detach_from_owner(window)
+    _setup_taskbar(window)
+    _register_app_window(window)
 
     # Показываем уже в правильной позиции
     window.deiconify()
@@ -361,7 +407,8 @@ def create_toplevel_with_persistence(parent: tk.Tk,
 
     restore_window_geometry(dlg, window_name, settings_manager,
                             default_geometry, parent_window=parent)
-    _detach_from_owner(dlg)
+    _setup_taskbar(dlg)
+    _register_app_window(dlg)
     dlg.deiconify()
 
     def on_close() -> None:
