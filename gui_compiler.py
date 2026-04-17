@@ -304,43 +304,16 @@ class CompilerDialog:
 
         try:
             try:
-                from precache import Precache
-                from passes.pass1_read_files import Pass1ReadFiles
-                from passes.pass2_filename import Pass2Filename
-                from passes.pass2_fallback import Pass2Fallback
-                from fb2_author_extractor import FB2AuthorExtractor
+                from regen_csv import RegenCSVService
             except ImportError:
-                from .precache import Precache
-                from .passes.pass1_read_files import Pass1ReadFiles
-                from .passes.pass2_filename import Pass2Filename
-                from .passes.pass2_fallback import Pass2Fallback
-                from .fb2_author_extractor import FB2AuthorExtractor
+                from .regen_csv import RegenCSVService
 
-            self._set_status('Кеширование папок…')
+            self._set_status('Сканирование файлов…')
 
-            settings = self._settings
-            logger   = self._logger
-            folder_parse_limit = getattr(settings, 'get_folder_parse_limit',
-                                         lambda: 0)() if settings else 0
-
-            extractor = FB2AuthorExtractor()
-            precache  = Precache(work_dir, settings, logger, folder_parse_limit)
-            precache.execute()
-
-            self._set_status('Чтение файлов…')
-            pass1   = Pass1ReadFiles(work_dir, precache.author_folder_cache,
-                                     extractor, logger, folder_parse_limit)
-            records = pass1.execute()
-
-            self._set_status('Извлечение авторов…')
-            pass2 = Pass2Filename(settings, logger, work_dir,
-                                  male_names=precache.male_names,
-                                  female_names=precache.female_names)
-            pass2.prebuild_author_cache(records)
-            pass2.execute(records)
-
-            pass2fb = Pass2Fallback(logger, settings=settings)
-            pass2fb.execute(records)
+            svc = RegenCSVService()
+            # generate_csv запускает полный пайплайн Pass1–Pass6
+            # output_csv_path=None — не писать CSV на диск
+            records = svc.generate_csv(folder, output_csv_path=None)
 
             self._set_status('Поиск групп для компиляции…')
             groups = self._service.find_groups(records, work_dir)
@@ -348,7 +321,8 @@ class CompilerDialog:
             self._win.after(0, lambda: self._populate_groups(groups))
 
         except Exception as exc:
-            err = str(exc)
+            import traceback
+            err = traceback.format_exc()
             self._win.after(0, lambda: self._on_scan_error(err))
 
         finally:
