@@ -628,17 +628,23 @@ class StdoutRedirector:
 
     @staticmethod
     def _extract_progress(message: str) -> str:
-        """Извлечь читаемую строку прогресса из вывода tqdm или обычного текста.
+        """Извлечь компактную строку прогресса из вывода tqdm или обычного текста.
 
-        tqdm пишет через \\r: "\\rProcessing FB2 files:  30%|████| 3155/10351 [00:54<02:04]"
-        Берём последний непустой фрагмент после разбивки по \\r и \\n.
+        tqdm пишет через \\r: "\\rProcessing FB2 files:  30%|████...████| 3155/10351 [00:54<02:04, 99it/s]"
+        Берём последний непустой фрагмент, затем убираем полосу прогресса (всё между '|' и '|'),
+        оставляя только: "Processing FB2 files:  30% 3155/10351 [00:54<02:04, 99it/s]"
         """
-        # Разбить по \r и \n, взять последний непустой кусок
+        import re
         parts = message.replace('\r', '\n').split('\n')
         for part in reversed(parts):
             clean = part.strip()
-            if clean and not clean.startswith('='):
-                return clean
+            if not clean or clean.startswith('='):
+                continue
+            # Убрать блок с заполняющейся шкалой: |██████...██| → ''
+            compact = re.sub(r'\|[^|]*\|', '', clean).strip()
+            # Схлопнуть лишние пробелы
+            compact = re.sub(r'  +', ' ', compact)
+            return compact if compact else clean
         return ''
 
     def write(self, message):
