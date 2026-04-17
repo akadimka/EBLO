@@ -1384,7 +1384,10 @@ class CSVNormalizerApp:
             except ImportError:
                 from fb2parser.gui_duplicate_finder import DuplicateFinderWindow
         
-        DuplicateFinderWindow(self.root, self.settings_manager)
+        DuplicateFinderWindow(
+            self.root, self.settings_manager,
+            on_close=lambda: self._log("Окно 'Поиск дубликатов' закрыто")
+        )
         self._log("Окно 'Поиск дубликатов' открыто")
         
     def open_compiler(self):

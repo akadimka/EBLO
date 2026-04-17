@@ -27,7 +27,7 @@ def _file_hash(path: Path, chunk_size: int = 65536) -> str:
 
 
 class DuplicateFinderWindow:
-    def __init__(self, parent=None, settings_manager=None):
+    def __init__(self, parent=None, settings_manager=None, on_close=None):
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
         self.window.withdraw()  # скрываем до позиционирования
         self.window.title("Поиск дубликатов")
@@ -35,6 +35,7 @@ class DuplicateFinderWindow:
         self.search_path = tk.StringVar()
         self._duplicates: list = []
         self._searching = False
+        self._on_close_cb = on_close
 
         if settings_manager:
             setup_window_persistence(self.window, 'duplicate_finder', settings_manager, '1100x700+200+150', parent_window=parent)
@@ -44,8 +45,14 @@ class DuplicateFinderWindow:
         else:
             self.window.geometry("1100x700")
 
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
         self.search_path.trace_add('write', self._save_search_path)
         self._build_ui()
+
+    def _on_close(self):
+        if self._on_close_cb:
+            self._on_close_cb()
+        self.window.destroy()
 
     def _save_search_path(self, *_):
         if self.settings_manager:
