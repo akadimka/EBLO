@@ -297,17 +297,37 @@ class FB2CompilerService:
                 continue
             books_sorted, order_determined, alphabetical_order = self._sort_books(books)
 
-            volume_range = self._compute_volume_range(books_sorted) if order_determined else ''
-
-            groups.append(CompilationGroup(
-                author=author,
-                series=series,
-                books=books_sorted,
-                order_determined=order_determined,
-                volume_range=volume_range,
-                duplicate_paths=duplicate_paths,
-                alphabetical_order=alphabetical_order,
-            ))
+            if alphabetical_order:
+                # Порядок по названию — нет номеров томов, пропуски неприменимы
+                volume_range = ''
+                groups.append(CompilationGroup(
+                    author=author,
+                    series=series,
+                    books=books_sorted,
+                    order_determined=order_determined,
+                    volume_range=volume_range,
+                    duplicate_paths=duplicate_paths,
+                    alphabetical_order=True,
+                ))
+            else:
+                # Разбиваем на непрерывные подгруппы — пропуски томов не допускаются
+                runs = self._split_into_consecutive_runs(books_sorted)
+                first_group = True
+                for run in runs:
+                    if len(run) < 2:
+                        continue  # одиночный том в дыре — не компилируем
+                    run_range = self._compute_volume_range(run) if order_determined else ''
+                    groups.append(CompilationGroup(
+                        author=author,
+                        series=series,
+                        books=run,
+                        order_determined=not any(b.order_ambiguous for b in run),
+                        volume_range=run_range,
+                        # дубликаты только к первой подгруппе, чтобы не удалять дважды
+                        duplicate_paths=duplicate_paths if first_group else [],
+                        alphabetical_order=False,
+                    ))
+                    first_group = False
 
         groups.sort(key=lambda g: (g.author.lower(), g.series.lower()))
         self._log(f"Найдено групп для компиляции: {len(groups)}")
@@ -633,6 +653,50 @@ class FB2CompilerService:
         except Exception:
             pass
         return None
+
+    def _split_into_consecutive_runs(
+        self,
+        books: List[CompilationBook],
+    ) -> List[List[CompilationBook]]:
+        """Разбить отсортированные книги на непрерывные подгруппы без пропусков.
+
+        Применяется только если ВСЕ книги имеют числовой ключ сортировки (level 0).
+        При смешанном или нечисловом порядке возвращает все книги одной группой.
+
+        Предкомпилированные файлы, покрывающие диапазон (volume_label="1-3"),
+        учитываются по верхней границе: следующая книга с lo == hi+1 считается
+        непрерывной.
+        """
+        if not books:
+            return []
+
+        # Разбиваем только полностью числовые группы
+        if any(b.sort_key[0] != 0 for b in books):
+            return [books]
+
+        def get_hi(book: CompilationBook) -> int:
+            """Верхняя граница диапазона томов данного файла."""
+            rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', book.volume_label or '')
+            if rng:
+                return int(rng.group(2))
+            return book.sort_key[1]
+
+        runs: List[List[CompilationBook]] = []
+        current_run: List[CompilationBook] = [books[0]]
+        prev_hi = get_hi(books[0])
+
+        for book in books[1:]:
+            lo = book.sort_key[1]
+            if lo == prev_hi + 1:
+                current_run.append(book)
+                prev_hi = get_hi(book)
+            else:
+                runs.append(current_run)
+                current_run = [book]
+                prev_hi = get_hi(book)
+        runs.append(current_run)
+
+        return runs
 
     def _sort_books(
         self, books: List[CompilationBook]
