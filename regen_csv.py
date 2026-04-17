@@ -9,6 +9,7 @@ Reference: REGEN_CSV_ARCHITECTURE.md
 
 import csv
 import sys
+import time
 from pathlib import Path
 
 from settings_manager import SettingsManager
@@ -299,18 +300,22 @@ class RegenCSVService:
             # ===== PRECACHE =====
             if progress_callback:
                 progress_callback(5, 100, "Кеширование папок авторов")
-            precache = Precache(self.work_dir, self.settings, self.logger, 
+            _t = time.perf_counter()
+            precache = Precache(self.work_dir, self.settings, self.logger,
                                self.folder_parse_limit)
             self.author_folder_cache = precache.execute()
+            print(f"[PRECACHE] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Author folder hierarchy cached")
-            
+
             # ===== PASS 1 =====
             if progress_callback:
                 progress_callback(10, 100, "Pass 1: Чтение FB2 файлов")
+            _t = time.perf_counter()
             pass1 = Pass1ReadFiles(self.work_dir, self.author_folder_cache,
-                                  self.extractor, self.logger, 
+                                  self.extractor, self.logger,
                                   self.folder_parse_limit)
             self.records = pass1.execute()
+            print(f"[PASS 1] → {time.perf_counter()-_t:.2f}s")
             
             if not self.records:
                 raise FileNotFoundError(
@@ -349,21 +354,26 @@ class RegenCSVService:
 
             if progress_callback:
                 progress_callback(20, 100, "Pass 2: Извлечение авторов")
+            _t = time.perf_counter()
             pass2 = Pass2Filename(self.settings, self.logger, self.work_dir,
                                 male_names=precache.male_names,
                                 female_names=precache.female_names)
             pass2.prebuild_author_cache(self.records)
             pass2.execute(self.records)
+            print(f"[PASS 2] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] PASS 2: Authors extracted from filenames")
-            
+
             # ===== PASS 2 Fallback =====
             if progress_callback:
                 progress_callback(25, 100, "Pass 2 Fallback: Применение метаданных")
+            _t = time.perf_counter()
             pass2_fallback = Pass2Fallback(self.logger, settings=self.settings)
             pass2_fallback.execute(self.records)
+            print(f"[PASS 2 Fallback] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] PASS 2 Fallback: Metadata applied")
 
             # ===== PASS 2.5: Expand abbreviated/plural author from consistent metadata =====
+            _t25 = time.perf_counter()
             # Случай: папка "Войлошниковы", proposed_author="Войлошниковы" (filename),
             # но metadata_authors стабильно содержит полные имена авторов. Расширяем.
             import re as _re25
@@ -452,12 +462,14 @@ class RegenCSVService:
                         rec.needs_filename_fallback = False
                         expanded25 += 1
 
+            print(f"[PASS 2.5] → {time.perf_counter()-_t25:.2f}s")
             if expanded25:
                 self.logger.log(f"[OK] PASS 2.5: Expanded abbreviated authors in {expanded25} files")
 
             # ===== SERIES EXTRACTION: From Folders (VARIANT B) =====
             if progress_callback:
                 progress_callback(30, 100, "Извлечение серий")
+            _t = time.perf_counter()
             print("\n[SERIES] Extracting series from folder structure...")
 
             # Пункт 5: cache normalized name lookups — avoids repeated re.sub() calls
@@ -549,52 +561,65 @@ class RegenCSVService:
                     # folder_dataset для серии при отсутствии folder_dataset автора — недопустимо.
                     pass  # Let Pass 2 (filename patterns) and metadata handle series extraction
             
+            print(f"[SERIES folders] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Series extracted from folder structure (Variant B)")
-            
+
             # ===== SERIES PASS 2 =====
             if progress_callback:
                 progress_callback(40, 100, "Извлечение серий из имен файлов")
+            _t = time.perf_counter()
             print("[SERIES] Extracting series from filenames...")
             pass2_series = Pass2SeriesFilename(self.logger,
                                               male_names=precache.male_names,
                                               female_names=precache.female_names)
             pass2_series.execute(self.records)
+            print(f"[SERIES PASS 2] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Series PASS 2: Extracted from filenames")
-            
+
             # ===== SERIES PASS 3 =====
             if progress_callback:
                 progress_callback(45, 100, "Нормализация серий")
+            _t = time.perf_counter()
             print("[SERIES] Normalizing series names...")
             pass3_series = Pass3SeriesNormalize(self.logger, settings=self.settings)
             pass3_series.execute(self.records)
+            print(f"[SERIES PASS 3] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Series PASS 3: Normalized series names")
-            
+
             # ===== PASS 3 =====
             if progress_callback:
                 progress_callback(55, 100, "Pass 3: Нормализация авторов")
+            _t = time.perf_counter()
             pass3 = Pass3Normalize(self.logger, settings=self.settings)
             pass3.execute(self.records)
+            print(f"[PASS 3] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] PASS 3: Authors normalized")
-            
+
             # ===== PASS 4 =====
             if progress_callback:
                 progress_callback(65, 100, "Pass 4: Консенсус")
+            _t = time.perf_counter()
             pass4 = Pass4Consensus(self.logger, settings=self.settings)
             pass4.execute(self.records)
+            print(f"[PASS 4] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] PASS 4: Consensus applied")
-            
+
             # ===== PASS 5 =====
             if progress_callback:
                 progress_callback(75, 100, "Pass 5: Преобразования")
+            _t = time.perf_counter()
             pass5 = Pass5Conversions(self.logger, settings=self.settings)
             pass5.execute(self.records)
+            print(f"[PASS 5] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] PASS 5: Conversions re-applied")
-            
+
             # ===== PASS 6 =====
             if progress_callback:
                 progress_callback(85, 100, "Pass 6: Раскрытие аббревиатур")
+            _t = time.perf_counter()
             pass6 = Pass6Abbreviations(self.logger, settings=self.settings)
             pass6.execute(self.records)
+            print(f"[PASS 6] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] PASS 6: Abbreviations expanded")
             
             # ===== Clear series for collections/compilations =====
