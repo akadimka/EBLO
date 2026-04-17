@@ -311,9 +311,15 @@ class CompilerDialog:
             self._set_status('Сканирование файлов…')
 
             svc = RegenCSVService()
-            # generate_csv запускает полный пайплайн Pass1–Pass6
-            # output_csv_path=None — не писать CSV на диск
-            records = svc.generate_csv(folder, output_csv_path=None)
+            # Запускаем полный пайплайн Pass1–Pass6.
+            # generate_csv может вернуть [] если _save_csv упала —
+            # читаем svc.records напрямую на случай частичного сбоя.
+            try:
+                records = svc.generate_csv(folder, output_csv_path=None)
+            except Exception:
+                records = []
+            if not records:
+                records = getattr(svc, 'records', []) or []
 
             self._set_status('Поиск групп для компиляции…')
             groups = self._service.find_groups(records, work_dir)

@@ -72,6 +72,9 @@ class RegenCSVService:
         # CSV output path - ALWAYS in project directory
         self.project_dir = Path(__file__).parent
         self.output_csv = self.project_dir / "regen.csv"
+
+        # По умолчанию CSV сохраняется; generate_csv(output_csv_path=None) отключает запись
+        self._do_save_csv = True
     
     def generate_csv(self, folder_path: str, output_csv_path=None, progress_callback=None):
         """
@@ -88,11 +91,14 @@ class RegenCSVService:
         """
         # Override work directory with the provided folder path
         self.work_dir = Path(folder_path)
-        
+
         # Override output CSV path if provided
         if output_csv_path:
             self.output_csv = Path(output_csv_path)
-        
+            self._do_save_csv = True
+        else:
+            self._do_save_csv = False
+
         try:
             # Run regeneration with progress callback
             success = self.regenerate(progress_callback=progress_callback)
@@ -636,10 +642,11 @@ class RegenCSVService:
             self.logger.log("[OK] Final sanitization applied")
             
             # ===== Save CSV =====
-            if progress_callback:
-                progress_callback(95, 100, "Сохранение CSV")
-            self._save_csv()
-            self.logger.log(f"[OK] CSV saved to {self.output_csv}")
+            if self._do_save_csv:
+                if progress_callback:
+                    progress_callback(95, 100, "Сохранение CSV")
+                self._save_csv()
+                self.logger.log(f"[OK] CSV saved to {self.output_csv}")
             
             print(f"\n[OK] CSV regeneration completed successfully!")
             print(f"   Output: {self.output_csv}")
