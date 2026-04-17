@@ -633,39 +633,66 @@ class SynchronizationService:
             except Exception as e:
                 self._log(f"  Ошибка при удалении из БД: {e}")
     
+    # Символы, недопустимые в именах файлов Windows
+    _UNSAFE_CHARS_RE = re.compile(r'[\\/:*?"<>|]')
+
+    @classmethod
+    def _safe(cls, s: str) -> str:
+        """Заменить недопустимые символы в имени файла на '_'."""
+        return cls._UNSAFE_CHARS_RE.sub('_', s).strip()
+
     def _build_target_filename(self, record, kind: str, covered_volumes: set) -> str:
         """Build proper target filename based on record metadata.
 
-        - Compilations are renamed to clean convention: "Author - Series (Suffix).fb2"
-        - Single volumes keep original filename.
+        Compilations:  "Автор - Серия (Суффикс).fb2"
+        Single/unknown with series:
+            "Автор - Серия. Название. т. N.fb2"   ← если есть series_number
+            "Автор - Серия. Название.fb2"          ← без series_number
+        No series:
+            "Автор - Название.fb2"
         """
-        if kind != 'compilation':
-            return Path(record.file_path).name
+        _safe = self._safe
 
-        try:
-            from fb2_compiler import FB2CompilerService
-            clean_series = FB2CompilerService._clean_series_name(
-                (record.proposed_series or '').strip()
-            )
-        except Exception:
-            clean_series = (record.proposed_series or '').strip()
+        # ── Компиляции ────────────────────────────────────────────────
+        if kind == 'compilation':
+            try:
+                from fb2_compiler import FB2CompilerService
+                clean_series = FB2CompilerService._clean_series_name(
+                    (record.proposed_series or '').strip()
+                )
+            except Exception:
+                clean_series = (record.proposed_series or '').strip()
 
-        safe_author = re.sub(r'[\\/:*?"<>|]', '_', (record.proposed_author or '').strip())
-        safe_series = re.sub(r'[\\/:*?"<>|]', '_', clean_series)
+            if covered_volumes:
+                lo, hi = min(covered_volumes), max(covered_volumes)
+                volume_range = str(lo) if lo == hi else f'{lo}-{hi}'
+            else:
+                volume_range = ''
 
-        if covered_volumes:
-            lo, hi = min(covered_volumes), max(covered_volumes)
-            volume_range = str(lo) if lo == hi else f'{lo}-{hi}'
+            try:
+                from fb2_compiler import FB2CompilerService
+                suffix = FB2CompilerService._series_suffix(len(covered_volumes), volume_range)
+            except Exception:
+                suffix = f'т. {volume_range}' if volume_range else 'Сборник'
+
+            return f"{_safe(record.proposed_author or '')} - {_safe(clean_series)} ({suffix}).fb2"
+
+        # ── Одиночные тома и неопределённые ──────────────────────────
+        author = _safe((record.proposed_author or '').strip())
+        series = (record.proposed_series or '').strip()
+        title  = _safe((record.file_title or Path(record.file_path).stem).strip())
+
+        # series_number: используем только если это число или простой диапазон
+        sn = (getattr(record, 'series_number', '') or '').strip()
+        if sn and re.match(r'^\d+(?:\s*[-–]\s*\d+)?$', sn):
+            tome = f' т. {sn}'
         else:
-            volume_range = ''
+            tome = ''
 
-        try:
-            from fb2_compiler import FB2CompilerService
-            suffix = FB2CompilerService._series_suffix(len(covered_volumes), volume_range)
-        except Exception:
-            suffix = f'т. {volume_range}' if volume_range else 'Сборник'
-
-        return f"{safe_author} - {safe_series} ({suffix}).fb2"
+        if series:
+            return f"{author} - {_safe(series)}. {title}{tome}.fb2"
+        else:
+            return f"{author} - {title}{tome}.fb2"
 
     def _move_files(
         self,
@@ -1071,6 +1098,39 @@ class SynchronizationService:
         # Если ≥70% слов заголовка совпадают со словами автора — заголовок ошибочный
         return len(overlap) / len(title_words) >= 0.7
 
+    @staticmethod
+    def _pretty_print_description(content: str) -> str:
+        """Переформатировать секцию <description> с красивыми отступами.
+
+        Безопасно: парсим только <description>…</description>, секции <body>
+        не трогаем (там инлайн-разметка, где пробелы важны).
+        При любой ошибке парсинга возвращаем исходный content без изменений.
+        """
+        import xml.dom.minidom as _minidom
+
+        desc_m = re.search(
+            r'(<(?:fb:)?description>)(.*?)(</(?:fb:)?description>)',
+            content, re.DOTALL | re.IGNORECASE,
+        )
+        if not desc_m:
+            return content
+
+        raw_desc = desc_m.group(0)
+        try:
+            # Оборачиваем в корневой элемент для парсинга
+            dom = _minidom.parseString(f'<?xml version="1.0"?>{raw_desc}'.encode('utf-8'))
+            pretty = dom.toprettyxml(indent='  ', encoding=None)
+            # Убираем добавленную XML-декларацию и пустые строки
+            lines = [
+                ln for ln in pretty.splitlines()
+                if ln.strip() and not ln.strip().startswith('<?xml')
+            ]
+            formatted = '\n'.join(lines)
+        except Exception:
+            return content  # парсинг не удался — оставляем как есть
+
+        return content[:desc_m.start()] + formatted + content[desc_m.end():]
+
     def _patch_fb2_tags(
         self,
         fb2_path: Path,
@@ -1245,6 +1305,11 @@ class SynchronizationService:
             # ---- reconstruct content ----
             new_ti = ti_open + ti_body + ti_close
             result = content[:ti_m.start()] + new_ti + content[ti_m.end():]
+
+            # ---- pretty-print <description> block ----
+            # Переформатируем только секцию <description>…</description>,
+            # не трогая <body> (там инлайн-теги, пробелы значимы).
+            result = self._pretty_print_description(result)
 
             if has_bom:
                 result = '\ufeff' + result
