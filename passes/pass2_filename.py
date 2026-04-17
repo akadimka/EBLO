@@ -20,11 +20,6 @@ try:
 except ImportError:
     from ..name_normalizer import validate_author_name
 
-try:
-    from fb2_author_extractor import FB2AuthorExtractor
-except ImportError:
-    from ..fb2_author_extractor import FB2AuthorExtractor
-
 
 class Pass2Filename:
     """PASS 2: Extract authors from filenames.
@@ -78,8 +73,6 @@ class Pass2Filename:
         # Author cache: maps abbreviated/partial names to full names
         # e.g., {"А. Живой" -> "Живой Алексей", "Живой" -> "Живой Алексей"}
         self.author_cache = {}
-        # Single reusable extractor — avoids re-reading config.json per file
-        self._extractor = FB2AuthorExtractor()
     
     def _load_patterns(self) -> List[dict]:
         """Load author_series_patterns_in_files from config."""
@@ -197,34 +190,27 @@ class Pass2Filename:
                         self.author_cache[part_lower] = author
     
     def prebuild_author_cache(self, records: List) -> None:
-        """Pre-scan all FB2 files to build author cache BEFORE main processing.
+        """Pre-scan all records to build author cache BEFORE main processing.
 
         This ensures that even if a file has bad/missing metadata, its authors
         can be resolved from sibling files in the same folder that DO have good metadata.
 
-        Strategy: for each record, read FB2 metadata and cache all author names
+        Strategy: for each record, use record.metadata_authors and cache all author names
         (full name, surname, each word) so they're available during execute().
 
         Args:
             records: List of BookRecord objects
         """
-        if not self.work_dir:
-            return
-
         print("[PASS 2] Pre-building author cache from FB2 metadata...")
         cached_count = 0
 
         for record in records:
-            fb2_path = self.work_dir / record.file_path
-            if not fb2_path.exists():
+            fb2_authors_str = getattr(record, 'metadata_authors', '') or ''
+
+            if not fb2_authors_str:
                 continue
 
             try:
-                fb2_authors_str = self._extractor._extract_all_authors_from_metadata(fb2_path)
-
-                if not fb2_authors_str:
-                    continue
-
                 fb2_authors = [a.strip() for a in fb2_authors_str.split(';') if a.strip()]
 
                 for author in fb2_authors:
@@ -260,30 +246,30 @@ class Pass2Filename:
 
         print(f"[PASS 2] Pre-cache built: {len(self.author_cache)} entries from {cached_count} authors")
 
-    def _validate_and_expand_author(self, extracted_author: str, fb2_path: Optional[Path]) -> str:
+    def _validate_and_expand_author(self, extracted_author: str, metadata_authors_str: Optional[str]) -> str:
         """Validate and potentially expand author name using FB2 metadata and cache.
-        
+
         Strategy:
         1. Check author cache first (compiled from previous files)
         2. If not in cache, try to expand from FB2 metadata
         3. Compare with FB2 metadata authors to find matching record
         4. If found with better form (fuller name), use and cache that instead
-        
+
         SPECIAL CASE: If extracted is single word (surname) and metadata has multiple
         authors with this surname, DON'T expand here - leave for PASS 3 restoration.
-        
+
         Args:
             extracted_author: Author name extracted from filename
-            fb2_path: Path to FB2 file for metadata validation
-            
+            metadata_authors_str: Authors string from record.metadata_authors (already in memory)
+
         Returns:
             Validated/expanded author name or original if not found
         """
         if not extracted_author:
             return extracted_author
-        
+
         extracted_lower = extracted_author.lower().strip()
-        
+
         # STEP 1: Check author cache first (knowledge from other files).
         # BUT: for single-word extractions (surname only), the cache entry might have come
         # from a DIFFERENT author who shares the same surname (e.g. "Стайн Роберт" vs
@@ -294,93 +280,91 @@ class Pass2Filename:
         if cache_hit and not is_single_word:
             return cache_hit
         # For single-word: fall through to FB2 check; use cache only as final fallback
-        
-        # STEP 2: Try FB2 metadata if available
-        if fb2_path and fb2_path.exists():
+
+        # STEP 2: Try metadata if available
+        fb2_authors_str = metadata_authors_str if (metadata_authors_str and
+                                                    metadata_authors_str != '[unknown]') else ''
+        if fb2_authors_str:
             try:
-                # Extract authors from FB2 metadata (reuse shared extractor)
-                fb2_authors_str = self._extractor._extract_all_authors_from_metadata(fb2_path)
-                
-                if fb2_authors_str:
-                    # Parse FB2 authors (separated by '; ')
-                    fb2_authors = [a.strip() for a in fb2_authors_str.split(';') if a.strip()]
-                    
-                    # SPECIAL CASE: If extracted is single word and metadata has multiple co-authors
-                    # with this word, DON'T expand - leave surname-only for PASS 3 restoration
-                    if len(extracted_author.split()) == 1 and len(fb2_authors) > 1:
-                        # Check if this single word matches multiple FB2 authors
-                        extracted_words = {extracted_lower}
-                        matching_count = 0
-                        for fb2_author in fb2_authors:
-                            fb2_words = set(fb2_author.lower().split())
-                            if extracted_words.issubset(fb2_words):
-                                matching_count += 1
-                        
-                        # If matches multiple authors, don't expand
-                        if matching_count > 1:
-                            return extracted_author  # Return surname-only, let PASS 3 handle restoration
-                    
-                    # Exact match - return as is
+                # Parse FB2 authors (separated by '; ')
+                fb2_authors = [a.strip() for a in fb2_authors_str.split(';') if a.strip()]
+
+                # SPECIAL CASE: If extracted is single word and metadata has multiple co-authors
+                # with this word, DON'T expand - leave surname-only for PASS 3 restoration
+                if len(extracted_author.split()) == 1 and len(fb2_authors) > 1:
+                    # Check if this single word matches multiple FB2 authors
+                    extracted_words = {extracted_lower}
+                    matching_count = 0
                     for fb2_author in fb2_authors:
-                        if fb2_author.lower() == extracted_lower:
+                        fb2_words = set(fb2_author.lower().split())
+                        if extracted_words.issubset(fb2_words):
+                            matching_count += 1
+
+                    # If matches multiple authors, don't expand
+                    if matching_count > 1:
+                        return extracted_author  # Return surname-only, let PASS 3 handle restoration
+
+                # Exact match - return as is
+                for fb2_author in fb2_authors:
+                    if fb2_author.lower() == extracted_lower:
+                        self._add_to_author_cache(extracted_author, fb2_author)
+                        return fb2_author  # Return FB2 version (better normalization)
+
+                # Partial match - check if extracted is substring of any FB2 author
+                # This handles cases like "Демченко" matching "Демченко Антон" (single-word expansion)
+                # BUT: Do NOT allow reversed word order like "Гулевич Александр" → "Александр Гулевич"
+                for fb2_author in fb2_authors:
+                    fb2_lower = fb2_author.lower()
+                    extracted_words_list = extracted_lower.split()
+                    fb2_words_list = fb2_lower.split()
+
+                    # Only expand if:
+                    # 1. Extracted is SINGLE WORD (legitimate expansion like "Демченко" → "Демченко Антон")
+                    # 2. OR first words match AND same number of words (order preserved in both)
+                    if len(extracted_words_list) == 1:
+                        # Single word expansion - check if it's in FB2 author
+                        if extracted_lower in fb2_words_list:
+                            # Put the matched surname FIRST (ФИ convention).
+                            # FB2 metadata often stores names in ИФ order ("Хуан Франсиско Феррандис"),
+                            # but canonical format is ФИ ("Феррандис Хуан Франсиско").
+                            match_idx = fb2_words_list.index(extracted_lower)
+                            if match_idx > 0:
+                                rest = [w for i, w in enumerate(fb2_author.split()) if i != match_idx]
+                                reordered = fb2_author.split()[match_idx] + ' ' + ' '.join(rest)
+                                self._add_to_author_cache(extracted_author, reordered)
+                                return reordered
                             self._add_to_author_cache(extracted_author, fb2_author)
-                            return fb2_author  # Return FB2 version (better normalization)
-                    
-                    # Partial match - check if extracted is substring of any FB2 author
-                    # This handles cases like \"Демченко\" matching \"Демченко Антон\" (single-word expansion)
-                    # BUT: Do NOT allow reversed word order like "Гулевич Александр" → "Александр Гулевич"
+                            return fb2_author  # Use fuller name from FB2
+                    elif (len(extracted_words_list) == len(fb2_words_list) and
+                          extracted_words_list[0] == fb2_words_list[0]):
+                        # Multi-word with matching first word (likely normalized case variation)
+                        self._add_to_author_cache(extracted_author, fb2_author)
+                        return fb2_author
+                    # Otherwise: different number of words OR reversed order → skip (don't match)
+
+                # PARTICLE MATCHING: if extracted contains a name particle (де, ван, фон…),
+                # check if the "particle tail" (from first particle onwards) appears verbatim in
+                # any metadata author. This catches compound surnames like:
+                #   "Жиро де л Эн" (filename) vs "Аликс де л'Эн" (metadata)
+                # Both share the tail "делэн" after apostrophe+space normalization.
+                if self.name_particles:
+                    _apo = str.maketrans({"'": "", "\u2019": "", "\u02bc": ""})
                     for fb2_author in fb2_authors:
-                        fb2_lower = fb2_author.lower()
-                        extracted_words_list = extracted_lower.split()
-                        fb2_words_list = fb2_lower.split()
-                        
-                        # Only expand if:
-                        # 1. Extracted is SINGLE WORD (legitimate expansion like "Демченко" → "Демченко Антон")
-                        # 2. OR first words match AND same number of words (order preserved in both)
-                        if len(extracted_words_list) == 1:
-                            # Single word expansion - check if it's in FB2 author
-                            if extracted_lower in fb2_words_list:
-                                # Put the matched surname FIRST (ФИ convention).
-                                # FB2 metadata often stores names in ИФ order ("Хуан Франсиско Феррандис"),
-                                # but canonical format is ФИ ("Феррандис Хуан Франсиско").
-                                match_idx = fb2_words_list.index(extracted_lower)
-                                if match_idx > 0:
-                                    rest = [w for i, w in enumerate(fb2_author.split()) if i != match_idx]
-                                    reordered = fb2_author.split()[match_idx] + ' ' + ' '.join(rest)
-                                    self._add_to_author_cache(extracted_author, reordered)
-                                    return reordered
-                                self._add_to_author_cache(extracted_author, fb2_author)
-                                return fb2_author  # Use fuller name from FB2
-                        elif (len(extracted_words_list) == len(fb2_words_list) and 
-                              extracted_words_list[0] == fb2_words_list[0]):
-                            # Multi-word with matching first word (likely normalized case variation)
-                            self._add_to_author_cache(extracted_author, fb2_author)
-                            return fb2_author
-                        # Otherwise: different number of words OR reversed order → skip (don't match)
-                    
-                    # PARTICLE MATCHING: if extracted contains a name particle (де, ван, фон…),
-                    # check if the "particle tail" (from first particle onwards) appears verbatim in
-                    # any metadata author. This catches compound surnames like:
-                    #   "Жиро де л Эн" (filename) vs "Аликс де л'Эн" (metadata)
-                    # Both share the tail "делэн" after apostrophe+space normalization.
-                    if self.name_particles:
-                        _apo = str.maketrans({"'": "", "\u2019": "", "\u02bc": ""})
-                        for fb2_author in fb2_authors:
-                            fb2_norm = fb2_author.lower().translate(_apo).replace(' ', '')
-                            for i, w in enumerate(extracted_lower.split()):
-                                if w in self.name_particles:
-                                    tail = ' '.join(extracted_lower.split()[i:]).translate(_apo).replace(' ', '')
-                                    if tail and tail in fb2_norm:
-                                        self.logger.log(
-                                            f"[PASS 2] Particle-tail match: '{extracted_author}' → "
-                                            f"'{fb2_author}' (tail='{tail}')"
-                                        )
-                                        self._add_to_author_cache(extracted_author, fb2_author)
-                                        return fb2_author
-                                    break  # only check from the FIRST particle
-            
+                        fb2_norm = fb2_author.lower().translate(_apo).replace(' ', '')
+                        for i, w in enumerate(extracted_lower.split()):
+                            if w in self.name_particles:
+                                tail = ' '.join(extracted_lower.split()[i:]).translate(_apo).replace(' ', '')
+                                if tail and tail in fb2_norm:
+                                    self.logger.log(
+                                        f"[PASS 2] Particle-tail match: '{extracted_author}' → "
+                                        f"'{fb2_author}' (tail='{tail}')"
+                                    )
+                                    self._add_to_author_cache(extracted_author, fb2_author)
+                                    return fb2_author
+                                break  # only check from the FIRST particle
+
             except Exception as e:
-                self.logger.log(f"[PASS 2] WARNING: Failed to validate author against FB2: {e}")
+                self.logger.log(f"[PASS 2] WARNING: Failed to validate author against metadata: {e}")
         
         # FB2 lookup found nothing — use cross-file cache hit if available (single-word fallback)
         if cache_hit:
@@ -732,12 +716,11 @@ class Pass2Filename:
             filename = record.file_path.replace('\\', '/').split('/')[-1]  # Get basename only
             filename_without_ext = filename.rsplit('.', 1)[0]  # Remove extension
             
-            # Construct full FB2 path for metadata validation
-            fb2_path = None
-            if self.work_dir:
-                fb2_path = self.work_dir / record.file_path
-            
-            author = self._extract_author_from_filename(filename_without_ext, fb2_path)
+            author = self._extract_author_from_filename(
+                filename_without_ext,
+                file_title=getattr(record, 'file_title', '') or '',
+                metadata_authors_str=getattr(record, 'metadata_authors', '') or '',
+            )
 
             if author:
                 # Successfully extracted from filename
@@ -1071,26 +1054,29 @@ class Pass2Filename:
         
         return cleaned.strip()
     
-    def _extract_author_from_filename(self, filename: str, fb2_path: Optional[Path] = None) -> str:
+    def _extract_author_from_filename(self, filename: str, file_title: Optional[str] = None,
+                                       metadata_authors_str: Optional[str] = None) -> str:
         """Extract author name from filename using BLOCK-LEVEL pattern matching.
-        
+
         Algorithm:
         1. CLEAN filename from blacklist markers (like "(СИ)") to preserve block count
         2. Tokenize cleaned filename into blocks (delimited by ' - ', '. ', parens)
         3. Score each pattern against blocks via BlockLevelPatternMatcher
         4. Take best-score match (threshold 0.6)
-        5. TITLE-AS-AUTHOR GUARD: compare extracted candidate against FB2 <book-title>.
-           When two patterns tie (e.g. "Author - Title" vs "Title - Author" both score 0.73
-           for a two-block filename), the first pattern in config.json wins by default.
-           If that first-winner extracts the book title as "author", retry without
-           patterns whose name starts with "Title" → correct pattern wins the retry.
+        5. TITLE-AS-AUTHOR GUARD: compare extracted candidate against book title from
+           record.file_title. When two patterns tie (e.g. "Author - Title" vs
+           "Title - Author" both score 0.73 for a two-block filename), the first pattern
+           in config.json wins by default. If that first-winner extracts the book title
+           as "author", retry without patterns whose name starts with "Title" → correct
+           pattern wins the retry.
         6. VALIDATE extracted name (_looks_like_author_name + validate_author_name)
-        7. EXPAND abbreviated/incomplete names via FB2 metadata and author cache
-        
+        7. EXPAND abbreviated/incomplete names via metadata and author cache
+
         Args:
             filename: Filename without extension
-            fb2_path: Path to FB2 file for book-title guard + metadata expansion (optional)
-        
+            file_title: Book title from record.file_title (already in memory, optional)
+            metadata_authors_str: Authors string from record.metadata_authors (already in memory, optional)
+
         Returns:
             Author name or empty string
         """
@@ -1131,14 +1117,14 @@ class Pass2Filename:
             
             author = author.strip()
             
-            # TITLE-AS-AUTHOR GUARD: <book-title> from FB2 metadata can NEVER be an author.
+            # TITLE-AS-AUTHOR GUARD: <book-title> can NEVER be an author.
             # This catches tie-breaking mistakes: e.g. "Алдерман Наоми - Сила" scores equally
             # for "Author - Title" and "Title - Author"; if the winning candidate equals the
             # real book title, the pattern order chose wrong — reject it and try again
             # without that candidate pattern.
-            if fb2_path and fb2_path.exists():
+            book_title = file_title or ''
+            if book_title:
                 try:
-                    book_title = self._extractor._extract_title_from_fb2(fb2_path)
                     # Strip trailing [...] noise (e.g. "[litres]", "[СИ]") before comparing.
                     _book_title_clean = re.sub(r'\s*\[.*?\]\s*$', '', book_title.strip()) if book_title else ''
                     # Also strip trailing (...) noise (e.g. "(ЛП)", "(СИ)", "(альт. перевод)")
@@ -1153,7 +1139,7 @@ class Pass2Filename:
                     )
                     if _title_matches_author:
                         self.logger.log(
-                            f"[PASS 2] Rejected author '{author}' — matches book-title from FB2 "
+                            f"[PASS 2] Rejected author '{author}' — matches book-title "
                             f"(pattern='{best_pattern}'). Retrying without Title-first patterns."
                         )
                         # Retry: exclude patterns whose name starts with "Title"
@@ -1182,7 +1168,7 @@ class Pass2Filename:
                     looks_like = self._looks_like_author_name(single_author)
                     is_valid = validate_author_name(single_author) if single_author else False
                     if single_author and looks_like and is_valid:
-                        expanded = self._validate_and_expand_author(single_author, fb2_path)
+                        expanded = self._validate_and_expand_author(single_author, metadata_authors_str)
                         validated_authors.append(expanded)
                     elif single_author:
                         validated_authors.append(single_author)
@@ -1195,7 +1181,7 @@ class Pass2Filename:
             
             # Single author case
             if author and self._looks_like_author_name(author) and validate_author_name(author):
-                author = self._validate_and_expand_author(author, fb2_path)
+                author = self._validate_and_expand_author(author, metadata_authors_str)
                 self.logger.log(f"[PASS 2] ✓ Extracted '{author}' from '{filename}' (block-level)")
                 return author
             else:
