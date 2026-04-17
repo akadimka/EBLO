@@ -805,12 +805,15 @@ class MainWindow(tk.Tk):
         # Создаем новое окно для нормализации
         # Полноценное окно (не диалог) — все кнопки хрома: свернуть/развернуть/закрыть
         normalizer_root = tk.Toplevel(self)
+        normalizer_root.withdraw()          # скрываем ДО построения UI — без мигания
         normalizer_root.resizable(True, True)
-        
+
         # Инициализируем app (геометрия будет восстановлена автоматически)
         app = CSVNormalizerApp(normalizer_root, current_folder, self.logger, self.settings)
-        
+
         # Настройка сохранения размера и позиции окна
+        # setup_window_persistence тоже вызывает withdraw/deiconify, но окно уже скрыто —
+        # двойной withdraw безопасен, deiconify покажет окно в правильной позиции
         setup_window_persistence(normalizer_root, 'normalizer', self.settings, '1400x700+150+100',
                                  parent_window=self)
         

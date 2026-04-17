@@ -781,6 +781,7 @@ class HelpWindow:
 
     def __init__(self, parent=None, settings_manager: SettingsManager = None):
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
+        self.window.withdraw()  # скрываем до позиционирования
         self.window.title("Справка — EBook Library Organizer")
         self.window.minsize(800, 500)
 

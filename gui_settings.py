@@ -27,6 +27,7 @@ except Exception:
 class SettingsWindow(tk.Toplevel):
     def __init__(self, master, settings_manager):
         super().__init__(master)
+        self.withdraw()  # скрываем до позиционирования
         self.title('Настройки')
         self.settings_manager = settings_manager
         self.master_window = master

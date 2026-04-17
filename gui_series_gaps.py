@@ -21,6 +21,7 @@ class SeriesGapsWindow:
         self.db_path = Path(__file__).parent / '.library_cache.db'
 
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
+        self.window.withdraw()  # скрываем до позиционирования
         self.window.title("Серии с пробелами")
         self.window.minsize(750, 450)
 

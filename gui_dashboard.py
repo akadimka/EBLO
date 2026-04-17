@@ -21,6 +21,7 @@ class DashboardWindow:
         self.db_path = Path(__file__).parent / '.library_cache.db'
 
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
+        self.window.withdraw()  # скрываем до позиционирования
         self.window.title("Статистика библиотеки")
         self.window.minsize(700, 500)
 

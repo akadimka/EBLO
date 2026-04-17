@@ -118,6 +118,7 @@ class IntegrityCheckWindow:
         self.settings = settings_manager
 
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
+        self.window.withdraw()  # скрываем до позиционирования
         self.window.title("Глубокая проверка FB2")
         self.window.minsize(800, 450)
 

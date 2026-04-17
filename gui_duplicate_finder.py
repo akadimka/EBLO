@@ -29,6 +29,7 @@ def _file_hash(path: Path, chunk_size: int = 65536) -> str:
 class DuplicateFinderWindow:
     def __init__(self, parent=None, settings_manager=None):
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
+        self.window.withdraw()  # скрываем до позиционирования
         self.window.title("Поиск дубликатов")
         self.settings_manager = settings_manager
         self.search_path = tk.StringVar()

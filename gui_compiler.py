@@ -53,6 +53,7 @@ class CompilerDialog:
         self._results: List[CompilationResult] = []
 
         self._win = tk.Toplevel(parent)
+        self._win.withdraw()  # скрываем до позиционирования
         self._win.title('Компиляция серий')
         self._win.resizable(True, True)
 

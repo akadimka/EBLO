@@ -9,6 +9,7 @@ except ImportError:
 class BrokenFilesWindow:
     def __init__(self, parent=None, settings_manager=None):
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
+        self.window.withdraw()  # скрываем до позиционирования
         self.window.title("Битые файлы")
         self.settings_manager = settings_manager
         

@@ -35,6 +35,7 @@ class SearchWindow:
         self.db_path = Path(__file__).parent / '.library_cache.db'
 
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
+        self.window.withdraw()  # скрываем до позиционирования
         self.window.title("Поиск по библиотеке")
         self.window.minsize(800, 500)
 

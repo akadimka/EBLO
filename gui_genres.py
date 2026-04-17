@@ -15,6 +15,7 @@ except ImportError:
 class GenresManagerWindow(tk.Toplevel):
     def __init__(self, root, genres_manager, logger=None, settings_manager=None, update_callback=None):
         super().__init__(root)
+        self.withdraw()  # скрываем до позиционирования — без мигания
         self.title('Управление жанрами')
         self.genres_manager = genres_manager
         if hasattr(root, 'master'):
