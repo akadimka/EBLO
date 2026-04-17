@@ -61,6 +61,26 @@ def _register_app_window(window: tk.Tk) -> None:
     window.bind('<Destroy>',  on_destroy,   add=True)
 
 
+def _restore_focus_to_last() -> None:
+    """Вернуть фокус последнему зарегистрированному окну приложения."""
+    try:
+        import sys
+        if sys.platform != 'win32':
+            return
+        # Последний элемент _app_windows — самое «свежее» окно
+        for win in reversed(_app_windows):
+            try:
+                if win.winfo_exists() and win.state() != 'withdrawn':
+                    import ctypes
+                    hwnd = int(win.wm_frame(), 16)
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    return
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
 def _setup_taskbar(window: tk.Tk) -> None:
     """Гарантировать, что кнопка окна в Панели задач появится на мониторе окна.
 
@@ -97,7 +117,9 @@ def _setup_taskbar(window: tk.Tk) -> None:
         # 3. Hide → Show: Shell создаёт новую запись кнопки на текущем мониторе
         u32.ShowWindow(hwnd, SW_HIDE)
         u32.ShowWindow(hwnd, SW_SHOW)
-        u32.SetForegroundWindow(hwnd)
+
+        # Фокус всегда возвращаем последнему открытому окну, а не текущему
+        _restore_focus_to_last()
     except Exception:
         pass
 
