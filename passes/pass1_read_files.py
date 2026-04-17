@@ -105,8 +105,9 @@ def _get_author_for_file_worker(fb2_file: Path, work_dir: Path,
                 break
             continue
 
-        if current_dir in author_folder_cache:
-            author_name, confidence = author_folder_cache[current_dir]
+        cache_key = str(current_dir)
+        if cache_key in author_folder_cache:
+            author_name, confidence = author_folder_cache[cache_key]
             last_hit = author_name
 
         try:
