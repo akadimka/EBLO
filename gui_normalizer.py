@@ -1404,7 +1404,18 @@ class CSVNormalizerApp:
         # Создаем новое окно логов
         self.log_window = tk.Toplevel(self.root)
         self.log_window.title("Логи нормализации")
-        self.log_window.geometry("800x400")
+        try:
+            from window_persistence import setup_window_persistence
+            _settings = getattr(self, 'settings_manager', None) or getattr(
+                self.csv_service, 'settings', None)
+            if _settings:
+                setup_window_persistence(self.log_window, 'normalizer_log', _settings,
+                                         '800x400+100+100', parent_window=self.root)
+            else:
+                from window_persistence import _default_geometry_near_parent
+                self.log_window.geometry(_default_geometry_near_parent(self.root, 800, 400))
+        except Exception:
+            self.log_window.geometry('800x400')
         
         # Frame с Text и Scrollbar
         frame = ttk.Frame(self.log_window)

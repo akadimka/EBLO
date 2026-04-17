@@ -14,7 +14,7 @@ class BrokenFilesWindow:
         
         # Настройка сохранения размера и позиции окна
         if settings_manager:
-            setup_window_persistence(self.window, 'broken_files', settings_manager, '1000x600+300+250')
+            setup_window_persistence(self.window, 'broken_files', settings_manager, '1000x600+300+250', parent_window=parent)
         else:
             self.window.geometry("1000x600")
         

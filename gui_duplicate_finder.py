@@ -36,7 +36,7 @@ class DuplicateFinderWindow:
         self._searching = False
 
         if settings_manager:
-            setup_window_persistence(self.window, 'duplicate_finder', settings_manager, '1100x700+200+150')
+            setup_window_persistence(self.window, 'duplicate_finder', settings_manager, '1100x700+200+150', parent_window=parent)
             saved = settings_manager.settings.get('duplicate_finder_path', '')
             if saved and os.path.isdir(saved):
                 self.search_path.set(saved)

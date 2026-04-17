@@ -40,7 +40,7 @@ class SearchWindow:
 
         if settings_manager:
             setup_window_persistence(self.window, 'search', settings_manager,
-                                     '1100x600+150+100')
+                                     '1100x600+150+100', parent_window=parent)
         else:
             self.window.geometry('1100x600')
 

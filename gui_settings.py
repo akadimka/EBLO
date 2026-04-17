@@ -33,7 +33,7 @@ class SettingsWindow(tk.Toplevel):
         self.result = None
 
         # Настройка сохранения размера и позиции окна
-        setup_window_persistence(self, 'settings', self.settings_manager, '600x400+250+200')
+        setup_window_persistence(self, 'settings', self.settings_manager, '600x400+250+200', parent_window=master)
 
         # Управление окном через менеджер
         window_manager = get_window_manager()

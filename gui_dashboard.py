@@ -25,7 +25,7 @@ class DashboardWindow:
         self.window.minsize(700, 500)
 
         if settings_manager:
-            setup_window_persistence(self.window, 'dashboard', settings_manager, '800x600+150+100')
+            setup_window_persistence(self.window, 'dashboard', settings_manager, '800x600+150+100', parent_window=parent)
         else:
             self.window.geometry('800x600')
 

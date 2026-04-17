@@ -25,7 +25,7 @@ class SeriesGapsWindow:
         self.window.minsize(750, 450)
 
         if settings_manager:
-            setup_window_persistence(self.window, 'series_gaps', settings_manager, '900x550+160+120')
+            setup_window_persistence(self.window, 'series_gaps', settings_manager, '900x550+160+120', parent_window=parent)
         else:
             self.window.geometry('900x550')
 

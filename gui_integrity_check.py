@@ -123,7 +123,7 @@ class IntegrityCheckWindow:
 
         if settings_manager:
             setup_window_persistence(self.window, 'integrity_check', settings_manager,
-                                     '1000x600+150+100')
+                                     '1000x600+150+100', parent_window=parent)
         else:
             self.window.geometry('1000x600')
 

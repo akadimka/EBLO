@@ -786,7 +786,7 @@ class HelpWindow:
 
         if settings_manager:
             setup_window_persistence(self.window, 'help', settings_manager,
-                                     '1100x680+100+80')
+                                     '1100x680+100+80', parent_window=parent)
         else:
             self.window.geometry('1100x680')
 

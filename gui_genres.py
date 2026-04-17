@@ -33,8 +33,12 @@ class GenresManagerWindow(tk.Toplevel):
         except Exception as exc:
             messagebox.showerror('Ошибка загрузки жанров', f'Не удалось загрузить genres.xml:\n{exc}')
 
-        # Set default geometry if not using persistence
-        self.geometry('700x500')
+        # Set default geometry — placed near parent on the same monitor
+        try:
+            from window_persistence import _default_geometry_near_parent
+        except ImportError:
+            from .window_persistence import _default_geometry_near_parent
+        self.geometry(_default_geometry_near_parent(root, 700, 500))
         
         # Управление окном через менеджер (только если передали master window)
         if self.master_window != root:
@@ -333,7 +337,8 @@ class GenresManagerWindow(tk.Toplevel):
         
         # Настройка сохранения позиции окна
         if hasattr(self.master_window, 'settings'):
-            setup_window_persistence(win, 'genre_prompt', self.master_window.settings, '300x100+300+300')
+            setup_window_persistence(win, 'genre_prompt', self.master_window.settings, '300x100+300+300',
+                                         parent_window=self)
         tk.Label(win, text=text).pack(padx=10, pady=5)
         entry = tk.Entry(win)
         entry.insert(0, initial)
