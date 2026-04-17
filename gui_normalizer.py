@@ -699,11 +699,15 @@ class CSVNormalizerApp:
         
         # Переменные
         self.folder_path = tk.StringVar()
-        # Если папка передана, используем её, иначе используем по умолчанию
-        if folder_path and os.path.isdir(folder_path):
-            self.folder_path.set(folder_path)
-        else:
-            self.folder_path.set("E:/Users/dmitriy.murov/Downloads/Tribler/Downloads/Test1")
+        # Приоритет: аргумент → settings → пустая строка
+        saved = (
+            self.settings_manager.get_normalizer_folder()
+            if self.settings_manager else ''
+        )
+        initial = folder_path if (folder_path and os.path.isdir(folder_path)) else (
+            saved if (saved and os.path.isdir(saved)) else ''
+        )
+        self.folder_path.set(initial)
         
         # Переменная для прогресса
         self.progress_var = tk.StringVar(value="Готово")
@@ -849,6 +853,8 @@ class CSVNormalizerApp:
         folder = filedialog.askdirectory(initialdir=self.folder_path.get())
         if folder:
             self.folder_path.set(folder)
+            if self.settings_manager:
+                self.settings_manager.set_normalizer_folder(folder)
             self._log(f"Папка выбрана: {folder}")
             
     def create_csv(self):

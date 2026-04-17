@@ -26,6 +26,7 @@ class SettingsManager:
         self.settings = {
             'library_path': '',
             'last_scan_path': '',
+            'normalizer_folder': '',
             'genres_file_path': 'genres.xml',  # Путь к файлу жанров
             'genre_association_method': 'context_menu',
             'window_sizes': {},  # Для хранения размеров окон
@@ -137,6 +138,15 @@ class SettingsManager:
     def get_last_scan_path(self):
         """Get last scan path / Получить последний путь сканирования."""
         return self.settings.get('last_scan_path', '')
+
+    def set_normalizer_folder(self, path: str) -> None:
+        """Сохранить последнюю папку окна нормализации."""
+        self.settings['normalizer_folder'] = path
+        self.save()
+
+    def get_normalizer_folder(self) -> str:
+        """Получить последнюю папку окна нормализации."""
+        return self.settings.get('normalizer_folder', '')
 
     def get_genres_file_path(self):
         """Get genres file path / Получить путь к файлу жанров."""
