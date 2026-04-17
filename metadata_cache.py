@@ -46,9 +46,21 @@ class MetadataCache:
         self._init_db()
         self._check_parser_version()
 
+    def _connect(self) -> sqlite3.Connection:
+        """Открыть соединение с БД с таймаутом и WAL-режимом.
+
+        WAL (Write-Ahead Logging) позволяет одновременные READ + один WRITE
+        без блокировок. Timeout=30 — ждать освобождения блокировки вместо
+        немедленной ошибки при конкуренции процессов ProcessPoolExecutor.
+        """
+        conn = sqlite3.connect(self.cache_path, timeout=30)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA synchronous=NORMAL')
+        return conn
+
     def _init_db(self):
         """Initialize the cache database."""
-        with sqlite3.connect(self.cache_path) as conn:
+        with self._connect() as conn:
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS file_metadata (
                     file_path TEXT PRIMARY KEY,
@@ -68,7 +80,7 @@ class MetadataCache:
 
     def _check_parser_version(self):
         """Сбросить кэш если исходники парсера изменились."""
-        with sqlite3.connect(self.cache_path) as conn:
+        with self._connect() as conn:
             row = conn.execute(
                 "SELECT value FROM cache_meta WHERE key = 'parser_version'"
             ).fetchone()
@@ -91,7 +103,7 @@ class MetadataCache:
             stat = file_path.stat()
             current_mtime = stat.st_mtime
 
-            with sqlite3.connect(self.cache_path) as conn:
+            with self._connect() as conn:
                 row = conn.execute(
                     "SELECT metadata, file_hash FROM file_metadata WHERE file_path = ? AND mtime = ?",
                     (str(file_path), current_mtime)
@@ -111,7 +123,7 @@ class MetadataCache:
             stat = file_path.stat()
             file_hash = self._calculate_hash(file_path)
 
-            with sqlite3.connect(self.cache_path) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     """INSERT OR REPLACE INTO file_metadata
                        (file_path, file_hash, mtime, metadata, cached_at)
@@ -120,7 +132,9 @@ class MetadataCache:
                      json.dumps(metadata), datetime.now().timestamp())
                 )
                 conn.commit()
-        except OSError:
+        except (OSError, sqlite3.OperationalError):
+            # Блокировка БД при параллельной записи — некритично,
+            # файл будет перечитан при следующем запуске.
             pass
 
     def _calculate_hash(self, file_path: Path) -> str:
@@ -136,13 +150,13 @@ class MetadataCache:
 
     def clear_cache(self):
         """Clear all cached metadata."""
-        with sqlite3.connect(self.cache_path) as conn:
+        with self._connect() as conn:
             conn.execute("DELETE FROM file_metadata")
             conn.commit()
 
     def get_cache_stats(self) -> Dict[str, int]:
         """Get cache statistics."""
-        with sqlite3.connect(self.cache_path) as conn:
+        with self._connect() as conn:
             total = conn.execute("SELECT COUNT(*) FROM file_metadata").fetchone()[0]
             recent = conn.execute(
                 "SELECT COUNT(*) FROM file_metadata WHERE cached_at > ?",
@@ -153,6 +167,6 @@ class MetadataCache:
     def cleanup_old_entries(self, max_age_days: int = 30):
         """Remove cache entries older than max_age_days."""
         cutoff = datetime.now().timestamp() - (max_age_days * 86400)
-        with sqlite3.connect(self.cache_path) as conn:
+        with self._connect() as conn:
             conn.execute("DELETE FROM file_metadata WHERE cached_at < ?", (cutoff,))
             conn.commit()

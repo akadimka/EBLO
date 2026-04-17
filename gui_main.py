@@ -1410,6 +1410,10 @@ class MainWindow(tk.Tk):
         # открывались рядом с главным окном (на том же мониторе).
         self.settings.clear_secondary_window_geometries()
         self.destroy()
+        # Принудительно завершить процесс — убивает все фоновые потоки
+        # и дочерние процессы (ProcessPoolExecutor workers) немедленно.
+        import os
+        os._exit(0)
 
 
 def main():

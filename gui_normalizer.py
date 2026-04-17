@@ -626,13 +626,28 @@ class StdoutRedirector:
         self._last_progress: str = ""
         self._timer_active = False
 
+    @staticmethod
+    def _extract_progress(message: str) -> str:
+        """Извлечь читаемую строку прогресса из вывода tqdm или обычного текста.
+
+        tqdm пишет через \\r: "\\rProcessing FB2 files:  30%|████| 3155/10351 [00:54<02:04]"
+        Берём последний непустой фрагмент после разбивки по \\r и \\n.
+        """
+        # Разбить по \r и \n, взять последний непустой кусок
+        parts = message.replace('\r', '\n').split('\n')
+        for part in reversed(parts):
+            clean = part.strip()
+            if clean and not clean.startswith('='):
+                return clean
+        return ''
+
     def write(self, message):
         """Buffer the message; flush to UI at most every _FLUSH_INTERVAL_MS ms."""
         self.original_stdout.write(message)
         with self._lock:
             self._pending_lines.append(message)
-            display = message.rstrip()
-            if display and not display.startswith("="):
+            display = self._extract_progress(message)
+            if display:
                 self._last_progress = display
             if not self._timer_active:
                 self._timer_active = True
