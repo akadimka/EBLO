@@ -137,21 +137,30 @@ class FB2CompilerService:
     def _series_suffix(cls, book_count: int, volume_range: str) -> str:
         """Вернуть суффикс для имени файла компиляции.
 
-        - 2..10 конечных томов: используем сервисное слово (Дилогия, Трилогия…)
-        - больше 10: «т. 1-17»
-        - если volume_range пустой: просто «Сборник»
+        Служебное слово (Дилогия, Трилогия…) присваивается ТОЛЬКО если:
+          1. Диапазон начинается с тома 1 (нумерация с начала серии).
+          2. Количество томов ≤ 10 (есть подходящее слово).
+        Во всех остальных случаях: «т. X-Y».
+        Пустой volume_range → «компиляция романов».
 
-        ВАЖНО: n вычисляется из диапазона томов (volume_range), а не из количества
-        исходных файлов (book_count), чтобы предкомпиляция, покрывающая несколько
-        томов, считалась корректно (например, файл 1-4 + отдельный том 5 = 5 томов,
-        а не 2 исходных файла → «Пенталогия», а не «Дилогия»).
+        n вычисляется из диапазона (volume_range), а не из числа файлов, чтобы
+        предкомпиляция-диапазон (файл «1-4» + том 5 = 5 томов) считалась верно.
         """
         if not volume_range:
             return 'компиляция романов'
-        # Количество конечных томов из диапазона
         rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', volume_range.strip())
-        n = int(rng.group(2)) - int(rng.group(1)) + 1 if rng else book_count
-        if 2 <= n < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n]:
+        if rng:
+            lo = int(rng.group(1))
+            n  = int(rng.group(2)) - lo + 1
+        else:
+            lo = 1   # одиночный том вида "5" — не начинается с 1
+            try:
+                lo = int(volume_range.strip())
+            except ValueError:
+                pass
+            n = book_count
+        # Служебное слово только если нумерация с тома 1
+        if lo == 1 and 2 <= n < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n]:
             return cls._SERIES_WORDS[n]
         return f'т. {volume_range}'
 
