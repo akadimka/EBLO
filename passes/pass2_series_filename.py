@@ -449,10 +449,18 @@ class Pass2SeriesFilename:
                                 # Проверяем: папка-автор сама является циклом?
                                 # Признак: "Серия (Автор)" — _extract_series_from_folder_name вернёт
                                 # что-то отличное от исходного имени папки.
+                                # НО: если скобки содержат псевдоним/псевдоним автора
+                                # ("Гоблин (MeXXanik)") — это НЕ "Серия (Автор)", а папка автора.
                                 author_folder_series = self._extract_series_from_folder_name(part)
+                                _parens_match = re.search(r'\(([^)]+)\)\s*$', part)
+                                _parens_content = _parens_match.group(1).strip() if _parens_match else ''
+                                _parens_is_author = bool(_parens_content) and _author_matches_folder(
+                                    author_name, _parens_content
+                                )
                                 has_parent_series = (
                                     bool(author_folder_series) and
-                                    author_folder_series.strip().lower() != part.strip().lower()
+                                    author_folder_series.strip().lower() != part.strip().lower() and
+                                    not _parens_is_author
                                 )
 
                                 if has_parent_series:
