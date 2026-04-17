@@ -149,62 +149,53 @@ class Pass6Abbreviations:
             Dictionary {surname.lower(): [full_names]}
         """
         authors_map: Dict[str, List[str]] = {}
-        seen = set()  # For deduplication
-        
+        seen = set()      # нормализованные строки — дедупликация результатов
+        seen_raw = set()  # сырые строки — пропускаем normalize_format если уже видели
+        norm_cache: Dict[str, str] = {}  # raw → normalized, избегаем повторных вызовов
+
+        def _add(normalized: str) -> None:
+            """Добавить нормализованного автора в authors_map."""
+            if not normalized or normalized in seen:
+                return
+            parts = normalized.split()
+            if not parts:
+                return
+            key = parts[0].lower()
+            if key:
+                authors_map.setdefault(key, []).append(normalized)
+                seen.add(normalized)
+
+        def _normalize_cached(raw: str) -> str:
+            if raw not in norm_cache:
+                norm_cache[raw] = self.normalizer.normalize_format(raw)
+            return norm_cache[raw]
+
         # Collect from proposed_author (already processed)
         for record in records:
             if record.proposed_author and record.proposed_author != "Сборник":
                 author = record.proposed_author
-                
-                # Handle multi-author case
                 if ', ' in author:
                     for single_author in author.split(', '):
                         single_author = single_author.strip()
                         if single_author and '.' not in single_author:
-                            key = single_author.split()[0].lower()  # First word = surname
-                            if key and single_author not in seen:
-                                if key not in authors_map:
-                                    authors_map[key] = []
-                                authors_map[key].append(single_author)
-                                seen.add(single_author)
-
+                            _add(single_author)
                 else:
-                    # Single author
                     if '.' not in author:
-                        key = author.split()[0].lower()  # First word = surname
-                        if key and author not in seen:
-                            if key not in authors_map:
-                                authors_map[key] = []
-                            authors_map[key].append(author)
-                            seen.add(author)
+                        _add(author)
 
-            
             # Collect from metadata_authors (original source - best for abbreviation expansion)
             if record.metadata_authors and record.metadata_authors != "Сборник":
                 author = record.metadata_authors
-                
-                # Handle multi-author case (could use , or ;)
                 sep = ', ' if ', ' in author else ('; ' if '; ' in author else None)
                 if sep:
                     for single_author in author.split(sep):
                         single_author = single_author.strip()
-                        if single_author:
-                            normalized = self.normalizer.normalize_format(single_author)
-                            key = normalized.split()[0].lower()  # First word = surname
-                            if key and normalized not in seen:
-                                if key not in authors_map:
-                                    authors_map[key] = []
-                                authors_map[key].append(normalized)
-                                seen.add(normalized)
-
+                        if single_author and single_author not in seen_raw:
+                            seen_raw.add(single_author)
+                            _add(_normalize_cached(single_author))
                 else:
-                    # Single author
-                    normalized = self.normalizer.normalize_format(author)
-                    key = normalized.split()[0].lower()  # First word = surname
-                    if key and normalized not in seen:
-                        if key not in authors_map:
-                            authors_map[key] = []
-                        authors_map[key].append(normalized)
-                        seen.add(normalized)
-        
+                    if author not in seen_raw:
+                        seen_raw.add(author)
+                        _add(_normalize_cached(author))
+
         return authors_map
