@@ -58,8 +58,12 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
             if cache:
                 cache.cache_metadata(fb2_file, meta)
 
-        author, author_source = _get_author_for_file_worker(
-            fb2_file, work_dir, author_folder_cache, folder_parse_limit)
+        # folder_author_map: {str(parent_folder): (author, source)} — precomputed per unique folder
+        folder_key = str(fb2_file.parent)
+        if folder_key in author_folder_cache:
+            author, author_source = author_folder_cache[folder_key]
+        else:
+            author, author_source = "", ""
 
         # Create record
         record = BookRecord(
@@ -85,7 +89,11 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
 
 def _get_author_for_file_worker(fb2_file: Path, work_dir: Path,
                               author_folder_cache: Dict, folder_parse_limit: int) -> Tuple[str, str]:
-    """Simplified author extraction for worker"""
+    """Walk up folder hierarchy to find author from cache.
+
+    Used both for precomputing folder_author_map (one call per unique folder)
+    and as fallback if called directly with the serialized cache.
+    """
     current_dir = fb2_file.parent
     parse_levels = 0
     last_hit = ""
@@ -211,10 +219,26 @@ class Pass1ReadFiles:
 
         print(f"[PASS 1] Found {total} files, processing in parallel...")
 
-        # Serialize cache for workers
+        # Serialize cache for hierarchy lookup
         author_folder_cache_serialized = {}
         for path, (author, conf) in self.author_folder_cache.items():
             author_folder_cache_serialized[str(path)] = (author, conf)
+
+        # Precompute author per unique parent folder once — воркеры делают один dict-lookup
+        # вместо обхода иерархии для каждого файла.
+        unique_folders = {fb2_file.parent for fb2_file in fb2_files}
+        folder_author_map: dict = {}  # {str(folder): (author, source)}
+        for folder in unique_folders:
+            author, source = _get_author_for_file_worker(
+                folder / '_dummy',   # файл не используется, нужен только parent
+                self.work_dir,
+                author_folder_cache_serialized,
+                self.folder_parse_limit,
+            )
+            if author:
+                folder_author_map[str(folder)] = (author, source)
+        print(f"[PASS 1] Precomputed authors for {len(folder_author_map)} folders "
+              f"({len(unique_folders)} unique)")
 
         settings_dict = getattr(self.extractor.settings, 'settings', {}) if hasattr(self.extractor, 'settings') else {}
         use_cache = settings_dict.get('performance', {}).get('enable_caching', True)
@@ -235,7 +259,7 @@ class Pass1ReadFiles:
                     process_file_worker,
                     str(fb2_file),
                     str(self.work_dir),
-                    author_folder_cache_serialized,
+                    folder_author_map,   # плоская карта: str(parent) → (author, source)
                     self.folder_parse_limit,
                     settings_dict,
                     use_cache,
