@@ -238,22 +238,37 @@ class FB2CompilerService:
                 # Берём предкомпиляцию с максимальным охватом
                 best_pre, best_lo, best_hi = max(precompiled, key=lambda t: t[2] - t[1])
                 best_count = best_hi - best_lo + 1
-                # Прочие предкомпиляции (менее полные) — на удаление
-                for book, _, _ in precompiled:
-                    if book is not best_pre:
+                # Прочие предкомпиляции — на удаление ТОЛЬКО если их диапазон полностью
+                # покрыт «лучшей» предкомпиляцией. Если не покрыт (например "1-2" + "3-4"
+                # — непересекающиеся диапазоны) — они нужны как источники, не дубликаты.
+                other_precompiled: List[Tuple] = []
+                for entry in precompiled:
+                    book, lo, hi = entry
+                    if book is best_pre:
+                        continue
+                    if best_lo <= lo and hi <= best_hi:
+                        # Полностью покрыта лучшей → дубликат
                         duplicate_paths.append(book.abs_path)
+                    else:
+                        # Не покрыта → сохраняем как источник
+                        other_precompiled.append(entry)
 
-                # АКТУАЛЬНА только если ВСЕ обычные тома входят в диапазон предкомпиляции.
+                # АКТУАЛЬНА только если ВСЕ обычные тома входят в диапазон предкомпиляции
+                # И нет других непокрытых предкомпиляций (other_precompiled пуст).
                 # Пример: предкомпиляция 1-3 + обычный том 4 → НЕ актуальна (том 4 не покрыт).
+                # Пример: предкомпиляция 1-2 + предкомпиляция 3-4 → НЕ актуальна (нужно объединить).
                 def _vol_num_for_check(b: 'CompilationBook') -> Optional[int]:
                     if b.sort_key and b.sort_key[0] == 0:
                         return b.sort_key[1]
                     return None
 
-                all_covered = all(
-                    (n := _vol_num_for_check(r)) is not None and best_lo <= n <= best_hi
-                    for r in regular_books
-                ) if regular_books else True
+                all_covered = (
+                    not other_precompiled and
+                    (all(
+                        (n := _vol_num_for_check(r)) is not None and best_lo <= n <= best_hi
+                        for r in regular_books
+                    ) if regular_books else True)
+                )
 
                 if all_covered:
                     # 1. АКТУАЛЬНА — компиляция уже сделана, новая не нужна.
@@ -290,6 +305,19 @@ class FB2CompilerService:
                             duplicate_paths.append(r.abs_path)
                         remaining = [r for r in regular_books if r not in covered_individually]
                         books = [best_pre] + remaining
+
+                    # Добавляем прочие предкомпиляции с непересекающимися диапазонами
+                    # как дополнительные источники (они уже НЕ в duplicate_paths).
+                    for other_book, other_lo, other_hi in other_precompiled:
+                        # Проверяем: все тома этой предкомпиляции уже есть отдельно?
+                        other_fully_individual = all(
+                            any(_vol_num(r) == v for r in regular_books)
+                            for v in range(other_lo, other_hi + 1)
+                        )
+                        if other_fully_individual:
+                            duplicate_paths.append(other_book.abs_path)
+                        else:
+                            books.append(other_book)
             else:
                 books = regular_books
 
