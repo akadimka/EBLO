@@ -331,14 +331,13 @@ class CompilerDialog:
             for g in to_compile:
                 r = self._service.compile_group(g, None, delete_sources=delete_now)
                 results.append(r)
-            self._win.after(0, lambda: self._on_compile_done(results, skipped, delete_now))
+            self._win.after(0, lambda: self._on_compile_done(results, delete_now))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_compile_done(
         self,
         results: List[CompilationResult],
-        skipped: List[CompilationGroup],
         delete_now: bool,
     ):
         ok      = [r for r in results if r.success]
@@ -347,7 +346,7 @@ class CompilerDialog:
         self._compile_btn.configure(state=tk.NORMAL)
         self._sel_all_btn.configure(state=tk.NORMAL)
         self._status_var.set(
-            f'Готово: {len(ok)} успешно, {len(failed)} ошибок, {len(skipped)} пропущено'
+            f'Готово: {len(ok)} успешно, {len(failed)} ошибок'
         )
 
         # Если не удаляли сразу — предложить удалить сейчас
@@ -369,9 +368,4 @@ class CompilerDialog:
             lines.append(f'\nОшибок: {len(failed)}')
             for r in failed:
                 lines.append(f'  ✗ {r.group.series}: {r.error}')
-        if skipped:
-            lines.append(f'\nПропущено (порядок не определён): {len(skipped)}')
-            for g in skipped:
-                lines.append(f'  ⚠ {g.author} / {g.series}')
-
         messagebox.showinfo('Результат компиляции', '\n'.join(lines), parent=self._win)
