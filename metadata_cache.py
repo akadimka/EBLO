@@ -6,12 +6,45 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 
 
+# Файлы парсера, от которых зависит качество извлечения метаданных.
+# При изменении любого из них весь кэш автоматически сбрасывается.
+_PARSER_SOURCE_FILES = [
+    'fb2_sax_extractor.py',
+    'fb2_author_extractor.py',
+    'passes/pass1_read_files.py',
+]
+
+
+def _compute_parser_version() -> str:
+    """Вычислить хэш исходников парсера.
+
+    Если код парсера изменился — хэш изменится → кэш будет сброшен
+    при следующем запуске пайплайна.
+    """
+    h = hashlib.md5()
+    base = Path(__file__).parent
+    for rel in _PARSER_SOURCE_FILES:
+        p = base / rel
+        try:
+            h.update(p.read_bytes())
+        except OSError:
+            h.update(rel.encode())
+    return h.hexdigest()
+
+
 class MetadataCache:
-    """SQLite-based cache for FB2 file metadata to avoid re-parsing unchanged files."""
+    """SQLite-based cache for FB2 file metadata to avoid re-parsing unchanged files.
+
+    Автоматически сбрасывается при изменении исходников парсера —
+    таким образом фиксы в логике всегда отражаются в результатах
+    следующего запуска пайплайна без ручного вмешательства.
+    """
 
     def __init__(self, cache_path: Path = Path("metadata_cache.db")):
         self.cache_path = cache_path
+        self._parser_version = _compute_parser_version()
         self._init_db()
+        self._check_parser_version()
 
     def _init_db(self):
         """Initialize the cache database."""
@@ -25,7 +58,32 @@ class MetadataCache:
                     cached_at REAL
                 )
             ''')
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS cache_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
             conn.commit()
+
+    def _check_parser_version(self):
+        """Сбросить кэш если исходники парсера изменились."""
+        with sqlite3.connect(self.cache_path) as conn:
+            row = conn.execute(
+                "SELECT value FROM cache_meta WHERE key = 'parser_version'"
+            ).fetchone()
+            stored_version = row[0] if row else None
+
+            if stored_version != self._parser_version:
+                conn.execute("DELETE FROM file_metadata")
+                conn.execute(
+                    "INSERT OR REPLACE INTO cache_meta (key, value) VALUES ('parser_version', ?)",
+                    (self._parser_version,)
+                )
+                conn.commit()
+                if stored_version is not None:
+                    # Не первый запуск — сообщаем о сбросе
+                    print(f"[CACHE] Парсер обновлён — кэш метаданных сброшен")
 
     def get_cached_metadata(self, file_path: Path) -> Optional[Dict[str, Any]]:
         """Get cached metadata if file hasn't changed."""
@@ -41,15 +99,8 @@ class MetadataCache:
 
                 if row:
                     metadata_json, cached_hash = row
-                    # Verify hash hasn't changed (extra safety)
                     if self._calculate_hash(file_path) == cached_hash:
-                        meta = json.loads(metadata_json)
-                        # Не возвращать запись где и авторы и заголовок пустые —
-                        # это признак сбоя парсинга (битая кодировка и т.п.).
-                        # Такой файл будет перечитан и результат перекэширован.
-                        if not meta.get('authors') and not meta.get('title'):
-                            return None
-                        return meta
+                        return json.loads(metadata_json)
         except (OSError, json.JSONDecodeError):
             pass
         return None
@@ -70,7 +121,7 @@ class MetadataCache:
                 )
                 conn.commit()
         except OSError:
-            pass  # Silently fail if can't cache
+            pass
 
     def _calculate_hash(self, file_path: Path) -> str:
         """Calculate file hash for verification."""
@@ -95,7 +146,7 @@ class MetadataCache:
             total = conn.execute("SELECT COUNT(*) FROM file_metadata").fetchone()[0]
             recent = conn.execute(
                 "SELECT COUNT(*) FROM file_metadata WHERE cached_at > ?",
-                (datetime.now().timestamp() - 86400,)  # Last 24 hours
+                (datetime.now().timestamp() - 86400,)
             ).fetchone()[0]
             return {"total_cached": total, "recently_cached": recent}
 
