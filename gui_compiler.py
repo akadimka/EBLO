@@ -190,6 +190,17 @@ class CompilerDialog:
         self._det_tree.grid(row=0, column=0, sticky='nsew')
         det_vsb.grid(row=0, column=1, sticky='ns')
 
+        # ── Строка предпросмотра имени файла ─────────────────────────
+        fname_frm = ttk.Frame(bot_frm)
+        fname_frm.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(4, 0))
+        ttk.Label(fname_frm, text='Имя файла:', foreground='#666666').pack(side=tk.LEFT, padx=(2, 6))
+        self._fname_var = tk.StringVar(value='—')
+        ttk.Label(
+            fname_frm, textvariable=self._fname_var,
+            foreground='#0067C0', font=('Segoe UI', 9, 'italic'),
+            anchor='w',
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         paned.add(bot_frm, weight=1)
 
     # ------------------------------------------------------------------
@@ -263,6 +274,7 @@ class CompilerDialog:
         """Показать детали выбранной группы."""
         sel = self._tree.selection()
         if not sel:
+            self._fname_var.set('—')
             return
         idx = int(sel[0])
         if idx >= len(self._groups):
@@ -288,6 +300,19 @@ class CompilerDialog:
                     sn,
                 ),
             )
+
+        # Предпросмотр имени файла компиляции
+        try:
+            import re as _re
+            clean_series = self._service._clean_series_name(group.series)
+            safe_author  = _re.sub(r'[\\/:*?"<>|]', '_', group.author)
+            safe_series  = _re.sub(r'[\\/:*?"<>|]', '_', clean_series)
+            volume_range = group.volume_range or self._service._compute_volume_range(group.books)
+            suffix       = self._service._series_suffix(len(group.books), volume_range)
+            fname        = f'{safe_author} - {safe_series} ({suffix}).fb2'
+            self._fname_var.set(fname)
+        except Exception:
+            self._fname_var.set('—')
 
     def _select_all(self):
         """Выделить все строки в таблице групп."""
