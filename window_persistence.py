@@ -14,6 +14,30 @@ from typing import Optional, Tuple
 # Virtual screen helpers (multi-monitor)
 # ---------------------------------------------------------------------------
 
+def _detach_from_owner(window: tk.Tk) -> None:
+    """Remove Win32 owner relationship so taskbar button appears on window's monitor.
+
+    By default tkinter Toplevel windows are owned by the main Tk window, which
+    makes Windows place the taskbar button on the *owner's* monitor regardless
+    of where the child window is actually displayed.  Clearing GWL_HWNDPARENT
+    lets the Shell track the button to the window's own monitor.
+
+    Safe to call on non-Windows: the try/except silences any errors.
+    """
+    try:
+        import sys
+        if sys.platform != 'win32':
+            return
+        import ctypes
+        window.update_idletasks()
+        # wm_frame() returns the HWND of the top-level decoration frame as a hex string
+        hwnd = int(window.wm_frame(), 16)
+        GWL_HWNDPARENT = -8
+        ctypes.windll.user32.SetWindowLongPtrW(hwnd, GWL_HWNDPARENT, 0)
+    except Exception:
+        pass
+
+
 def _get_virtual_screen_bounds() -> Tuple[int, int, int, int]:
     """Return (x, y, width, height) of the virtual screen spanning all monitors.
 
@@ -299,6 +323,7 @@ def setup_window_persistence(window: tk.Tk,
     def restore_deferred() -> None:
         restore_window_geometry(window, window_name, settings_manager,
                                 default_geometry, parent_window=parent_window)
+        _detach_from_owner(window)
 
     window.after(1, restore_deferred)
 
@@ -307,6 +332,7 @@ def setup_window_persistence(window: tk.Tk,
         window.unbind('<Map>')
         restore_window_geometry(window, window_name, settings_manager,
                                 default_geometry, parent_window=parent_window)
+        _detach_from_owner(window)
 
     window.bind('<Map>', on_first_map)
 
@@ -337,6 +363,7 @@ def create_toplevel_with_persistence(parent: tk.Tk,
 
     restore_window_geometry(dlg, window_name, settings_manager,
                             default_geometry, parent_window=parent)
+    _detach_from_owner(dlg)
 
     def on_close() -> None:
         save_window_geometry(dlg, window_name, settings_manager)
