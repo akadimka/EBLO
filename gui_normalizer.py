@@ -1244,6 +1244,48 @@ class CSVNormalizerApp:
             sys.stdout = original_stdout
             self.processing = False
 
+    def _filter_female_authors(self, records: list):
+        """Найти файлы с авторами-женщинами из уже загруженных records.
+
+        Не перезапускает pipeline — использует готовые proposed_author.
+        """
+        try:
+            import re as _re
+            settings = self.settings_manager if self.settings_manager else self.csv_service.settings
+            male_set   = set(n.lower() for n in settings.get_male_names())
+            female_set = set(n.lower() for n in settings.get_female_names())
+
+            def is_female_author(author_str: str) -> bool:
+                parts = author_str.split()
+                if not parts:
+                    return False
+                for word in parts:
+                    if word.lower() in male_set:
+                        return False
+                for word in parts:
+                    if word.lower() in female_set:
+                        return True
+                return False
+
+            self.root.after(0, lambda: self.progress_var.set("Фильтрация авторов…"))
+            rows = []
+            for rec in records:
+                combined = rec.proposed_author or ""
+                if not combined or combined in ("Сборник", "Соавторство", "[unknown]"):
+                    continue
+                authors = [a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()]
+                if authors and all(is_female_author(a) for a in authors):
+                    rows.append((rec.file_path, combined))
+
+            work_dir = self.folder_path.get()
+            self.root.after(0, lambda: self.progress_var.set(f"Найдено: {len(rows)} файлов"))
+            self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows, work_dir))
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            self.root.after(0, lambda: messagebox.showerror("Ошибка", f"{e}\n\n{tb}"))
+            self.root.after(0, lambda: self.progress_var.set("ОШИБКА"))
+
     def apply_changes(self):
         messagebox.showinfo("Информация", "Применение изменений")
 
@@ -1264,6 +1306,19 @@ class CSVNormalizerApp:
         if not folder or not os.path.isdir(folder):
             messagebox.showwarning("Внимание", "Укажите корректную рабочую папку")
             return
+
+        # Если pipeline уже прогнан — используем готовые records, не перезапускаем.
+        existing_records = getattr(self, '_all_records', [])
+        if existing_records:
+            self._log("Поиск файлов с авторами-женщинами (из текущих данных)...")
+            thread = threading.Thread(
+                target=self._filter_female_authors,
+                args=(existing_records,),
+                daemon=True,
+            )
+            thread.start()
+            return
+
         fb2_count = sum(1 for _ in Path(folder).rglob('*.fb2'))
         if fb2_count == 0:
             messagebox.showwarning("Папка пуста",
@@ -1274,7 +1329,7 @@ class CSVNormalizerApp:
             messagebox.showwarning("Внимание", "Обработка уже в процессе")
             return
         self.processing = True
-        self._log("Поиск файлов с авторами-женщинами...")
+        self._log("Поиск файлов с авторами-женщинами (полный пайплайн)...")
         thread = threading.Thread(
             target=self._run_female_pipeline,
             args=(folder,),
