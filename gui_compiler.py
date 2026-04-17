@@ -122,8 +122,9 @@ class CompilerDialog:
         self._tree.column('order',  width=200, minwidth=140)
         self._tree.column('range',  width=80,  minwidth=60,  anchor='center')
 
-        self._tree.tag_configure('ok',   background=_ORDER_OK_COLOR)
-        self._tree.tag_configure('warn', background=_ORDER_WARN_COLOR)
+        self._tree.tag_configure('ok',    background=_ORDER_OK_COLOR)
+        self._tree.tag_configure('warn',  background=_ORDER_WARN_COLOR)
+        self._tree.tag_configure('alpha', background='#E8F4FD')  # бледно-голубой
 
         self._tree.grid(row=0, column=0, sticky='nsew')
         vsb.grid(row=0, column=1, sticky='ns')
@@ -207,18 +208,20 @@ class CompilerDialog:
             return
 
         total      = len(groups)
-        skipped    = sum(1 for g in groups if not g.order_determined)
-        compilable = total - skipped
+        compilable = total  # все группы теперь компилируемы
 
         for idx, g in enumerate(groups):
             # Описание источника сортировки
             sources = {b.sort_source for b in g.books}
             sources.discard('unknown')
-            if g.order_determined:
+            if getattr(g, 'alphabetical_order', False):
+                order_txt = '📖 По названию (нет нумерации томов)'
+                tag = 'alpha'
+            elif g.order_determined:
                 order_txt = ', '.join(_SORT_SOURCE_LABEL.get(s, s) for s in sources)
                 tag = 'ok'
             else:
-                order_txt = '⚠ Порядок не определён — пропущено'
+                order_txt = '⚠ Порядок частично не определён'
                 tag = 'warn'
 
             self._tree.insert(
@@ -234,9 +237,15 @@ class CompilerDialog:
                 tags=(tag,),
             )
 
-        self._status_var.set(
-            f'Групп: {total}  |  К компиляции: {compilable}  |  Пропущено: {skipped}'
-        )
+        alpha = sum(1 for g in groups if getattr(g, 'alphabetical_order', False))
+        warn  = sum(1 for g in groups if not g.order_determined
+                    and not getattr(g, 'alphabetical_order', False))
+        status = f'Групп: {total}  |  К компиляции: {compilable}'
+        if alpha:
+            status += f'  |  По названию: {alpha}'
+        if warn:
+            status += f'  |  Частично: {warn}'
+        self._status_var.set(status)
         self._compile_btn.configure(state=tk.NORMAL if compilable else tk.DISABLED)
 
     # ------------------------------------------------------------------
@@ -259,8 +268,9 @@ class CompilerDialog:
         for pos, book in enumerate(group.books, 1):
             title     = (book.record.file_title or '').strip() or book.abs_path.stem
             sort_lbl  = _SORT_SOURCE_LABEL.get(book.sort_source, book.sort_source)
-            sn = book.volume_label or ('?' if book.order_ambiguous else '—')
-            warn      = ' ⚠' if book.order_ambiguous else ''
+            is_alpha = getattr(group, 'alphabetical_order', False)
+            sn = book.volume_label or ('α' if is_alpha else ('?' if book.order_ambiguous else '—'))
+            warn = '' if is_alpha else (' ⚠' if book.order_ambiguous else '')
             self._det_tree.insert(
                 '', tk.END,
                 values=(
@@ -288,24 +298,19 @@ class CompilerDialog:
             return
 
         selected_groups = [self._groups[int(iid)] for iid in sel]
-        # Фильтруем группы с неопределённым порядком
-        to_compile = [g for g in selected_groups if g.order_determined]
-        skipped    = [g for g in selected_groups if not g.order_determined]
+        to_compile = selected_groups  # все группы компилируемы
+        alpha_cnt  = sum(1 for g in to_compile if getattr(g, 'alphabetical_order', False))
 
         if not to_compile:
-            messagebox.showwarning(
-                'Внимание',
-                'Во всех выбранных группах порядок книг не определён.\n'
-                'Компиляция невозможна.',
-                parent=self._win,
-            )
+            messagebox.showwarning('Внимание', 'Выберите группы для компиляции',
+                                   parent=self._win)
             return
 
         delete_now = self._delete_var.get()
 
         msg = f'Скомпилировать {len(to_compile)} групп(ы)?'
-        if skipped:
-            msg += f'\n(Пропущено {len(skipped)} с неопределённым порядком)'
+        if alpha_cnt:
+            msg += f'\n({alpha_cnt} будут упорядочены по названию → «компиляция романов»)'
         if delete_now:
             msg += '\n\n⚠ Исходные файлы будут удалены сразу!'
         if not messagebox.askyesno('Подтверждение', msg, parent=self._win):

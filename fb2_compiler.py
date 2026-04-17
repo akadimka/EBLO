@@ -56,6 +56,7 @@ class CompilationGroup:
     order_determined: bool  # False если хотя бы у одной книги ambiguous
     volume_range: str       # "1-7" или ""
     duplicate_paths: List[Path] = None  # Файлы-дубликаты для автоматического удаления
+    alphabetical_order: bool = False    # True — порядок не определён, отсортировано по названию
 
     def __post_init__(self):
         if self.duplicate_paths is None:
@@ -146,7 +147,7 @@ class FB2CompilerService:
         а не 2 исходных файла → «Пенталогия», а не «Дилогия»).
         """
         if not volume_range:
-            return 'Сборник'
+            return 'компиляция романов'
         # Количество конечных томов из диапазона
         rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', volume_range.strip())
         n = int(rng.group(2)) - int(rng.group(1)) + 1 if rng else book_count
@@ -294,7 +295,7 @@ class FB2CompilerService:
                 # Даже если группа не идёт на компиляцию, дубликаты запомняем для удаления
                 # (но они будут обработаны отдельно, если потребуется)
                 continue
-            books_sorted, order_determined = self._sort_books(books)
+            books_sorted, order_determined, alphabetical_order = self._sort_books(books)
 
             volume_range = self._compute_volume_range(books_sorted) if order_determined else ''
 
@@ -305,6 +306,7 @@ class FB2CompilerService:
                 order_determined=order_determined,
                 volume_range=volume_range,
                 duplicate_paths=duplicate_paths,
+                alphabetical_order=alphabetical_order,
             ))
 
         groups.sort(key=lambda g: (g.author.lower(), g.series.lower()))
@@ -634,13 +636,27 @@ class FB2CompilerService:
 
     def _sort_books(
         self, books: List[CompilationBook]
-    ) -> Tuple[List[CompilationBook], bool]:
-        """Отсортировать книги и определить, однозначен ли порядок."""
+    ) -> Tuple[List[CompilationBook], bool, bool]:
+        """Отсортировать книги и определить, однозначен ли порядок.
+
+        Returns:
+            (sorted_books, order_determined, alphabetical_order)
+            alphabetical_order=True — у всех книг неизвестная позиция,
+            отсортированы по названию как единственный детерминированный вариант.
+        """
+        all_ambiguous = all(b.order_ambiguous for b in books)
+
+        if all_ambiguous:
+            # Нет нумерации — сортируем по названию (алфавитный порядок)
+            sorted_books = sorted(
+                books,
+                key=lambda b: (b.record.file_title or b.abs_path.stem).lower(),
+            )
+            return sorted_books, True, True
+
         has_ambiguous = any(b.order_ambiguous for b in books)
-        # Сортируем всех — даже при наличии неопределённых, чтобы
-        # known идут первыми по sort_key, unknown — в конец
         sorted_books = sorted(books, key=lambda b: b.sort_key)
-        return sorted_books, not has_ambiguous
+        return sorted_books, not has_ambiguous, False
 
     def _compute_volume_range(self, books: List[CompilationBook]) -> str:
         """Вернуть строку диапазона томов, например '1-7'."""
