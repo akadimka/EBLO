@@ -243,7 +243,19 @@ class FB2CompilerService:
                     if book is not best_pre:
                         duplicate_paths.append(book.abs_path)
 
-                if best_count >= regular_count:
+                # АКТУАЛЬНА только если ВСЕ обычные тома входят в диапазон предкомпиляции.
+                # Пример: предкомпиляция 1-3 + обычный том 4 → НЕ актуальна (том 4 не покрыт).
+                def _vol_num_for_check(b: 'CompilationBook') -> Optional[int]:
+                    if b.sort_key and b.sort_key[0] == 0:
+                        return b.sort_key[1]
+                    return None
+
+                all_covered = all(
+                    (n := _vol_num_for_check(r)) is not None and best_lo <= n <= best_hi
+                    for r in regular_books
+                ) if regular_books else True
+
+                if all_covered:
                     # 1. АКТУАЛЬНА — компиляция уже сделана, новая не нужна.
                     # Отдельные тома, уже покрытые компиляцией, — на удаление.
                     # В список компиляции НЕ добавляем: один файл ≠ задача компиляции.
