@@ -414,7 +414,36 @@ class CompilerDialog:
         alpha = sum(1 for g in groups if getattr(g, 'alphabetical_order', False))
         warn  = sum(1 for g in groups if not g.order_determined
                     and not getattr(g, 'alphabetical_order', False))
-        status = f'Групп: {total}  |  К компиляции: {compilable}'
+
+        # Подсчёт файлов и размеров
+        files_before = sum(len(g.books) for g in groups)
+        files_after  = len(groups)  # каждая группа → 1 файл
+        freed_bytes  = 0
+        for g in groups:
+            total_size = 0
+            for b in g.books:
+                try:
+                    total_size += b.abs_path.stat().st_size
+                except OSError:
+                    pass
+            # Результат ~= суммарный размер книг (без учёта overhead).
+            # Экономия считается по числу файлов: N→1, т.е. N-1 файла исчезнет.
+            # Точный размер результата неизвестен, но обычно он ≈ сумме исходников.
+            # Показываем «файлов до / после» и суммарный размер исходников.
+            freed_bytes += total_size  # суммарный объём всех групп
+
+        def _fmt_size(b: int) -> str:
+            if b >= 1_073_741_824:
+                return f'{b/1_073_741_824:.1f} ГБ'
+            if b >= 1_048_576:
+                return f'{b/1_048_576:.1f} МБ'
+            return f'{b/1024:.0f} КБ'
+
+        status = (
+            f'Групп: {total}'
+            f'  |  Файлов: {files_before} → {files_after}'
+            f'  |  Объём исходников: {_fmt_size(freed_bytes)}'
+        )
         if alpha:
             status += f'  |  По названию: {alpha}'
         if warn:
