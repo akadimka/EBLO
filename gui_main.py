@@ -470,7 +470,8 @@ class MainWindow(tk.Tk):
         win.withdraw()  # Скрыть окно изначально
         
         # Настройка сохранения размера и позиции окна
-        setup_window_persistence(win, 'log', self.settings, '700x400+100+100')
+        setup_window_persistence(win, 'log', self.settings, '700x400+100+100',
+                                 parent_window=self)
         
         # Показать окно
         win.deiconify()
@@ -522,7 +523,8 @@ class MainWindow(tk.Tk):
         genres_window = GenresManagerWindow(self, self.genres_manager, self.logger, self.settings, lambda: None)
         
         # Setup persistence AFTER window is created
-        setup_window_persistence(genres_window, 'genres_manager', self.settings, '700x500+200+150')
+        setup_window_persistence(genres_window, 'genres_manager', self.settings, '700x500+200+150',
+                                 parent_window=self)
         
         # Register close callback
         window_manager = get_window_manager()
@@ -808,7 +810,8 @@ class MainWindow(tk.Tk):
         app = CSVNormalizerApp(normalizer_root, current_folder, self.logger, self.settings)
         
         # Настройка сохранения размера и позиции окна
-        setup_window_persistence(normalizer_root, 'normalizer', self.settings, '1400x700+150+100')
+        setup_window_persistence(normalizer_root, 'normalizer', self.settings, '1400x700+150+100',
+                                 parent_window=self)
         
         self.logger.log('Окно нормализации открыто')
         window_manager = get_window_manager()
@@ -1010,7 +1013,8 @@ class MainWindow(tk.Tk):
         self._load_database_data(books_tree, series_tree)
         
         # Сохранение geometrии окна
-        restore_window_geometry(db_window, 'database_viewer', self.settings, default_geometry='1000x500+200+150')
+        restore_window_geometry(db_window, 'database_viewer', self.settings,
+                                default_geometry='1000x500+200+150', parent_window=self)
         
         def on_close():
             save_window_geometry(db_window, 'database_viewer', self.settings)
@@ -1303,7 +1307,8 @@ class MainWindow(tk.Tk):
                 # Получить центрированную позицию (в случае если было сохранено за границами экрана)
                 centered_geometry = center_window_on_parent(progress_window, self, width=450, height=120)
                 
-                setup_window_persistence(progress_window, 'assign_genre_progress', self.settings, centered_geometry)
+                setup_window_persistence(progress_window, 'assign_genre_progress', self.settings, centered_geometry,
+                                         parent_window=self)
                 
                 # Сохранить позицию на закрытие
                 def on_progress_close():
@@ -1354,7 +1359,8 @@ class MainWindow(tk.Tk):
             # Получить центрированную позицию (в случае если было сохранено за границами экрана)
             centered_geometry = center_window_on_parent(dialog, self, width=400, height=300)
             
-            setup_window_persistence(dialog, 'genre_select', self.settings, centered_geometry)
+            setup_window_persistence(dialog, 'genre_select', self.settings, centered_geometry,
+                                         parent_window=self)
             
             # Сохранить позицию на закрытие
             def on_dialog_close():
@@ -1386,6 +1392,9 @@ class MainWindow(tk.Tk):
     def _on_closing(self):
         """Обработчик закрытия окна."""
         save_window_geometry(self, 'main', self.settings)
+        # Сбросить позиции вторичных окон, чтобы при следующем запуске они
+        # открывались рядом с главным окном (на том же мониторе).
+        self.settings.clear_secondary_window_geometries()
         self.destroy()
 
 

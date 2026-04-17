@@ -2,435 +2,355 @@
 Window state management utilities.
 
 Provides functions to save and restore window geometry (size, position, state).
+Supports multi-monitor setups correctly (virtual screen bounds via ctypes on Windows).
 """
 
+import re
 import tkinter as tk
 from typing import Optional, Tuple
 
 
-def save_window_geometry(window: tk.Tk, window_name: str, settings_manager):
-    """
-    Save window geometry (position, size, and state).
-    
-    Args:
-        window: Tkinter window to save
-        window_name: Unique identifier for the window (e.g., 'main', 'settings', 'debug')
-        settings_manager: SettingsManager instance
+# ---------------------------------------------------------------------------
+# Virtual screen helpers (multi-monitor)
+# ---------------------------------------------------------------------------
+
+def _get_virtual_screen_bounds() -> Tuple[int, int, int, int]:
+    """Return (x, y, width, height) of the virtual screen spanning all monitors.
+
+    On Windows uses ctypes GetSystemMetrics; falls back to (0, 0, 0, 0) on
+    other platforms (caller must use screen_width/height from winfo then).
     """
     try:
-        # Get geometry: "WxH+X+Y"
-        geometry = window.geometry()
-        
-        # Clean up geometry string - fix malformed coordinates like "+-1953" -> "-1953"
-        import re
-        # Replace "+-" with "-" to fix malformed negative coordinates
-        geometry = re.sub(r'\+-', '-', geometry)
-        
-        # Get state (normal, maximized, iconified, etc.)
-        state = window.state()
-        
-        # Don't save hidden states - dialogs shouldn't be saved as 'withdrawn'
-        # This prevents dialogs from being invisible when reopened
-        if state == 'withdrawn':
-            state = 'normal'
-        
-        # Normalize state for cross-platform compatibility
-        # Tkinter on Windows returns "zoomed", convert to "maximized" for portability
-        if state == 'zoomed':
-            state = 'maximized'
-        
-        # Store as dict
-        window_data = {
-            'geometry': geometry,
-            'state': state,
-        }
-        
-        # Save to settings
-        if not hasattr(settings_manager, '_window_states'):
-            settings_manager._window_states = {}
-        
-        settings_manager.set_window_geometry(window_name, window_data)
-        
-    except Exception as e:
+        import ctypes
+        u32 = ctypes.windll.user32
+        vx = u32.GetSystemMetrics(76)   # SM_XVIRTUALSCREEN
+        vy = u32.GetSystemMetrics(77)   # SM_YVIRTUALSCREEN
+        vw = u32.GetSystemMetrics(78)   # SM_CXVIRTUALSCREEN
+        vh = u32.GetSystemMetrics(79)   # SM_CYVIRTUALSCREEN
+        if vw > 0 and vh > 0:
+            return vx, vy, vw, vh
+    except Exception:
         pass
+    return 0, 0, 0, 0
+
+
+def _parse_geometry(geometry_str: str) -> Optional[Tuple[int, int, int, int]]:
+    """Parse "WxH+X+Y" (with possible negative coords) → (w, h, x, y) or None."""
+    try:
+        geometry_str = re.sub(r'\+-', '-', geometry_str)
+        m = re.match(r'(\d+)x(\d+)([\+\-])(\d+)([\+\-])(\d+)', geometry_str)
+        if not m:
+            return None
+        w = int(m.group(1))
+        h = int(m.group(2))
+        x = int(m.group(4)) * (1 if m.group(3) == '+' else -1)
+        y = int(m.group(6)) * (1 if m.group(5) == '+' else -1)
+        return w, h, x, y
+    except Exception:
+        return None
 
 
 def _is_geometry_visible(geometry_str: str, window) -> bool:
-    """
-    Check if a window geometry (position and size) is visible on screen.
-    
-    Args:
-        geometry_str: Geometry string like "WxH+X+Y"
-        window: Tkinter window (for accessing screen dimensions)
-    
-    Returns:
-        True if window is (at least partially) visible on screen, False otherwise
+    """Return True if the window (or at least its title bar) is visible on any monitor.
+
+    Uses the Windows virtual screen so windows on secondary monitors (left/right/above)
+    are correctly recognised as visible.
     """
     try:
-        import re
-        # Clean up malformed coordinates (+-1953 -> -1953)
-        geometry_str = re.sub(r'\+-', '-', geometry_str)
-        
-        # Parse geometry: WxH+X+Y or WxH-X-Y
-        match = re.match(r'(\d+)x(\d+)([\+\-])(\d+)([\+\-])(\d+)', geometry_str)
-        if not match:
+        parsed = _parse_geometry(geometry_str)
+        if not parsed:
             return False
-        
-        width = int(match.group(1))
-        height = int(match.group(2))
-        x_sign = match.group(3)
-        x_coord = int(match.group(4))
-        y_sign = match.group(5)
-        y_coord = int(match.group(6))
-        
-        # Apply signs
-        if x_sign == '-':
-            x_coord = -x_coord
-        if y_sign == '-':
-            y_coord = -y_coord
-        
-        # Get screen dimensions
-        try:
-            # For multi-monitor setup, we check against virtual screen
-            screen_width = window.winfo_screenwidth()
-            screen_height = window.winfo_screenheight()
-        except:
-            # Fallback: assume common screen size
-            screen_width = 1920
-            screen_height = 1080
-        
-        # Window bounds
-        window_left = x_coord
-        window_right = x_coord + width
-        window_top = y_coord
-        window_bottom = y_coord + height
-        
-        # Screen bounds - allow small margins for multi-monitor and decorations
-        # But be more strict than before - only allow up to 200px margin
-        screen_left = -200
-        screen_right = screen_width + 200
-        screen_top = -200
-        screen_bottom = screen_height + 200
-        
-        # Check if window overlaps with screen area
-        # Window is visible if it intersects the screen rectangle
-        window_visible = not (
-            window_right < screen_left or
-            window_left > screen_right or
-            window_bottom < screen_top or
-            window_top > screen_bottom
-        )
-        
-        return window_visible
-        
-    except Exception as e:
-        # If we can't determine visibility, assume it's OK
-        return True
+        w, h, x, y = parsed
+
+        if w < 200 or h < 100:
+            return False
+
+        # Try Windows virtual screen first
+        vx, vy, vw, vh = _get_virtual_screen_bounds()
+        if vw > 0:
+            # Allow a 50-px margin so partially off-screen windows are still OK
+            margin = 50
+            vs_left   = vx - margin
+            vs_top    = vy - margin
+            vs_right  = vx + vw + margin
+            vs_bottom = vy + vh + margin
+        else:
+            # Fallback: primary screen only
+            try:
+                sw = window.winfo_screenwidth()
+                sh = window.winfo_screenheight()
+            except Exception:
+                sw, sh = 1920, 1080
+            margin = 200
+            vs_left, vs_top = -margin, -margin
+            vs_right, vs_bottom = sw + margin, sh + margin
+
+        # Window is visible if it intersects the virtual desktop
+        win_right  = x + w
+        win_bottom = y + h
+        return not (win_right  < vs_left  or
+                    x          > vs_right or
+                    win_bottom < vs_top   or
+                    y          > vs_bottom)
+
+    except Exception:
+        return True   # optimistic fallback
 
 
-def restore_window_geometry(window: tk.Tk, window_name: str, settings_manager,
-                           default_geometry: Optional[str] = None,
-                           default_state: str = 'normal') -> bool:
+# ---------------------------------------------------------------------------
+# Parent-relative default geometry
+# ---------------------------------------------------------------------------
+
+def _default_geometry_near_parent(parent: tk.Tk,
+                                  width: int,
+                                  height: int,
+                                  offset_x: int = 60,
+                                  offset_y: int = 40) -> str:
+    """Return a geometry string placing the window on the same monitor as *parent*.
+
+    If *parent* is not available or its position cannot be determined,
+    falls back to "+100+100".
     """
-    Restore window geometry (position, size, and state).
-    
-    Args:
-        window: Tkinter window to restore
-        window_name: Unique identifier for the window
-        settings_manager: SettingsManager instance
-        default_geometry: Default geometry if not saved (e.g., "1280x709+100+100")
-        default_state: Default state ('normal', 'maximized', etc.)
-    
-    Returns:
-        True if geometry was restored, False if using defaults
+    try:
+        parent.update_idletasks()
+        px = parent.winfo_x()
+        py = parent.winfo_y()
+        # Clamp so the new window stays fully inside the virtual screen (best-effort)
+        vx, vy, vw, vh = _get_virtual_screen_bounds()
+        if vw > 0:
+            nx = max(vx, min(px + offset_x, vx + vw - width))
+            ny = max(vy, min(py + offset_y, vy + vh - height))
+        else:
+            nx = px + offset_x
+            ny = py + offset_y
+        return f"{width}x{height}+{nx}+{ny}"
+    except Exception:
+        return f"{width}x{height}+100+100"
+
+
+# ---------------------------------------------------------------------------
+# Core save / restore
+# ---------------------------------------------------------------------------
+
+def save_window_geometry(window: tk.Tk, window_name: str, settings_manager) -> None:
+    """Save window geometry (position, size, state) to settings."""
+    try:
+        geometry = re.sub(r'\+-', '-', window.geometry())
+        state = window.state()
+
+        if state == 'withdrawn':
+            state = 'normal'
+        if state == 'zoomed':
+            state = 'maximized'
+
+        window_data = {'geometry': geometry, 'state': state}
+        settings_manager.set_window_geometry(window_name, window_data)
+    except Exception:
+        pass
+
+
+def _validated_geometry(geom_str: Optional[str], window) -> Optional[str]:
+    """Return cleaned geometry string if valid and visible, else None."""
+    if not geom_str:
+        return None
+    geom_str = re.sub(r'\+-', '-', geom_str)
+    parsed = _parse_geometry(geom_str)
+    if not parsed:
+        return None
+    w, h, x, y = parsed
+    if w < 200 or h < 100:
+        return None
+    if not _is_geometry_visible(geom_str, window):
+        return None
+    return geom_str
+
+
+def restore_window_geometry(window: tk.Tk,
+                            window_name: str,
+                            settings_manager,
+                            default_geometry: Optional[str] = None,
+                            default_state: str = 'normal',
+                            parent_window: Optional[tk.Tk] = None) -> bool:
+    """Restore saved window geometry.
+
+    If no geometry is saved and *parent_window* is given, the window is placed
+    on the same monitor as *parent_window* (size taken from *default_geometry*).
+
+    Returns True if saved geometry was applied, False if defaults were used.
     """
     try:
         window_data = settings_manager.get_window_geometry(window_name)
-        
-        # Helper function to validate and fix geometry
-        def validate_geometry(geom_str):
-            """Validate geometry string format and basic sanity checks."""
-            try:
-                import re
-                # Clean up malformed coordinates (+-1953 -> -1953)
-                geom_str = re.sub(r'\+-', '-', geom_str)
-                
-                match = re.match(r'(\d+)x(\d+)([\+\-])(\d+)([\+\-])(\d+)', geom_str)
-                if not match:
-                    return None
-                
-                width = int(match.group(1))
-                height = int(match.group(2))
-                
-                # Only validate minimum size, don't touch coordinates
-                # (negative coords are valid for multi-monitor systems)
-                if width < 200 or height < 100:
-                    return None
-                
-                # Check if window is visible on screen
-                if not _is_geometry_visible(geom_str, window):
-                    return None
-                
-                # Return geometry as-is (after cleanup)
-                return geom_str
-            except Exception as e:
-                return None
-        
-        if window_data is None:
-            # No saved geometry, use defaults
-            if default_geometry:
-                valid_geom = validate_geometry(default_geometry)
-                if valid_geom:
-                    window.geometry(valid_geom)
-            window.state(default_state)
-            return False
-        
-        # Handle both old format (just string) and new format (dict)
-        if isinstance(window_data, str):
-            # Old format: just geometry string
-            valid_geom = validate_geometry(window_data)
-            if valid_geom:
-                window.geometry(valid_geom)
-            else:
-                if default_geometry:
-                    valid_default = validate_geometry(default_geometry)
-                    if valid_default:
-                        window.geometry(valid_default)
-            window.state(default_state)
-            return True
-        
-        elif isinstance(window_data, dict):
-            # New format: dict with geometry and state
-            geometry = window_data.get('geometry', default_geometry)
-            state = window_data.get('state', default_state)
-            
-            # Normalize state for Tkinter
-            # Tkinter on Windows uses "zoomed" instead of "maximized"
-            # So we need to convert both directions:
-            # - When SAVING: zoomed -> maximized (for portability)
-            # - When APPLYING: maximized -> zoomed (for Windows Tkinter)
+
+        def apply_state(state: str) -> None:
             if state == 'maximized':
                 state = 'zoomed'
-            
-            if state in ['zoomed', 'iconic']:
-                # For special states, set geometry first, then apply state
-                if geometry:
-                    valid_geom = validate_geometry(geometry)
-                    if valid_geom:
-                        try:
-                            window.geometry(valid_geom)
-                        except tk.TclError:
-                            pass
-                
-                # Then apply state - this will maximize/zoom the window
+            try:
+                window.state(state)
+                window.update_idletasks()
+            except tk.TclError:
                 try:
-                    window.state(state)
-                    # Force update to ensure state is properly applied
-                    window.update_idletasks()
-                except tk.TclError:
-                    try:
-                        window.state(default_state)
-                    except:
-                        pass
-            else:
-                # For normal state, set geometry
-                if geometry:
-                    valid_geom = validate_geometry(geometry)
-                    if valid_geom:
-                        try:
-                            window.geometry(valid_geom)
-                        except tk.TclError as e:
-                            if default_geometry:
-                                valid_default = validate_geometry(default_geometry)
-                                if valid_default:
-                                    try:
-                                        window.geometry(valid_default)
-                                    except:
-                                        pass
-                    elif default_geometry:
-                        valid_default = validate_geometry(default_geometry)
-                        if valid_default:
-                            try:
-                                window.geometry(valid_default)
-                            except:
-                                pass
-                
+                    window.state(default_state)
+                except Exception:
+                    pass
+
+        def apply_geometry(geom: Optional[str], fallback: Optional[str] = None) -> None:
+            valid = _validated_geometry(geom, window) if geom else None
+            if not valid:
+                valid = _validated_geometry(fallback, window) if fallback else None
+            if valid:
                 try:
-                    window.state(state)
+                    window.geometry(valid)
                 except tk.TclError:
-                    try:
-                        window.state(default_state)
-                    except:
-                        pass
-            
+                    pass
+
+        # ── No saved data ──────────────────────────────────────────────────
+        if window_data is None:
+            if parent_window is not None and default_geometry:
+                # Derive size from default, position from parent's monitor
+                parsed = _parse_geometry(default_geometry)
+                if parsed:
+                    w, h, _, _ = parsed
+                    near_geom = _default_geometry_near_parent(parent_window, w, h)
+                    apply_geometry(near_geom, default_geometry)
+                else:
+                    apply_geometry(default_geometry)
+            elif default_geometry:
+                apply_geometry(default_geometry)
+            apply_state(default_state)
+            return False
+
+        # ── Old format: plain string ───────────────────────────────────────
+        if isinstance(window_data, str):
+            apply_geometry(window_data, default_geometry)
+            apply_state(default_state)
             return True
-        
+
+        # ── New format: dict ───────────────────────────────────────────────
+        if isinstance(window_data, dict):
+            geometry = window_data.get('geometry', default_geometry)
+            state    = window_data.get('state',    default_state)
+
+            if state in ('zoomed', 'maximized', 'iconic'):
+                apply_geometry(geometry, default_geometry)
+                apply_state(state)
+            else:
+                apply_geometry(geometry, default_geometry)
+                apply_state(state)
+            return True
+
         return False
-        
-    except Exception as e:
+
+    except Exception:
         if default_geometry:
             try:
                 window.geometry(default_geometry)
-            except:
+            except Exception:
                 pass
         return False
 
 
+# ---------------------------------------------------------------------------
+# Setup helpers
+# ---------------------------------------------------------------------------
+
 def _apply_window_state(window: tk.Tk, state: str, default_state: str) -> None:
-    """
-    Apply window state with error handling.
-    
-    Helper function to safely apply window state after delay.
-    """
+    """Safely apply window state."""
     try:
         window.state(state)
     except tk.TclError:
         try:
             window.state(default_state)
-        except:
+        except Exception:
             pass
 
 
-def center_window_on_parent(window: tk.Toplevel, parent: tk.Tk, width: int = 400, height: int = 300) -> str:
-    """
-    Center a child window on its parent window.
-    
-    Args:
-        window: Child window (Toplevel) to center
-        parent: Parent window (Tk)
-        width: Desired width of child window
-        height: Desired height of child window
-    
-    Returns:
-        Geometry string "WxH+X+Y" for the centered position
-    """
+def center_window_on_parent(window: tk.Toplevel,
+                            parent: tk.Tk,
+                            width: int = 400,
+                            height: int = 300) -> str:
+    """Return geometry string centering *window* on *parent*."""
     try:
-        # Get parent window position and size
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-        
-        # Calculate centered position
-        child_x = parent_x + (parent_width - width) // 2
-        child_y = parent_y + (parent_height - height) // 2
-        
-        # Ensure window doesn't go off-screen (with some margin)
-        min_x = -width + 50  # At least 50px visible
-        max_x = parent.winfo_screenwidth() - 50
-        min_y = -height + 50
-        max_y = parent.winfo_screenheight() - 50
-        
-        child_x = max(min_x, min(child_x, max_x))
-        child_y = max(min_y, min(child_y, max_y))
-        
-        geometry = f"{width}x{height}+{child_x}+{child_y}"
-        return geometry
-        
-    except Exception as e:
-        # Fallback to default
+        px = parent.winfo_x()
+        py = parent.winfo_y()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        cx = px + (pw - width)  // 2
+        cy = py + (ph - height) // 2
+        # Keep at least 50 px on-screen (use virtual screen bounds)
+        vx, vy, vw, vh = _get_virtual_screen_bounds()
+        if vw > 0:
+            cx = max(vx, min(cx, vx + vw - width  + 50))
+            cy = max(vy, min(cy, vy + vh - height + 50))
+        return f"{width}x{height}+{cx}+{cy}"
+    except Exception:
         return f"{width}x{height}+200+200"
 
 
-def setup_window_persistence(window: tk.Tk, window_name: str, settings_manager,
-                            default_geometry: Optional[str] = None) -> None:
+def setup_window_persistence(window: tk.Tk,
+                             window_name: str,
+                             settings_manager,
+                             default_geometry: Optional[str] = None,
+                             parent_window: Optional[tk.Tk] = None) -> None:
+    """Attach geometry persistence to *window*.
+
+    • Restores saved geometry (or places near *parent_window* if first open).
+    • Saves geometry when the window is closed via WM_DELETE_WINDOW.
     """
-    Setup automatic persistence for a window.
-    
-    Call this after creating a window to automatically:
-    - Restore geometry when window is first displayed
-    - Save geometry when window is closed
-    
-    Args:
-        window: Tkinter window
-        window_name: Unique identifier
-        settings_manager: SettingsManager instance
-        default_geometry: Optional default geometry
-    """
-    
-    
-    # Restore geometry using deferred callback to ensure window is ready
-    # This is more reliable than relying on <Map> event timing
-    def restore_deferred():
-        result = restore_window_geometry(window, window_name, settings_manager, default_geometry)
-        
-        # Extra check: if window is a Toplevel and might be off-screen, ensure it's visible
-        # This handles edge cases where old geometries were saved from different monitor configs
-        if isinstance(window, tk.Toplevel) and default_geometry:
-            try:
-                current_geom = window.geometry()
-                # Check if current geometry is off-screen
-                if not _is_geometry_visible(current_geom, window):
-                    # If not visible, apply the default geometry
-                    window.geometry(default_geometry)
-            except:
-                pass
-    
-    # Schedule restoration for next event loop iteration (after window initialization)
+    def restore_deferred() -> None:
+        restore_window_geometry(window, window_name, settings_manager,
+                                default_geometry, parent_window=parent_window)
+
     window.after(1, restore_deferred)
-    
-    # Also bind to <Map> event as backup (in case window is shown before after() callback)
-    def on_first_map(event=None):
+
+    # Backup restore on first <Map> event
+    def on_first_map(event=None) -> None:
         window.unbind('<Map>')
-        # Restore again on map in case it was shown before our after() callback
-        restore_window_geometry(window, window_name, settings_manager, default_geometry)
-    
+        restore_window_geometry(window, window_name, settings_manager,
+                                default_geometry, parent_window=parent_window)
+
     window.bind('<Map>', on_first_map)
-    
-    # Save geometry on close
-    def on_close():
+
+    def on_close() -> None:
         save_window_geometry(window, window_name, settings_manager)
         window.destroy()
-    
+
     window.protocol('WM_DELETE_WINDOW', on_close)
 
 
-def create_toplevel_with_persistence(parent: tk.Tk, window_name: str, 
+def create_toplevel_with_persistence(parent: tk.Tk,
+                                     window_name: str,
                                      settings_manager,
                                      default_geometry: Optional[str] = None,
-                                     on_close_callback = None,
+                                     on_close_callback=None,
                                      **toplevel_kwargs) -> tk.Toplevel:
-    """
-    Create a Toplevel window with automatic persistence.
-    
-    Args:
-        parent: Parent window
-        window_name: Unique identifier for this window
-        settings_manager: SettingsManager instance
-        default_geometry: Default size+position (e.g., "800x600+100+100")
-        on_close_callback: Optional callback to call before window closes
-        **toplevel_kwargs: Additional kwargs for tk.Toplevel()
-    
-    Returns:
-        Configured Toplevel window
+    """Create a Toplevel with automatic geometry persistence.
+
+    New windows (no saved position) open near *parent*.
     """
     dlg = tk.Toplevel(parent)
-    
-    # Apply any kwargs
+
     for key, value in toplevel_kwargs.items():
         if key == 'title':
             dlg.title(value)
         elif key == 'geometry':
             dlg.geometry(value)
-    
-    # Setup persistence
-    restore_window_geometry(dlg, window_name, settings_manager, default_geometry)
-    
-    # Save on close
-    def on_close():
+
+    restore_window_geometry(dlg, window_name, settings_manager,
+                            default_geometry, parent_window=parent)
+
+    def on_close() -> None:
         save_window_geometry(dlg, window_name, settings_manager)
         if on_close_callback:
             on_close_callback()
         dlg.destroy()
-    
-    # Also bind to Destroy event to catch any close path
-    def on_destroy(event):
+
+    def on_destroy(event=None) -> None:
         if dlg.winfo_exists():
             save_window_geometry(dlg, window_name, settings_manager)
             if on_close_callback:
                 on_close_callback()
-    
+
     dlg.bind('<Destroy>', on_destroy, add=True)
     dlg.protocol('WM_DELETE_WINDOW', on_close)
-    
+
     return dlg

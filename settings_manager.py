@@ -220,11 +220,22 @@ class SettingsManager:
     def get_window_geometry(self, window_name):
         """
         Get saved window geometry.
-        
+
         / Получает сохраненную геометрию окна.
         """
         sizes = self.settings.get('window_sizes', {})
         return sizes.get(window_name, None)
+
+    def clear_secondary_window_geometries(self):
+        """Remove saved geometry for all windows except 'main'.
+
+        Called when the main window closes so secondary windows reopen near
+        the main window (on the correct monitor) on the next launch.
+        """
+        sizes = self.settings.get('window_sizes', {})
+        main_geom = sizes.get('main')
+        self.settings['window_sizes'] = {'main': main_geom} if main_geom else {}
+        self.save()
 
     def set_genre_tree_state(self, expanded_nodes):
         """
