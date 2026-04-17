@@ -483,7 +483,18 @@ class FemaleAuthorsDialog:
         self._rows = list(rows)
         self.top = tk.Toplevel(parent)
         self.top.title("Великомученницы")
-        self.top.geometry("1000x500")
+        try:
+            from window_persistence import setup_window_persistence
+            _settings = getattr(parent, 'settings', None) or getattr(
+                getattr(parent, 'master', None), 'settings', None)
+            if _settings is not None:
+                setup_window_persistence(self.top, 'female_authors_dialog', _settings,
+                                         '1000x500+100+100', parent_window=parent)
+            else:
+                from window_persistence import _default_geometry_near_parent
+                self.top.geometry(_default_geometry_near_parent(parent, 1000, 500))
+        except Exception:
+            self.top.geometry('1000x500')
         self._build_ui()
 
     def _build_ui(self):
