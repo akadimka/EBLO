@@ -1178,11 +1178,11 @@ class SynchronizationService:
                             f'</{ns}author>'
                         )
                     else:
+                        # Формат всегда "Фамилия Имя" — отчество не пишем в FB2
                         xml = (
                             f'<{ns}author>'
                             f'<{ns}last-name>{parts[0]}</{ns}last-name>'
                             f'<{ns}first-name>{parts[1]}</{ns}first-name>'
-                            f'<{ns}middle-name>{" ".join(parts[2:])}</{ns}middle-name>'
                             f'</{ns}author>'
                         )
                     author_xmls.append(xml)

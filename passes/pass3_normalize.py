@@ -289,4 +289,32 @@ class Pass3Normalize:
             if len(_seen) < len(_parts):
                 record.proposed_author = sep.join(_seen)
 
+        # ФИНАЛЬНАЯ НОРМАЛИЗАЦИЯ ФОРМАТА:
+        # Правило: ТОЛЬКО "Фамилия Имя" для каждого автора, ТОЛЬКО ", " между соавторами.
+        # 1. Заменяем "; " → ", "
+        # 2. Обрезаем отчество (3-е и последующие слова в имени автора)
+        _SKIP = {"Сборник", "Соавторство", "[unknown]"}
+        for record in records:
+            if not record.proposed_author or record.proposed_author in _SKIP:
+                continue
+            # Нормализуем разделитель: всегда ", "
+            raw = record.proposed_author.replace('; ', ', ')
+            # Разбиваем по соавторам
+            authors = [a.strip() for a in raw.split(', ') if a.strip()]
+            # Каждый автор — не более 2 слов (Фамилия Имя), отчество отбрасываем
+            trimmed = []
+            for auth in authors:
+                words = auth.split()
+                if len(words) > 2:
+                    auth = ' '.join(words[:2])
+                trimmed.append(auth)
+            # Дедупликация
+            seen: list = []
+            for a in trimmed:
+                if a.lower() not in [x.lower() for x in seen]:
+                    seen.append(a)
+            result = ', '.join(seen)
+            if result != record.proposed_author:
+                record.proposed_author = result
+
         self.logger.log(f"[PASS 3] Normalized {normalized_count} author names")
