@@ -310,22 +310,50 @@ class FB2CompilerService:
                     alphabetical_order=True,
                 ))
             else:
-                # Разбиваем на непрерывные подгруппы — пропуски томов не допускаются
-                runs = self._split_into_consecutive_runs(books_sorted)
-                first_group = True
-                for run in runs:
+                # Разбиваем числовые и нечисловые книги независимо:
+                #   • числовые (level-0) → непрерывные подгруппы, пропуски не допускаются
+                #   • нечисловые (даты / unknown) → отдельная группа «компиляция романов»
+                # Это предотвращает ложное смешение диапазона (например, sn=1 + sn=3 + дата
+                # дало бы volume_range='1-3' → «Трилогия», хотя тома 1 и 3 не идут подряд).
+                numeric = [b for b in books_sorted if b.sort_key[0] == 0]
+                others  = [b for b in books_sorted if b.sort_key[0] != 0]
+
+                first_group = True  # для назначения duplicate_paths только один раз
+
+                # ── Числовые книги: непрерывные блоки ──────────────────────
+                for run in self._split_into_consecutive_runs(numeric):
                     if len(run) < 2:
-                        continue  # одиночный том в дыре — не компилируем
-                    run_range = self._compute_volume_range(run) if order_determined else ''
+                        continue  # одиночный том или изолированный — пропуск
+                    run_range = self._compute_volume_range(run)
                     groups.append(CompilationGroup(
                         author=author,
                         series=series,
                         books=run,
-                        order_determined=not any(b.order_ambiguous for b in run),
+                        order_determined=True,   # level-0 книги никогда не ambiguous
                         volume_range=run_range,
-                        # дубликаты только к первой подгруппе, чтобы не удалять дважды
                         duplicate_paths=duplicate_paths if first_group else [],
                         alphabetical_order=False,
+                    ))
+                    first_group = False
+
+                # ── Нечисловые книги: компиляция по году / по названию ─────
+                if len(others) >= 2:
+                    all_oth_ambig = all(b.order_ambiguous for b in others)
+                    if all_oth_ambig:
+                        oth_sorted = sorted(
+                            others,
+                            key=lambda b: (b.record.file_title or b.abs_path.stem).lower(),
+                        )
+                    else:
+                        oth_sorted = sorted(others, key=lambda b: b.sort_key)
+                    groups.append(CompilationGroup(
+                        author=author,
+                        series=series,
+                        books=oth_sorted,
+                        order_determined=not any(b.order_ambiguous for b in others),
+                        volume_range='',
+                        duplicate_paths=duplicate_paths if first_group else [],
+                        alphabetical_order=all_oth_ambig,
                     ))
                     first_group = False
 
@@ -658,28 +686,18 @@ class FB2CompilerService:
         self,
         books: List[CompilationBook],
     ) -> List[List[CompilationBook]]:
-        """Разбить отсортированные книги на непрерывные подгруппы без пропусков.
+        """Разбить числовые (level-0) книги на непрерывные подгруппы без пропусков.
 
-        Применяется только если ВСЕ книги имеют числовой ключ сортировки (level 0).
-        При смешанном или нечисловом порядке возвращает все книги одной группой.
-
-        Предкомпилированные файлы, покрывающие диапазон (volume_label="1-3"),
-        учитываются по верхней границе: следующая книга с lo == hi+1 считается
-        непрерывной.
+        На вход ожидаются ТОЛЬКО книги с sort_key[0] == 0 (series_number / filename).
+        Предкомпилированные файлы с диапазоном (volume_label="1-3") учитываются по
+        верхней границе: следующий файл с lo == hi+1 считается непрерывным.
         """
         if not books:
             return []
 
-        # Разбиваем только полностью числовые группы
-        if any(b.sort_key[0] != 0 for b in books):
-            return [books]
-
         def get_hi(book: CompilationBook) -> int:
-            """Верхняя граница диапазона томов данного файла."""
             rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', book.volume_label or '')
-            if rng:
-                return int(rng.group(2))
-            return book.sort_key[1]
+            return int(rng.group(2)) if rng else book.sort_key[1]
 
         runs: List[List[CompilationBook]] = []
         current_run: List[CompilationBook] = [books[0]]
