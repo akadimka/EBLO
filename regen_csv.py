@@ -472,8 +472,7 @@ class RegenCSVService:
             _t = time.perf_counter()
             print("\n[SERIES] Extracting series from folder structure...")
 
-            # Пункт 5: cache normalized name lookups — avoids repeated re.sub() calls
-            #          for the same strings across thousands of records.
+            # Кэш нормализации имён для _surnames_match_folder
             _norm_cache: dict = {}
 
             def _norm(name: str) -> str:
@@ -481,85 +480,65 @@ class RegenCSVService:
                     _norm_cache[name] = self._normalize_name_for_comparison(name)
                 return _norm_cache[name]
 
-            # Пункт 6: cache Path(...).parts per file_path to avoid constructing
-            #          a new Path object on each iteration.
+            # Вспомогательная функция: вычислить (proposed_series, series_source)
+            # по частям пути и автору. Результат кэшируется по ключу (author, parent_parts).
+            _series_folder_cache: dict = {}  # (author, parent_parts) → (series, source)
+
+            def _compute_folder_series(author: str, parent_parts: tuple) -> tuple:
+                """Вернуть (proposed_series, series_source) из структуры папок."""
+                key = (author, parent_parts)
+                if key in _series_folder_cache:
+                    return _series_folder_cache[key]
+
+                author_folder_index = -1
+                if author:
+                    for idx, part in enumerate(parent_parts):
+                        if self._surnames_match_folder(author, part):
+                            author_folder_index = idx
+                            break
+
+                result = ('', '')
+                if author_folder_index >= 0:
+                    series_folders = parent_parts[author_folder_index + 1:]
+                    if len(series_folders) == 0:
+                        pass  # файл прямо в папке автора — серия из filename/metadata
+                    elif any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
+                        result = ('', 'no_series_folder')
+                    else:
+                        series_names = [self._extract_series_from_folder_name(f) for f in series_folders]
+                        series_combined = '\\'.join(series_names)
+                        if series_combined:
+                            result = (series_combined, 'folder_dataset')
+
+                _series_folder_cache[key] = result
+                return result
+
+            # Предвычисляем части пути один раз
             _parts_cache: dict = {}
 
             for record in self.records:
                 if record.proposed_series:
                     continue  # Skip if series already set
 
-                # Пункт 6: use cached path parts
                 file_path_parts = _parts_cache.get(record.file_path)
                 if file_path_parts is None:
                     raw_parts = Path(record.file_path).parts
-                    # Фильтруем папки с именами-расширениями (последний элемент = имя файла, не фильтруем)
                     file_path_parts = tuple(
                         p for i, p in enumerate(raw_parts)
                         if i == len(raw_parts) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
                     )
                     _parts_cache[record.file_path] = file_path_parts
 
-                # Key Strategy: Find author folder in path and skip it
-                # Everything below author folder = series/subseries
-                author_folder_index = -1  # Not found by default
+                parent_parts = file_path_parts[:-1]  # без имени файла
+                author = record.proposed_author or ''
 
-                if record.proposed_author:
-                    # Поиск папки автора с учётом формы множественного числа фамилии
-                    # и нескольких авторов (Живов Геннадий, Живов Георгий ↔ Живовы Георгий и Геннадий)
-                    for idx, part in enumerate(file_path_parts[:-1]):  # Exclude filename
-                        if self._surnames_match_folder(record.proposed_author, part):
-                            author_folder_index = idx
-                            break  # Found the author folder
-                
-                # Now extract series based on structure AFTER author folder
-                if author_folder_index >= 0 and len(file_path_parts) > author_folder_index + 1:
-                    # We found author folder, extract series folders after it
-                    series_folders = file_path_parts[author_folder_index + 1 : -1]  # Exclude author folder and filename
-                    
+                series, source = _compute_folder_series(author, parent_parts)
+                if source:
+                    record.proposed_series = series
+                    record.series_source = source
 
-                    if len(series_folders) == 0:
-                        # No series folder (file directly in author folder)
-                        # ВАЖНО: Оставляем proposed_series пустым чтобы дать возможность:
-                        # 1. Pass 2 попытаться извлечь из filename (приоритет 2)
-                        # 2. Потом применить metadata как fallback (приоритет 1)
-                        # Это соблюдает cascade priority: FOLDER(3) > FILENAME(2) > METADATA(1)
-                        # Do NOT set series_source here - let following passes handle it
-                        pass
-                    elif any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
-                        # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии.
-                        # Фиксируем пустую серию и блокируем дальнейшее извлечение.
-                        record.proposed_series = ""
-                        record.series_source = "no_series_folder"
-                    else:
-                        # Hierarchical OR simple series: Author / Series [/ SubSeries ...] / File
-                        # NOTE: Папка автора НЕ включается в иерархию серии
-                        # Серия содержит только папки после папки автора
-                        
-                        all_folders = list(series_folders)
-                        series_names = [self._extract_series_from_folder_name(folder) for folder in all_folders]
-                        series_combined = "\\".join(series_names)
-                        if series_combined:  # Only set source if we actually got a series
-                            record.proposed_series = series_combined
-                            record.series_source = "folder_dataset"
-
-                elif len(file_path_parts) >= 4:
-                    # No author folder found, but depth >= 4 (Old behavior: Coll / FB2 / Author / Series / File)
-                    # Only use fallback if we're confident this is actually a series folder structure
-                    # Skip if we can't reliably identify series vs author folders
-                    
-                    # Don't use this fallback at all - let Pass 2 (filename extraction) and metadata
-                    # handle series extraction. Fallback was too unreliable for depth >= 4 without
-                    # knowing author folder position upfront (proposed_author not yet available in Pass 1)
-                    pass
-                
-                elif len(file_path_parts) == 3:
-                    # Depth 3: Coll / Series / File
-                    # Правило: папка серии возможна ТОЛЬКО внутри папки автора.
-                    # Если author_folder_index < 0 — папки автора нет, middle-папка
-                    # является жанровой/издательской структурой, не серией книг.
-                    # folder_dataset для серии при отсутствии folder_dataset автора — недопустимо.
-                    pass  # Let Pass 2 (filename patterns) and metadata handle series extraction
+                # Если author_folder_index < 0 (папка автора не найдена) —
+                # серия из папок не извлекается; Pass 2 Series и metadata возьмут на себя.
             
             print(f"[SERIES folders] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Series extracted from folder structure (Variant B)")
