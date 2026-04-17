@@ -67,6 +67,15 @@ class SettingsManager:
         # После сохранения обновляем копию
         self._loaded_settings = copy.deepcopy(self.settings)
 
+    def get(self, key: str, default=None):
+        """Получить произвольное значение из настроек."""
+        return self.settings.get(key, default)
+
+    def set(self, key: str, value) -> None:
+        """Сохранить произвольное значение в настройках."""
+        self.settings[key] = value
+        self.save()
+
     def set_library_path(self, path):
         """Set library path / Установить путь к библиотеке."""
         self.settings['library_path'] = path

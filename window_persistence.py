@@ -355,6 +355,32 @@ def center_window_on_parent(window: tk.Toplevel,
         return f"{width}x{height}+200+200"
 
 
+def _show_at_position(window: tk.Tk) -> None:
+    """Показать окно в правильной позиции без мигания.
+
+    Если окно было скрыто (withdrawn) — делаем его прозрачным, снимаем
+    withdrawn-состояние (deiconify), применяем геометрию, потом убираем
+    прозрачность.  Win32 уважает geometry() только для видимого окна,
+    поэтому withdraw/deiconify не работает надёжно на multi-monitor.
+    """
+    try:
+        import sys
+        if sys.platform == 'win32':
+            was_withdrawn = (window.state() == 'withdrawn')
+            window.wm_attributes('-alpha', 0)
+            if was_withdrawn:
+                window.deiconify()
+            window.update_idletasks()
+            # geometry уже применена — просто показываем
+            window.wm_attributes('-alpha', 1)
+            return
+    except Exception:
+        pass
+    # Fallback для не-Windows
+    if window.state() == 'withdrawn':
+        window.deiconify()
+
+
 def setup_window_persistence(window: tk.Tk,
                              window_name: str,
                              settings_manager,
@@ -365,18 +391,34 @@ def setup_window_persistence(window: tk.Tk,
     • Restores saved geometry (or places near *parent_window* if first open).
     • Saves geometry when the window is closed via WM_DELETE_WINDOW.
 
-    Использует withdraw/deiconify чтобы окно не мелькало на основном мониторе
-    перед перемещением на нужный монитор.
+    Использует alpha=0/1 вместо withdraw/deiconify — Win32 надёжно соблюдает
+    geometry() только для видимого (пусть и прозрачного) окна.
     """
-    # Скрываем до позиционирования — убирает мигание при первом появлении
-    window.withdraw()
+    # Скрываем прозрачностью (не withdraw) чтобы Win32 уважал geometry()
+    try:
+        import sys
+        if sys.platform == 'win32':
+            window.wm_attributes('-alpha', 0)
+            # Если окно было withdrawn (из __init__) — показываем прозрачным
+            if window.state() == 'withdrawn':
+                window.deiconify()
+    except Exception:
+        window.withdraw()
 
     restore_window_geometry(window, window_name, settings_manager,
                             default_geometry, parent_window=parent_window)
+    window.update_idletasks()
     _setup_taskbar(window)
     _register_app_window(window)
 
     # Показываем уже в правильной позиции
+    try:
+        import sys
+        if sys.platform == 'win32':
+            window.wm_attributes('-alpha', 1)
+            return
+    except Exception:
+        pass
     window.deiconify()
 
     def on_close() -> None:
@@ -397,7 +439,16 @@ def create_toplevel_with_persistence(parent: tk.Tk,
     New windows (no saved position) open near *parent*.
     """
     dlg = tk.Toplevel(parent)
-    dlg.withdraw()  # скрываем до позиционирования
+
+    # Скрываем прозрачностью — Win32 уважает geometry() только для visible окна
+    try:
+        import sys
+        if sys.platform == 'win32':
+            dlg.wm_attributes('-alpha', 0)
+        else:
+            dlg.withdraw()
+    except Exception:
+        dlg.withdraw()
 
     for key, value in toplevel_kwargs.items():
         if key == 'title':
@@ -407,9 +458,18 @@ def create_toplevel_with_persistence(parent: tk.Tk,
 
     restore_window_geometry(dlg, window_name, settings_manager,
                             default_geometry, parent_window=parent)
+    dlg.update_idletasks()
     _setup_taskbar(dlg)
     _register_app_window(dlg)
-    dlg.deiconify()
+
+    try:
+        import sys
+        if sys.platform == 'win32':
+            dlg.wm_attributes('-alpha', 1)
+        else:
+            dlg.deiconify()
+    except Exception:
+        dlg.deiconify()
 
     def on_close() -> None:
         save_window_geometry(dlg, window_name, settings_manager)

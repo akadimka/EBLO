@@ -1362,18 +1362,6 @@ class CSVNormalizerApp:
         
     def open_compiler(self):
         """Открыть диалог компиляции серий."""
-        records = getattr(self, '_all_records', [])
-        if not records:
-            messagebox.showwarning('Внимание',
-                'Сначала создайте CSV (загрузите данные в таблицу).',
-                parent=self.root)
-            return
-
-        folder = self.folder_path.get().strip()
-        if not folder or not os.path.isdir(folder):
-            messagebox.showerror('Ошибка', 'Укажите корректную папку.', parent=self.root)
-            return
-
         try:
             try:
                 from gui_compiler import CompilerDialog
@@ -1381,9 +1369,8 @@ class CSVNormalizerApp:
                 from .gui_compiler import CompilerDialog
             CompilerDialog(
                 parent=self.root,
-                records=records,
-                work_dir=Path(folder),
                 logger=self.logger,
+                settings=self.settings_manager,
             )
         except Exception as e:
             self._log(f'Ошибка открытия компилятора: {e}')

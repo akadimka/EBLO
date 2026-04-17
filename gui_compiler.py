@@ -2,12 +2,13 @@
 Диалог компиляции FB2-файлов.
 
 Открывается из окна нормализации кнопкой «Скомпилировать».
-Показывает все найденные группы (автор + серия ≥ 2 книг),
-даёт запустить компиляцию с опцией удаления исходников.
+Пользователь выбирает папку, нажимает «Сканировать» — диалог сам
+находит все группы (автор + серия ≥ 2 книг) и заполняет таблицу.
+Затем можно выбрать группы и запустить компиляцию.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import threading
 from pathlib import Path
 from typing import List, Optional
@@ -32,25 +33,26 @@ _ORDER_OK_COLOR   = '#DFF0D8'   # бледно-зелёный
 _ORDER_WARN_COLOR = '#FCF8E3'   # жёлтый
 _ORDER_ERR_COLOR  = '#F2DEDE'   # розовый
 
+_SETTINGS_KEY_COMPILER_DIR = 'compiler_scan_dir'
+
 
 class CompilerDialog:
-    """Модальный диалог компиляции серий."""
+    """Диалог компиляции серий."""
 
-    def __init__(self, parent: tk.Widget, records: list, work_dir: Path, logger=None):
+    def __init__(self, parent: tk.Widget, logger=None, settings=None):
         """
         Args:
-            parent:   Родительское окно (CSVNormalizerApp.root).
-            records:  Список BookRecord из текущей загруженной таблицы.
-            work_dir: Корневая папка (для разрешения file_path).
+            parent:   Родительское окно.
             logger:   Logger приложения.
+            settings: SettingsManager для сохранения/восстановления состояния.
         """
         self._parent   = parent
-        self._records  = records
-        self._work_dir = work_dir
         self._logger   = logger
+        self._settings = settings
         self._service  = FB2CompilerService(logger=logger)
         self._groups: List[CompilationGroup] = []
         self._results: List[CompilationResult] = []
+        self._scanning = False
 
         self._win = tk.Toplevel(parent)
         self._win.withdraw()  # скрываем до позиционирования
@@ -60,46 +62,56 @@ class CompilerDialog:
         # Позиционируем окно относительно родительского (тот же монитор)
         try:
             from window_persistence import setup_window_persistence
-            _W, _H = 900, 620
-            try:
-                _settings = getattr(parent, 'settings', None) or getattr(
-                    parent.master, 'settings', None)
-            except Exception:
-                _settings = None
-
-            if _settings is not None:
+            _W, _H = 900, 640
+            if self._settings is not None:
                 setup_window_persistence(
-                    self._win, 'compiler_dialog', _settings,
+                    self._win, 'compiler_dialog', self._settings,
                     f'{_W}x{_H}+100+100', parent_window=parent,
                 )
             else:
-                # Нет settings — просто центрируем на родителе
                 from window_persistence import _default_geometry_near_parent
                 self._win.geometry(_default_geometry_near_parent(parent, _W, _H))
+                self._win.deiconify()
         except Exception:
-            self._win.geometry('900x620')
+            self._win.geometry('900x640')
+            self._win.deiconify()
 
         self._build_ui()
-        self._win.after(100, self._load_groups)
+        self._load_saved_dir()
 
     # ------------------------------------------------------------------
     # UI
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        # ── Верхняя панель ────────────────────────────────────────────
-        top = ttk.Frame(self._win, padding='5 5 5 0')
+        # ── Панель выбора директории (вверху) ────────────────────────
+        dir_frm = ttk.Frame(self._win, padding='5 5 5 3')
+        dir_frm.pack(fill=tk.X)
+
+        ttk.Label(dir_frm, text='Папка для сканирования:').pack(side=tk.LEFT)
+
+        self._dir_var = tk.StringVar()
+        self._dir_var.trace_add('write', self._on_dir_changed)
+        dir_entry = ttk.Entry(dir_frm, textvariable=self._dir_var)
+        dir_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 4))
+
+        ttk.Button(dir_frm, text='…', width=3,
+                   command=self._browse_dir).pack(side=tk.LEFT)
+
+        ttk.Separator(self._win, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=5)
+
+        # ── Верхняя панель (статус) ───────────────────────────────────
+        top = ttk.Frame(self._win, padding='5 3 5 0')
         top.pack(fill=tk.X)
 
         ttk.Label(top, text='Найденные группы серий (≥ 2 файлов):',
                   font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT)
 
-        self._status_var = tk.StringVar(value='Анализ…')
+        self._status_var = tk.StringVar(value='Укажите папку и нажмите «Сканировать»')
         ttk.Label(top, textvariable=self._status_var,
                   foreground='#0067C0').pack(side=tk.RIGHT, padx=5)
 
-        # ── Нижняя панель: опции + кнопки (пакуем ДО PanedWindow, чтобы
-        #    expand=True не вытеснял кнопки за пределы окна) ───────────
+        # ── Нижняя панель: опции + кнопки ────────────────────────────
         bot = ttk.Frame(self._win, padding='5 3 5 5')
         bot.pack(fill=tk.X, side=tk.BOTTOM)
 
@@ -112,8 +124,14 @@ class CompilerDialog:
         btn_frm = ttk.Frame(bot)
         btn_frm.grid(row=1, column=0, columnspan=2, sticky='e', pady=4)
 
+        self._scan_btn = ttk.Button(btn_frm, text='Сканировать',
+                                    command=self._run_scan,
+                                    state=tk.DISABLED)
+        self._scan_btn.pack(side=tk.LEFT, padx=3)
+
         self._sel_all_btn = ttk.Button(btn_frm, text='Выбрать все',
-                                       command=self._select_all)
+                                       command=self._select_all,
+                                       state=tk.DISABLED)
         self._sel_all_btn.pack(side=tk.LEFT, padx=3)
 
         self._compile_btn = ttk.Button(btn_frm, text='Скомпилировать',
@@ -204,32 +222,168 @@ class CompilerDialog:
         paned.add(bot_frm, weight=1)
 
     # ------------------------------------------------------------------
-    # Загрузка групп
+    # Директория
     # ------------------------------------------------------------------
 
-    def _load_groups(self):
-        """Запустить поиск групп в фоне."""
-        def worker():
-            groups = self._service.find_groups(self._records, self._work_dir)
-            self._win.after(0, lambda: self._populate_groups(groups))
+    def _load_saved_dir(self):
+        """Загрузить сохранённую директорию из настроек."""
+        if self._settings is None:
+            return
+        try:
+            saved = self._settings.get(_SETTINGS_KEY_COMPILER_DIR, '')
+            if saved and Path(saved).is_dir():
+                self._dir_var.set(saved)
+        except Exception:
+            pass
 
-        threading.Thread(target=worker, daemon=True).start()
+    def _save_dir(self, path: str):
+        """Сохранить директорию в настройки."""
+        if self._settings is None:
+            return
+        try:
+            self._settings.set(_SETTINGS_KEY_COMPILER_DIR, path)
+        except Exception:
+            pass
 
-    def _populate_groups(self, groups: List[CompilationGroup]):
-        self._groups = groups
+    def _browse_dir(self):
+        current = self._dir_var.get().strip()
+        initial = current if current and Path(current).is_dir() else ''
+        chosen = filedialog.askdirectory(
+            parent=self._win,
+            title='Выберите папку для сканирования',
+            initialdir=initial or None,
+        )
+        if chosen:
+            self._dir_var.set(chosen)
 
+    def _on_dir_changed(self, *_):
+        folder = self._dir_var.get().strip()
+        is_valid = bool(folder) and Path(folder).is_dir()
+        self._scan_btn.configure(state=tk.NORMAL if is_valid else tk.DISABLED)
+        if is_valid:
+            self._save_dir(folder)
+
+    # ------------------------------------------------------------------
+    # Сканирование
+    # ------------------------------------------------------------------
+
+    def _run_scan(self):
+        if self._scanning:
+            return
+        folder = self._dir_var.get().strip()
+        if not folder or not Path(folder).is_dir():
+            messagebox.showerror('Ошибка', 'Укажите корректную папку.', parent=self._win)
+            return
+
+        self._scanning = True
+        self._scan_btn.configure(state=tk.DISABLED)
+        self._sel_all_btn.configure(state=tk.DISABLED)
+        self._compile_btn.configure(state=tk.DISABLED)
+        self._status_var.set('Сканирование…')
+
+        # Очистить таблицы
         for iid in self._tree.get_children():
             self._tree.delete(iid)
+        for iid in self._det_tree.get_children():
+            self._det_tree.delete(iid)
+        self._fname_var.set('—')
+        self._groups = []
+
+        threading.Thread(target=self._scan_worker, args=(folder,), daemon=True).start()
+
+    def _scan_worker(self, folder: str):
+        import sys, os
+        work_dir = Path(folder)
+
+        # tqdm и другие модули пишут в stdout/stderr; в GUI-приложении
+        # без консоли это может привести к зависанию — подавляем вывод.
+        _devnull = open(os.devnull, 'w', encoding='utf-8')
+        _old_stdout, _old_stderr = sys.stdout, sys.stderr
+        sys.stdout = _devnull
+        sys.stderr = _devnull
+
+        try:
+            try:
+                from precache import Precache
+                from passes.pass1_read_files import Pass1ReadFiles
+                from passes.pass2_filename import Pass2Filename
+                from passes.pass2_fallback import Pass2Fallback
+                from fb2_author_extractor import FB2AuthorExtractor
+            except ImportError:
+                from .precache import Precache
+                from .passes.pass1_read_files import Pass1ReadFiles
+                from .passes.pass2_filename import Pass2Filename
+                from .passes.pass2_fallback import Pass2Fallback
+                from .fb2_author_extractor import FB2AuthorExtractor
+
+            self._set_status('Кеширование папок…')
+
+            settings = self._settings
+            logger   = self._logger
+            folder_parse_limit = getattr(settings, 'get_folder_parse_limit',
+                                         lambda: 0)() if settings else 0
+
+            extractor = FB2AuthorExtractor()
+            precache  = Precache(work_dir, settings, logger, folder_parse_limit)
+            precache.execute()
+
+            self._set_status('Чтение файлов…')
+            pass1   = Pass1ReadFiles(work_dir, precache.author_folder_cache,
+                                     extractor, logger, folder_parse_limit)
+            records = pass1.execute()
+
+            self._set_status('Извлечение авторов…')
+            pass2 = Pass2Filename(settings, logger, work_dir,
+                                  male_names=precache.male_names,
+                                  female_names=precache.female_names)
+            pass2.prebuild_author_cache(records)
+            pass2.execute(records)
+
+            pass2fb = Pass2Fallback(logger, settings=settings)
+            pass2fb.execute(records)
+
+            self._set_status('Поиск групп для компиляции…')
+            groups = self._service.find_groups(records, work_dir)
+
+            self._win.after(0, lambda: self._populate_groups(groups))
+
+        except Exception as exc:
+            err = str(exc)
+            self._win.after(0, lambda: self._on_scan_error(err))
+
+        finally:
+            sys.stdout = _old_stdout
+            sys.stderr = _old_stderr
+            _devnull.close()
+
+    def _set_status(self, text: str):
+        self._win.after(0, lambda: self._status_var.set(text))
+
+    def _on_scan_error(self, err: str):
+        self._scanning = False
+        self._scan_btn.configure(
+            state=tk.NORMAL if Path(self._dir_var.get().strip()).is_dir() else tk.DISABLED
+        )
+        self._status_var.set(f'Ошибка: {err}')
+        messagebox.showerror('Ошибка сканирования', err, parent=self._win)
+
+    def _populate_groups(self, groups: List[CompilationGroup]):
+        self._scanning = False
+        folder = self._dir_var.get().strip()
+        self._scan_btn.configure(
+            state=tk.NORMAL if folder and Path(folder).is_dir() else tk.DISABLED
+        )
+
+        self._groups = groups
 
         if not groups:
             self._status_var.set('Групп для компиляции не найдено')
             return
 
         total      = len(groups)
-        compilable = total  # все группы теперь компилируемы
+        compilable = total
 
         for idx, g in enumerate(groups):
-            # Описание источника сортировки
             sources = {b.sort_source for b in g.books}
             sources.discard('unknown')
             if getattr(g, 'alphabetical_order', False):
@@ -264,6 +418,8 @@ class CompilerDialog:
         if warn:
             status += f'  |  Частично: {warn}'
         self._status_var.set(status)
+
+        self._sel_all_btn.configure(state=tk.NORMAL if compilable else tk.DISABLED)
         self._compile_btn.configure(state=tk.NORMAL if compilable else tk.DISABLED)
 
     # ------------------------------------------------------------------
@@ -285,8 +441,8 @@ class CompilerDialog:
             self._det_tree.delete(iid)
 
         for pos, book in enumerate(group.books, 1):
-            title     = (book.record.file_title or '').strip() or book.abs_path.stem
-            sort_lbl  = _SORT_SOURCE_LABEL.get(book.sort_source, book.sort_source)
+            title    = (book.record.file_title or '').strip() or book.abs_path.stem
+            sort_lbl = _SORT_SOURCE_LABEL.get(book.sort_source, book.sort_source)
             is_alpha = getattr(group, 'alphabetical_order', False)
             sn = book.volume_label or ('α' if is_alpha else ('?' if book.order_ambiguous else '—'))
             warn = '' if is_alpha else (' ⚠' if book.order_ambiguous else '')
@@ -315,7 +471,6 @@ class CompilerDialog:
             self._fname_var.set('—')
 
     def _select_all(self):
-        """Выделить все строки в таблице групп."""
         self._tree.selection_set(self._tree.get_children())
 
     # ------------------------------------------------------------------
@@ -330,7 +485,7 @@ class CompilerDialog:
             return
 
         selected_groups = [self._groups[int(iid)] for iid in sel]
-        to_compile = selected_groups  # все группы компилируемы
+        to_compile = selected_groups
         alpha_cnt  = sum(1 for g in to_compile if getattr(g, 'alphabetical_order', False))
 
         if not to_compile:
@@ -350,6 +505,7 @@ class CompilerDialog:
 
         self._compile_btn.configure(state=tk.DISABLED)
         self._sel_all_btn.configure(state=tk.DISABLED)
+        self._scan_btn.configure(state=tk.DISABLED)
         self._status_var.set('Компиляция…')
 
         def worker():
@@ -366,14 +522,16 @@ class CompilerDialog:
         results: List[CompilationResult],
         delete_now: bool,
     ):
-        ok      = [r for r in results if r.success]
-        failed  = [r for r in results if not r.success]
+        ok     = [r for r in results if r.success]
+        failed = [r for r in results if not r.success]
 
-        self._compile_btn.configure(state=tk.NORMAL)
-        self._sel_all_btn.configure(state=tk.NORMAL)
-        self._status_var.set(
-            f'Готово: {len(ok)} успешно, {len(failed)} ошибок'
+        folder = self._dir_var.get().strip()
+        self._scan_btn.configure(
+            state=tk.NORMAL if folder and Path(folder).is_dir() else tk.DISABLED
         )
+        self._compile_btn.configure(state=tk.NORMAL if self._groups else tk.DISABLED)
+        self._sel_all_btn.configure(state=tk.NORMAL if self._groups else tk.DISABLED)
+        self._status_var.set(f'Готово: {len(ok)} успешно, {len(failed)} ошибок')
 
         # Если не удаляли сразу — предложить удалить сейчас
         if not delete_now and ok:
