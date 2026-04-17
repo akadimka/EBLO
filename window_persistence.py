@@ -319,22 +319,19 @@ def setup_window_persistence(window: tk.Tk,
 
     • Restores saved geometry (or places near *parent_window* if first open).
     • Saves geometry when the window is closed via WM_DELETE_WINDOW.
+
+    Использует withdraw/deiconify чтобы окно не мелькало на основном мониторе
+    перед перемещением на нужный монитор.
     """
-    def restore_deferred() -> None:
-        restore_window_geometry(window, window_name, settings_manager,
-                                default_geometry, parent_window=parent_window)
-        _detach_from_owner(window)
+    # Скрываем до позиционирования — убирает мигание при первом появлении
+    window.withdraw()
 
-    window.after(1, restore_deferred)
+    restore_window_geometry(window, window_name, settings_manager,
+                            default_geometry, parent_window=parent_window)
+    _detach_from_owner(window)
 
-    # Backup restore on first <Map> event
-    def on_first_map(event=None) -> None:
-        window.unbind('<Map>')
-        restore_window_geometry(window, window_name, settings_manager,
-                                default_geometry, parent_window=parent_window)
-        _detach_from_owner(window)
-
-    window.bind('<Map>', on_first_map)
+    # Показываем уже в правильной позиции
+    window.deiconify()
 
     def on_close() -> None:
         save_window_geometry(window, window_name, settings_manager)
@@ -354,6 +351,7 @@ def create_toplevel_with_persistence(parent: tk.Tk,
     New windows (no saved position) open near *parent*.
     """
     dlg = tk.Toplevel(parent)
+    dlg.withdraw()  # скрываем до позиционирования
 
     for key, value in toplevel_kwargs.items():
         if key == 'title':
@@ -364,6 +362,7 @@ def create_toplevel_with_persistence(parent: tk.Tk,
     restore_window_geometry(dlg, window_name, settings_manager,
                             default_geometry, parent_window=parent)
     _detach_from_owner(dlg)
+    dlg.deiconify()
 
     def on_close() -> None:
         save_window_geometry(dlg, window_name, settings_manager)
