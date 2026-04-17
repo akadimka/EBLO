@@ -302,6 +302,7 @@ class CompilerDialog:
         sys.stdout = _devnull
         sys.stderr = _devnull
 
+        diag_lines = []
         try:
             try:
                 from regen_csv import RegenCSVService
@@ -311,30 +312,55 @@ class CompilerDialog:
             self._set_status('Сканирование файлов…')
 
             svc = RegenCSVService()
-            # Запускаем полный пайплайн Pass1–Pass6.
-            # generate_csv может вернуть [] если _save_csv упала —
-            # читаем svc.records напрямую на случай частичного сбоя.
+            diag_lines.append(f'work_dir: {folder}')
+
             try:
                 records = svc.generate_csv(folder, output_csv_path=None)
-            except Exception:
+                diag_lines.append(f'generate_csv returned {len(records)} records')
+            except Exception as e:
+                import traceback
+                diag_lines.append(f'generate_csv EXCEPTION: {e}\n{traceback.format_exc()}')
                 records = []
+
+            svc_records = getattr(svc, 'records', []) or []
+            diag_lines.append(f'svc.records: {len(svc_records)}')
+
             if not records:
-                records = getattr(svc, 'records', []) or []
+                records = svc_records
+
+            # Показать первые несколько записей для диагностики
+            for r in records[:5]:
+                diag_lines.append(
+                    f'  rec: author={getattr(r,"proposed_author","?")!r}'
+                    f' series={getattr(r,"proposed_series","?")!r}'
+                    f' sn={getattr(r,"proposed_series_number","?")!r}'
+                )
 
             self._set_status('Поиск групп для компиляции…')
             groups = self._service.find_groups(records, work_dir)
+            diag_lines.append(f'find_groups → {len(groups)} groups')
+
+            # Временно показываем диагностику в статусе если групп нет
+            if not groups:
+                diag = '\n'.join(diag_lines)
+                self._win.after(0, lambda d=diag: self._show_diag(d))
 
             self._win.after(0, lambda: self._populate_groups(groups))
 
         except Exception as exc:
             import traceback
             err = traceback.format_exc()
-            self._win.after(0, lambda: self._on_scan_error(err))
+            diag_lines.append(f'OUTER EXCEPTION: {err}')
+            self._win.after(0, lambda: self._on_scan_error('\n'.join(diag_lines)))
 
         finally:
             sys.stdout = _old_stdout
             sys.stderr = _old_stderr
             _devnull.close()
+
+    def _show_diag(self, text: str):
+        from tkinter import messagebox
+        messagebox.showinfo('Диагностика сканирования', text, parent=self._win)
 
     def _set_status(self, text: str):
         self._win.after(0, lambda: self._status_var.set(text))
