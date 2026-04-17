@@ -375,6 +375,24 @@ class Pass2SeriesFilename:
         # даже для файлов у которых proposed_author был "Соавторство"/"Сборник".
         self._propagate_ancestor_folder_authors(records)
 
+        # Кэш Path.parts: один и тот же file_path встречается в нескольких проходах
+        _parts_cache: dict = {}
+
+        def _is_strong_match(author: str, folder: str) -> bool:
+            a = author.lower().replace('ё', 'е')
+            f = folder.lower().replace('ё', 'е')
+            if a in f or f in a:
+                return True
+            # Handle name-order variation (metadata "Имя Фамилия" vs folder "Фамилия Имя")
+            # and multi-author strings: check if all folder words match any single author
+            f_words = set(re.sub(r'[^\w]', ' ', f).split())
+            if f_words:
+                for single_author in re.split(r'[;,]', a):
+                    sa_words = set(single_author.strip().split())
+                    if sa_words and f_words == sa_words:
+                        return True
+            return False
+
         for record in records:
             # Приоритет из config.json: FOLDER_STRUCTURE=3 > FILENAME=2 > FB2_METADATA=1
             # Поиск по папкам применяется всегда, используя любой известный автор:
@@ -382,34 +400,14 @@ class Pass2SeriesFilename:
             # Это гарантирует соблюдение приоритета независимо от author_source.
             author_name = record.proposed_author or record.metadata_authors or None
             if author_name:
-                path_parts = Path(record.file_path).parts  # e.g., (TopFolder, Author, Series, File.fb2)
-                # Фильтруем папки с именами-расширениями (последний элемент = файл, не фильтруем)
-                path_parts = tuple(
-                    p for i, p in enumerate(path_parts)
-                    if i == len(path_parts) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
-                )
-
-                # Двухпроходный поиск папки автора:
-                # Проход 1: точное/строгое совпадение (proposed_author содержится в папке
-                #            или папка содержится в proposed_author).
-                # Проход 2: слабое совпадение по отдельному слову (_author_matches_folder).
-                # Это предотвращает ложные срабатывания на коллекционные папки вида
-                # «Сборник Дамиров и компания», которые содержат фамилию автора,
-                # но не являются его персональной папкой.
-                def _is_strong_match(author: str, folder: str) -> bool:
-                    a = author.lower().replace('ё', 'е')
-                    f = folder.lower().replace('ё', 'е')
-                    if a in f or f in a:
-                        return True
-                    # Handle name-order variation (metadata "Имя Фамилия" vs folder "Фамилия Имя")
-                    # and multi-author strings: check if all folder words match any single author
-                    f_words = set(re.sub(r'[^\w]', ' ', f).split())
-                    if f_words:
-                        for single_author in re.split(r'[;,]', a):
-                            sa_words = set(single_author.strip().split())
-                            if sa_words and f_words == sa_words:
-                                return True
-                    return False
+                path_parts = _parts_cache.get(record.file_path)
+                if path_parts is None:
+                    raw = Path(record.file_path).parts
+                    path_parts = tuple(
+                        p for i, p in enumerate(raw)
+                        if i == len(raw) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
+                    )
+                    _parts_cache[record.file_path] = path_parts
 
                 author_folder_idx = None
                 for i, part in enumerate(path_parts[:-1]):
