@@ -832,59 +832,78 @@ class MainWindow(tk.Tk):
         if hasattr(self, '_sync_running') and self._sync_running:
             messagebox.showwarning("Внимание", "Синхронизация уже выполняется")
             return
-        
+
+        # ── Проверка: разрешены только папки с присвоенным жанром (галочка) ──
+        assigned: dict = getattr(self, 'genre_assignments', {})
+        if not assigned:
+            messagebox.showwarning(
+                "Синхронизация невозможна",
+                "Ни одной папке не присвоен жанр.\n\n"
+                "Выберите папки в дереве и назначьте им жанр (✓),\n"
+                "после этого синхронизация станет доступна."
+            )
+            return
+
+        allowed_folders = set(assigned.keys())   # абсолютные пути папок с галочкой
+
         # Confirm before starting
+        folder_list = '\n'.join(f'  • {Path(p).name}' for p in sorted(allowed_folders))
         if not messagebox.askyesno(
             "Подтверждение",
-            "Начать синхронизацию библиотеки?\n\n"
-            "Файлы будут перемещены из исходной папки в структурированную библиотеку."
+            f"Синхронизировать {len(allowed_folders)} папок с присвоенным жанром?\n\n"
+            f"{folder_list}\n\n"
+            "Файлы будут перемещены в структурированную библиотеку."
         ):
             return
-        
+
         self._sync_running = True
-        self.logger.log('Синхронизация запущена')
-        
+        self.logger.log(f'Синхронизация запущена: {len(allowed_folders)} папок')
+
         # Launch synchronization in background thread
         thread = threading.Thread(
             target=self._synchronize_thread,
+            args=(allowed_folders,),
             daemon=True
         )
         thread.start()
-    
-    def _synchronize_thread(self):
+
+    def _synchronize_thread(self, allowed_folders: set):
         """Execute synchronization in background thread."""
         original_stdout = sys.stdout
-        
+
         try:
             # Create synchronization service
             sync_service = SynchronizationService('config.json')
-            
+
             def progress_callback(current, total, status):
                 """Update progress bar in UI."""
                 self.after(0, lambda: self.progress_var.set(f"{status} ({current}/{total})"))
                 if self._status_bar:
                     self.after(0, lambda: self._status_bar.set(f"{status} ({current}/{total})", 'busy'))
                 self.logger.log(f"{status}: {current}/{total}")
-            
+
             def log_callback(message: str):
                 """Callback for logging from synchronization service."""
                 self.logger.log(f"[SYNC] {message}")
-            
+
             # Run synchronization
-            if self._status_bar: self.after(0, lambda: self._status_bar.set("Инициализация синхронизации...", 'busy'))
+            if self._status_bar:
+                self.after(0, lambda: self._status_bar.set("Инициализация синхронизации...", 'busy'))
             stats = sync_service.synchronize(
                 progress_callback=progress_callback,
-                log_callback=log_callback
+                log_callback=log_callback,
+                allowed_folders=allowed_folders,
             )
-            
+
             # Update final status
-            if self._status_bar: self.after(0, lambda: self._status_bar.set("Синхронизация завершена", 'ok'))
-            
+            if self._status_bar:
+                self.after(0, lambda: self._status_bar.set("Синхронизация завершена", 'ok'))
+
             # Show statistics popup
             self._show_synchronization_stats(stats)
-            
+
             self.logger.log("Синхронизация успешно завершена")
-            
+
         except Exception as e:
             self.logger.log(f"ОШИБКА при синхронизации: {str(e)}")
             self.after(
@@ -894,8 +913,9 @@ class MainWindow(tk.Tk):
                     f"Ошибка при синхронизации: {str(e)}"
                 )
             )
-            if self._status_bar: self.after(0, lambda: self._status_bar.set("ОШИБКА", 'error'))
-        
+            if self._status_bar:
+                self.after(0, lambda: self._status_bar.set("ОШИБКА", 'error'))
+
         finally:
             sys.stdout = original_stdout
             self._sync_running = False

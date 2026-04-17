@@ -171,7 +171,9 @@ class SynchronizationService:
         
         return stats
     
-    def synchronize(self, progress_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None) -> Dict:
+    def synchronize(self, progress_callback: Optional[Callable] = None,
+                    log_callback: Optional[Callable] = None,
+                    allowed_folders: Optional[set] = None) -> Dict:
         """Execute full synchronization process.
         
         Args:
@@ -214,12 +216,29 @@ class SynchronizationService:
                 progress_callback(5, 100, "Генерация CSV из исходной папки")
             
             records = self._generate_csv_data(progress_callback)
+
+            # ── Фильтр по папкам с присвоенным жанром ─────────────────────────
+            if allowed_folders:
+                allowed_abs = {Path(p).resolve() for p in allowed_folders}
+                before = len(records)
+                records = [
+                    r for r in records
+                    if any(
+                        (self.last_scan_path / r.file_path).resolve().is_relative_to(folder)
+                        for folder in allowed_abs
+                    )
+                ]
+                self._log(
+                    f"Фильтр по жанровым папкам: {before} → {len(records)} записей "
+                    f"({before - len(records)} пропущено без жанра)"
+                )
+
             self.stats['total_files'] = len(records)
-            
+
             if not records:
                 if progress_callback:
                     progress_callback(10, 100, "Нет файлов для обработки")
-                self._log("Синхронизация: нет файлов в исходной папке")
+                self._log("Синхронизация: нет файлов в разрешённых папках")
                 return self.stats
             
             # Step 2: Deduplicate by compilation (compilations win over single volumes)
