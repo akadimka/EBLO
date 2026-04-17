@@ -799,17 +799,14 @@ class MainWindow(tk.Tk):
         
         from window_persistence import setup_window_persistence, save_window_geometry
         
-        # Получаем текущий путь из главного окна
-        current_folder = self.selected_folder.get()
-        
         # Создаем новое окно для нормализации
         # Полноценное окно (не диалог) — все кнопки хрома: свернуть/развернуть/закрыть
         normalizer_root = tk.Toplevel(self)
         normalizer_root.withdraw()          # скрываем ДО построения UI — без мигания
         normalizer_root.resizable(True, True)
 
-        # Инициализируем app (геометрия будет восстановлена автоматически)
-        app = CSVNormalizerApp(normalizer_root, current_folder, self.logger, self.settings)
+        # Инициализируем app; папка восстанавливается из settings (normalizer_folder)
+        app = CSVNormalizerApp(normalizer_root, None, self.logger, self.settings)
 
         # Настройка сохранения размера и позиции окна
         # setup_window_persistence тоже вызывает withdraw/deiconify, но окно уже скрыто —
