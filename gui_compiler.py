@@ -329,11 +329,15 @@ class CompilerDialog:
                 records = svc_records
 
             # Показать первые несколько записей для диагностики
-            for r in records[:5]:
+            for r in records[:10]:
+                sn = getattr(r, 'proposed_series_number', None) or getattr(r, 'series_number', '?')
+                bk = self._service._make_book(r, work_dir)
                 diag_lines.append(
                     f'  rec: author={getattr(r,"proposed_author","?")!r}'
                     f' series={getattr(r,"proposed_series","?")!r}'
-                    f' sn={getattr(r,"proposed_series_number","?")!r}'
+                    f' sn={sn!r}'
+                    f' sort_key={bk.sort_key}'
+                    f' file={getattr(r,"file_path","?")}'
                 )
 
             self._set_status('Поиск групп для компиляции…')
