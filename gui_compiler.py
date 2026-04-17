@@ -97,6 +97,32 @@ class CompilerDialog:
         ttk.Label(top, textvariable=self._status_var,
                   foreground='#0067C0').pack(side=tk.RIGHT, padx=5)
 
+        # ── Нижняя панель: опции + кнопки (пакуем ДО PanedWindow, чтобы
+        #    expand=True не вытеснял кнопки за пределы окна) ───────────
+        bot = ttk.Frame(self._win, padding='5 3 5 5')
+        bot.pack(fill=tk.X, side=tk.BOTTOM)
+
+        self._delete_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            bot, text='Удалять исходники сразу после компиляции',
+            variable=self._delete_var,
+        ).grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
+
+        btn_frm = ttk.Frame(bot)
+        btn_frm.grid(row=1, column=0, columnspan=2, sticky='e', pady=4)
+
+        self._sel_all_btn = ttk.Button(btn_frm, text='Выбрать все',
+                                       command=self._select_all)
+        self._sel_all_btn.pack(side=tk.LEFT, padx=3)
+
+        self._compile_btn = ttk.Button(btn_frm, text='Скомпилировать',
+                                       command=self._run_compile,
+                                       state=tk.DISABLED)
+        self._compile_btn.pack(side=tk.LEFT, padx=3)
+
+        ttk.Button(btn_frm, text='Закрыть',
+                   command=self._win.destroy).pack(side=tk.LEFT, padx=3)
+
         # ── Перетаскиваемый разделитель между таблицами ───────────────
         paned = ttk.PanedWindow(self._win, orient=tk.VERTICAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=(2, 0))
@@ -164,33 +190,6 @@ class CompilerDialog:
         det_vsb.grid(row=0, column=1, sticky='ns')
 
         paned.add(bot_frm, weight=1)
-
-        # ── Нижняя панель: опции + кнопки ────────────────────────────
-        bot = ttk.Frame(self._win, padding='5 3 5 5')
-        bot.pack(fill=tk.X, side=tk.BOTTOM)
-
-        # Чекбокс удаления исходников
-        self._delete_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            bot, text='Удалять исходники сразу после компиляции',
-            variable=self._delete_var,
-        ).grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
-
-        # Кнопки
-        btn_frm = ttk.Frame(bot)
-        btn_frm.grid(row=1, column=0, columnspan=2, sticky='e', pady=4)
-
-        self._sel_all_btn = ttk.Button(btn_frm, text='Выбрать все',
-                                       command=self._select_all)
-        self._sel_all_btn.pack(side=tk.LEFT, padx=3)
-
-        self._compile_btn = ttk.Button(btn_frm, text='Скомпилировать',
-                                       command=self._run_compile,
-                                       state=tk.DISABLED)
-        self._compile_btn.pack(side=tk.LEFT, padx=3)
-
-        ttk.Button(btn_frm, text='Закрыть',
-                   command=self._win.destroy).pack(side=tk.LEFT, padx=3)
 
     # ------------------------------------------------------------------
     # Загрузка групп
