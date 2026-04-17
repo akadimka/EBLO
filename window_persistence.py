@@ -24,31 +24,27 @@ _app_windows: list = []
 
 
 def _register_app_window(window: tk.Tk) -> None:
-    """Зарегистрировать окно в группе приложения."""
+    """Зарегистрировать окно в группе приложения.
+
+    _app_windows хранит порядок СОЗДАНИЯ окон (не фокуса).
+    _app_windows[-1] — всегда последнее созданное окно.
+    При получении фокуса любым окном все окна поднимаются в порядке создания
+    (последнее созданное — поверх), но список НЕ перестраивается.
+    """
     if window not in _app_windows:
         _app_windows.append(window)
 
     def on_focus_in(event) -> None:
-        # Реагируем только на фокус самого окна, не дочерних виджетов
         if event.widget is not window:
             return
-        # Переставить окно в конец (самое свежее)
-        try:
-            _app_windows.remove(window)
-        except ValueError:
-            pass
-        _app_windows.append(window)
-        # Поднять все окна снизу вверх: старые первые, новое последним (поверх)
+        # Поднять все окна в порядке создания: последнее созданное — поверх.
+        # Список не перестраиваем — порядок создания неизменен.
         for win in list(_app_windows):
             try:
-                if win is not window and win.winfo_exists():
+                if win.winfo_exists():
                     win.lift()
             except Exception:
                 pass
-        try:
-            window.lift()
-        except Exception:
-            pass
 
     def on_destroy(event) -> None:
         if event.widget is window:
@@ -62,23 +58,32 @@ def _register_app_window(window: tk.Tk) -> None:
 
 
 def _restore_focus_to_last() -> None:
-    """Вернуть фокус последнему зарегистрированному окну приложения."""
-    try:
-        import sys
-        if sys.platform != 'win32':
-            return
-        # Последний элемент _app_windows — самое «свежее» окно
-        for win in reversed(_app_windows):
-            try:
-                if win.winfo_exists() and win.state() != 'withdrawn':
-                    import ctypes
-                    hwnd = int(win.wm_frame(), 16)
-                    ctypes.windll.user32.SetForegroundWindow(hwnd)
-                    return
-            except Exception:
-                continue
-    except Exception:
-        pass
+    """Вернуть фокус и z-order последнему созданному окну приложения."""
+    for win in reversed(_app_windows):
+        try:
+            if win.winfo_exists() and win.state() not in ('withdrawn', 'iconic'):
+                win.lift()
+                win.focus_force()
+                # Win32: снять блокировку foreground и поставить окно на передний план
+                try:
+                    import sys
+                    if sys.platform == 'win32':
+                        import ctypes
+                        u32 = ctypes.windll.user32
+                        tid = u32.GetCurrentThreadId()
+                        fg_tid = u32.GetWindowThreadProcessId(u32.GetForegroundWindow(), None)
+                        if fg_tid != tid:
+                            u32.AttachThreadInput(fg_tid, tid, True)
+                        hwnd = int(win.wm_frame(), 16)
+                        u32.SetForegroundWindow(hwnd)
+                        u32.BringWindowToTop(hwnd)
+                        if fg_tid != tid:
+                            u32.AttachThreadInput(fg_tid, tid, False)
+                except Exception:
+                    pass
+                return
+        except Exception:
+            continue
 
 
 def _setup_taskbar(window: tk.Tk) -> None:
@@ -118,8 +123,12 @@ def _setup_taskbar(window: tk.Tk) -> None:
         u32.ShowWindow(hwnd, SW_HIDE)
         u32.ShowWindow(hwnd, SW_SHOW)
 
-        # Фокус всегда возвращаем последнему открытому окну, а не текущему
+        # Фокус возвращаем последнему созданному окну.
+        # Вызываем дважды: сразу и через 150ms — Windows может заблокировать
+        # первый SetForegroundWindow если процесс потерял foreground статус.
         _restore_focus_to_last()
+        if _app_windows:
+            _app_windows[-1].after(150, _restore_focus_to_last)
     except Exception:
         pass
 
