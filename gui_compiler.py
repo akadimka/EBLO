@@ -111,6 +111,18 @@ class CompilerDialog:
         ttk.Label(top, textvariable=self._status_var,
                   foreground='#0067C0').pack(side=tk.RIGHT, padx=5)
 
+        # ── Прогресс-бар сканирования ─────────────────────────────────
+        prog_frm = ttk.Frame(self._win, padding='5 0 5 2')
+        prog_frm.pack(fill=tk.X)
+
+        self._progress_var = tk.IntVar(value=0)
+        self._progressbar = ttk.Progressbar(
+            prog_frm, variable=self._progress_var,
+            maximum=100, mode='determinate',
+        )
+        self._progressbar.pack(fill=tk.X)
+        self._progressbar.pack_forget()   # скрыт до начала сканирования
+
         # ── Нижняя панель: опции + кнопки ────────────────────────────
         bot = ttk.Frame(self._win, padding='5 3 5 5')
         bot.pack(fill=tk.X, side=tk.BOTTOM)
@@ -281,6 +293,10 @@ class CompilerDialog:
         self._compile_btn.configure(state=tk.DISABLED)
         self._status_var.set('Сканирование…')
 
+        # Показать прогресс-бар
+        self._progress_var.set(0)
+        self._progressbar.pack(fill=tk.X)
+
         # Очистить таблицы
         for iid in self._tree.get_children():
             self._tree.delete(iid)
@@ -295,12 +311,18 @@ class CompilerDialog:
         import sys, os
         work_dir = Path(folder)
 
-        # tqdm и другие модули пишут в stdout/stderr; в GUI-приложении
-        # без консоли это может привести к зависанию — подавляем вывод.
+        # tqdm пишет в stdout/stderr — перенаправляем в devnull чтобы не зависнуть.
         _devnull = open(os.devnull, 'w', encoding='utf-8')
         _old_stdout, _old_stderr = sys.stdout, sys.stderr
         sys.stdout = _devnull
         sys.stderr = _devnull
+
+        def _progress(current: int, total: int, status: str):
+            pct = int(current / total * 100) if total else 0
+            self._win.after(0, lambda p=pct, s=status: (
+                self._progress_var.set(p),
+                self._status_var.set(s),
+            ))
 
         try:
             try:
@@ -312,7 +334,8 @@ class CompilerDialog:
 
             svc = RegenCSVService()
             try:
-                records = svc.generate_csv(folder, output_csv_path=None)
+                records = svc.generate_csv(folder, output_csv_path=None,
+                                           progress_callback=_progress)
             except Exception:
                 records = []
             if not records:
@@ -338,6 +361,7 @@ class CompilerDialog:
 
     def _on_scan_error(self, err: str):
         self._scanning = False
+        self._progressbar.pack_forget()
         self._scan_btn.configure(
             state=tk.NORMAL if Path(self._dir_var.get().strip()).is_dir() else tk.DISABLED
         )
@@ -346,6 +370,7 @@ class CompilerDialog:
 
     def _populate_groups(self, groups: List[CompilationGroup]):
         self._scanning = False
+        self._progressbar.pack_forget()
         folder = self._dir_var.get().strip()
         self._scan_btn.configure(
             state=tk.NORMAL if folder and Path(folder).is_dir() else tk.DISABLED
@@ -485,9 +510,18 @@ class CompilerDialog:
         self._scan_btn.configure(state=tk.DISABLED)
         self._status_var.set('Компиляция…')
 
+        # Показать прогресс-бар компиляции
+        total_groups = len(to_compile)
+        self._progress_var.set(0)
+        self._progressbar.pack(fill=tk.X)
+
         def worker():
             results = []
-            for g in to_compile:
+            for i, g in enumerate(to_compile, 1):
+                self._win.after(0, lambda i=i, a=g.author, s=g.series: (
+                    self._progress_var.set(int((i - 1) / total_groups * 100)),
+                    self._status_var.set(f'Компиляция {i}/{total_groups}: {a} / {s}'),
+                ))
                 r = self._service.compile_group(g, None, delete_sources=delete_now)
                 results.append(r)
             self._win.after(0, lambda: self._on_compile_done(results, delete_now))
@@ -502,6 +536,7 @@ class CompilerDialog:
         ok     = [r for r in results if r.success]
         failed = [r for r in results if not r.success]
 
+        self._progressbar.pack_forget()
         folder = self._dir_var.get().strip()
         self._scan_btn.configure(
             state=tk.NORMAL if folder and Path(folder).is_dir() else tk.DISABLED
