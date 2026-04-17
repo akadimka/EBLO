@@ -3,6 +3,7 @@ PASS 1: Read FB2 files and determine initial authors from folder hierarchy.
 """
 
 import os
+import sys
 import threading
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
@@ -243,7 +244,8 @@ class Pass1ReadFiles:
 
             # Process results with progress bar
             records = []
-            with tqdm.tqdm(total=total, desc="Processing FB2 files", unit="file") as pbar:
+            with tqdm.tqdm(total=total, desc="Processing FB2 files", unit="file",
+                           file=sys.stdout, dynamic_ncols=True) as pbar:
                 for future in concurrent.futures.as_completed(future_to_file):
                     fb2_file = future_to_file[future]
                     try:
