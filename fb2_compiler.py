@@ -494,14 +494,30 @@ class FB2CompilerService:
         # Источник А: series_number из FB2-метаданных.
         # Пропускаем для подсерий (proposed_series содержит '\') — там series_number
         # относится к родительской серии и не отражает позицию внутри подсерии.
+        #
+        # ВАЖНО: series_number берётся ТОЛЬКО если metadata_series соответствует
+        # proposed_series. Если в FB2 указана другая серия (например, "Викинг" вместо
+        # "Варяг"), её порядковый номер не имеет смысла для текущей серии.
         is_subseries = '\\' in (rec.proposed_series or '')
         sn = (rec.series_number or '').strip()
         if sn and not is_subseries:
-            if re.match(r'^\d+$', sn):
-                return (0, int(sn), 0), 'series_number', False, sn
-            rng = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', sn)
-            if rng:
-                return (0, int(rng.group(1)), 0), 'series_number', False, sn
+            meta_s = (rec.metadata_series or '').strip().lower().replace('ё', 'е')
+            prop_s = (rec.proposed_series or '').strip().lower().replace('ё', 'е')
+            # Слова proposed_series длиной ≥ 3 (ключевые слова серии)
+            prop_words = {w for w in prop_s.split() if len(w) >= 3}
+            # series_number применяем только если metadata_series не задана,
+            # или совпадает с proposed_series, или содержит хотя бы одно ключевое слово
+            _series_ok = (
+                not meta_s
+                or meta_s == prop_s
+                or bool(prop_words and any(w in meta_s for w in prop_words))
+            )
+            if _series_ok:
+                if re.match(r'^\d+$', sn):
+                    return (0, int(sn), 0), 'series_number', False, sn
+                rng = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', sn)
+                if rng:
+                    return (0, int(rng.group(1)), 0), 'series_number', False, sn
 
         # Источник Б: число в начале имени файла
         num_m = self._STEM_NUM_RE.match(stem) or re.search(
