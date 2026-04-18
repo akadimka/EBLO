@@ -1079,8 +1079,9 @@ class Pass2SeriesFilename:
                         # Убрать числовой префикс "1. " "2) " и т.п.
                         subfolder_display = re.sub(r'^\d+[\.\)\-]\s*', '', subfolder_raw).strip()
                         new_series = f"{root_series}\\{subfolder_display}"
-                        # Устанавливаем серию только если не было более авторитетного источника
-                        if record.series_source not in ("folder_dataset",):
+                        # Устанавливаем серию только если нет более авторитетного источника.
+                        # filename и folder_hierarchy уже правильно определили серию — не трогаем.
+                        if record.series_source not in ("folder_dataset", "folder_hierarchy", "filename"):
                             if record.proposed_series != new_series:
                                 record.proposed_series = new_series
                                 record.series_source = "folder_hierarchy"
