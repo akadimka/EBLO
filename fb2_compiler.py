@@ -56,12 +56,15 @@ class CompilationGroup:
     order_determined: bool  # False если хотя бы у одной книги ambiguous
     volume_range: str       # "1-7" или ""
     duplicate_paths: List[Path] = None  # Файлы-дубликаты для автоматического удаления
+    kept_paths: List[Path] = None       # Файлы, которые остаются (для cleanup_only групп)
     alphabetical_order: bool = False    # True — порядок не определён, отсортировано по названию
     cleanup_only: bool = False          # True — новая компиляция не нужна, только удалить дубликаты
 
     def __post_init__(self):
         if self.duplicate_paths is None:
             self.duplicate_paths = []
+        if self.kept_paths is None:
+            self.kept_paths = []
 
 
 @dataclass
@@ -285,6 +288,7 @@ class FB2CompilerService:
                             order_determined=True,
                             volume_range=f'{best_lo}-{best_hi}' if best_lo != best_hi else str(best_lo),
                             duplicate_paths=duplicate_paths,
+                            kept_paths=[best_pre.abs_path],
                             cleanup_only=True,
                         ))
                     continue

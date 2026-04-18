@@ -491,14 +491,22 @@ class CompilerDialog:
             self._det_tree.delete(iid)
 
         if getattr(group, 'cleanup_only', False):
-            # Cleanup-only: показываем файлы-источники (kept) и дубликаты (to_delete)
-            dup_set = set(str(p) for p in group.duplicate_paths)
-
-            # Найти все файлы группы: книги (best precompiled) + дубликаты
-            # best precompiled — тот что НЕ в duplicate_paths, но относится к группе
-            # У cleanup_only группы books=[], поэтому восстанавливаем из buckets через work_dir
-            # Показываем дубликаты с пометкой, и кратко — что останется
-            for pos, dup_path in enumerate(group.duplicate_paths, 1):
+            # Сначала — файлы, которые остаются (зелёные)
+            for pos, kept_path in enumerate(group.kept_paths or [], 1):
+                self._det_tree.insert(
+                    '', tk.END,
+                    values=(
+                        pos,
+                        kept_path.stem,
+                        kept_path.name,
+                        '✓ Остаётся',
+                        '—',
+                    ),
+                    tags=('kept',),
+                )
+            # Затем — файлы к удалению (красные)
+            offset = len(group.kept_paths or [])
+            for pos, dup_path in enumerate(group.duplicate_paths, offset + 1):
                 self._det_tree.insert(
                     '', tk.END,
                     values=(
