@@ -91,7 +91,8 @@ class FB2CompilerService:
     _STEM_NUM_RE = re.compile(
         r'^(\d{1,4})\s*[.\-–—_)]\s*'           # "1. " / "02 - " / "3_"
         r'|^(\d{1,4})\s+(?=[А-ЯЁA-Z\(])'       # "1 Название" (пробел + заглавная)
-        r'|\s+(\d{1,4})\s*[.\-–—_)]\s',         # внутри: " 3. "
+        r'|\s+(\d{1,4})\s*[.\-–—_)]\s'          # внутри: " 3. "
+        r'|\s+(\d{1,4})$',                       # в конце: "Серия 1"
         re.UNICODE
     )
 
@@ -676,8 +677,8 @@ class FB2CompilerService:
                 if rng:
                     return (0, int(rng.group(1)), 0), 'series_number', False, sn
 
-        # Источник Б: число в начале имени файла
-        num_m = self._STEM_NUM_RE.match(stem) or re.search(
+        # Источник Б: число в начале/конце имени файла
+        num_m = self._STEM_NUM_RE.match(stem) or self._STEM_NUM_RE.search(stem) or re.search(
             r'(?:^|[-–\s])(\d{1,4})\.\s+[А-ЯЁA-Z]', stem
         )
         if num_m:
