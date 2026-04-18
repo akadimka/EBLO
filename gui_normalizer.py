@@ -719,7 +719,8 @@ class CSVNormalizerApp:
             saved if (saved and os.path.isdir(saved)) else ''
         )
         self.folder_path.set(initial)
-        
+        self.folder_path.trace_add('write', self._on_folder_path_changed)
+
         # Переменная для прогресса
         self.progress_var = tk.StringVar(value="Готово")
         
@@ -860,6 +861,12 @@ class CSVNormalizerApp:
             pass  # Игнорируем ошибки если окно закрыто
         
         
+    def _on_folder_path_changed(self, *_):
+        """Сохранять путь в настройках при любом изменении (включая ручной ввод)."""
+        path = self.folder_path.get().strip()
+        if self.settings_manager and path and os.path.isdir(path):
+            self.settings_manager.set_normalizer_folder(path)
+
     def browse_folder(self):
         folder = filedialog.askdirectory(initialdir=self.folder_path.get())
         if folder:
