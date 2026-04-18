@@ -218,6 +218,9 @@ class CompilerDialog:
         self._det_tree.column('sort_src', width=180, minwidth=120)
         self._det_tree.column('sn',       width=60,  minwidth=40, anchor='center')
 
+        self._det_tree.tag_configure('to_delete', background='#FFE4E1', foreground='#CC0000')  # красный — к удалению
+        self._det_tree.tag_configure('kept',      background='#E8F5E9', foreground='#2E7D32')  # зелёный — остаётся
+
         self._det_tree.grid(row=0, column=0, sticky='nsew')
         det_vsb.grid(row=0, column=1, sticky='ns')
 
@@ -486,6 +489,30 @@ class CompilerDialog:
 
         for iid in self._det_tree.get_children():
             self._det_tree.delete(iid)
+
+        if getattr(group, 'cleanup_only', False):
+            # Cleanup-only: показываем файлы-источники (kept) и дубликаты (to_delete)
+            dup_set = set(str(p) for p in group.duplicate_paths)
+
+            # Найти все файлы группы: книги (best precompiled) + дубликаты
+            # best precompiled — тот что НЕ в duplicate_paths, но относится к группе
+            # У cleanup_only группы books=[], поэтому восстанавливаем из buckets через work_dir
+            # Показываем дубликаты с пометкой, и кратко — что останется
+            for pos, dup_path in enumerate(group.duplicate_paths, 1):
+                self._det_tree.insert(
+                    '', tk.END,
+                    values=(
+                        pos,
+                        dup_path.stem,
+                        dup_path.name,
+                        '🗑 К удалению',
+                        '—',
+                    ),
+                    tags=('to_delete',),
+                )
+            kept_label = f'Уже скомпилировано: {group.volume_range}' if group.volume_range else 'Уже скомпилировано'
+            self._fname_var.set(kept_label)
+            return
 
         for pos, book in enumerate(group.books, 1):
             title    = (book.record.file_title or '').strip() or book.abs_path.stem
