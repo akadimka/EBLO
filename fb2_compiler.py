@@ -607,7 +607,84 @@ class FB2CompilerService:
                 if _has_series_link(text):
                     return 1, idx  # сервисное слово → предполагаем lo=1
 
+        # Критерий 4: файл выглядит как компиляция (по имени/title) — читаем FB2-контент
+        _COMPILATION_WORDS = re.compile(
+            r'компилян|компиляц|сборник|omnibus|антолог|собрани', re.IGNORECASE | re.UNICODE
+        )
+        if _COMPILATION_WORDS.search(text) or _COMPILATION_WORDS.search(book.abs_path.stem.lower()):
+            lo, hi = self._precompiled_range_from_content(book.abs_path, series)
+            if hi > lo:
+                return lo, hi
+
         return 0, 0
+
+    # ---- регулярки для парсинга FB2 ----
+    _FB2_SEQUENCE_RE = re.compile(
+        r'<sequence[^>]+number=["\'](\d+)["\']', re.IGNORECASE | re.DOTALL
+    )
+    _FB2_SECTION_TITLE_RE = re.compile(
+        r'<section[^>]*>\s*<title[^>]*>\s*<p[^>]*>(.*?)</p>', re.IGNORECASE | re.DOTALL
+    )
+
+    def _precompiled_range_from_content(self, abs_path: Path, series: str) -> Tuple[int, int]:
+        """Определить диапазон томов по содержимому FB2-файла.
+
+        Читает первые 64KB и ищет:
+        1. <sequence number="N"> внутри отдельных секций — берём min/max N
+        2. Заголовки секций первого уровня — ищем «Том N», «Книга N», римские цифры
+
+        Возвращает (lo, hi) или (0, 0) если не удалось определить.
+        """
+        try:
+            if not abs_path.exists():
+                return 0, 0
+            raw = abs_path.read_bytes()[:65536]
+            try:
+                text = raw.decode('utf-8', errors='replace')
+            except Exception:
+                text = raw.decode('cp1251', errors='replace')
+        except Exception:
+            return 0, 0
+
+        nums: List[int] = []
+
+        # Способ 1: <sequence number="N"> внутри <section> (наш компилятор прописывает их)
+        for m in self._FB2_SEQUENCE_RE.finditer(text):
+            n = int(m.group(1))
+            if 1 <= n <= 100:
+                nums.append(n)
+
+        # Способ 2: заголовки секций первого уровня — ищем числа и ключевые слова
+        for m in self._FB2_SECTION_TITLE_RE.finditer(text):
+            title_text = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+            # Ключевые слова тома + арабская цифра
+            km = self._VOLUME_KEYWORDS_RE.search(title_text)
+            if km:
+                n = int(km.group(1))
+                if 1 <= n <= 100:
+                    nums.append(n)
+                continue
+            # Римские цифры в заголовке
+            rm = self._VOLUME_ROMAN_RE.search(title_text)
+            if rm:
+                n = self._roman_to_int(rm.group(1))
+                if n and 1 <= n <= 100:
+                    nums.append(n)
+                continue
+            # Просто арабская цифра в начале/конце заголовка (осторожно: только если одна)
+            dm = re.match(r'^(\d{1,2})[\s\.\-–]|[\s\.\-–](\d{1,2})$', title_text)
+            if dm:
+                n = int(next(g for g in dm.groups() if g is not None))
+                if 1 <= n <= 100:
+                    nums.append(n)
+
+        if not nums:
+            return 0, 0
+        lo, hi = min(nums), max(nums)
+        # Требуем хотя бы 2 разных номера, чтобы не принять один том за диапазон
+        if lo == hi or hi - lo > 20:  # слишком большой пробел — ненадёжно
+            return 0, 0
+        return lo, hi
 
     def _precompiled_count(self, book: CompilationBook, series: str) -> int:
         """Обёртка для обратной совместимости. Возвращает hi - lo + 1 или 0."""
