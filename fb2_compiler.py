@@ -454,9 +454,13 @@ class FB2CompilerService:
                 lone_regular = [b for b in lone_numeric if not _RANGE_VL.match(b.volume_label or '')]
                 all_others = others
                 if len(others) < 2 and lone_regular:
-                    # Объединяем одиночные обычные (не precompiled) + нечисловые
-                    all_others = sorted(lone_regular, key=lambda b: b.sort_key) + list(others)
-                    lone_numeric = [b for b in lone_numeric if b not in lone_regular]
+                    # Объединяем одиночные обычные (не precompiled) + нечисловые,
+                    # НО только если lone_regular ровно один — иначе это несколько томов
+                    # с явными номерами и пробелом между ними (например, тома 7 и 9 без 8):
+                    # такие группы не компилируем.
+                    if len(lone_regular) == 1:
+                        all_others = sorted(lone_regular, key=lambda b: b.sort_key) + list(others)
+                        lone_numeric = [b for b in lone_numeric if b not in lone_regular]
 
                 if len(all_others) >= 2:
                     all_oth_ambig = all(b.order_ambiguous for b in all_others)
