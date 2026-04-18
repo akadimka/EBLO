@@ -935,7 +935,14 @@ class FB2CompilerService:
         if not nums:
             return ''
         lo, hi = min(nums), max(nums)
-        return str(lo) if lo == hi else f'{lo}-{hi}'
+        if lo == hi:
+            return str(lo)
+        # Проверяем: все тома от lo до hi реально присутствуют (нет пробелов)?
+        present = set(nums)
+        if all(v in present for v in range(lo, hi + 1)):
+            return f'{lo}-{hi}'
+        # Есть пробелы — не создаём ложный диапазон, возвращаем пустую строку
+        return ''
 
     # ------------------------------------------------------------------
     # Компиляция
