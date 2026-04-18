@@ -715,11 +715,26 @@ class FB2CompilerService:
                 or bool(prop_words and any(w in meta_s for w in prop_words))
             )
             if _series_ok:
+                meta_num: Optional[int] = None
                 if re.match(r'^\d+$', sn):
-                    return (0, int(sn), 0), 'series_number', False, sn
-                rng = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', sn)
-                if rng:
-                    return (0, int(rng.group(1)), 0), 'series_number', False, sn
+                    meta_num = int(sn)
+                else:
+                    rng = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', sn)
+                    if rng:
+                        meta_num = int(rng.group(1))
+
+                if meta_num is not None:
+                    # Перекрёстная проверка с именем файла.
+                    # Если в stem явно написан другой номер — доверяем файлу,
+                    # иначе метаданные могут быть ошибочными (например, sn='1' для тома 2).
+                    fn_m = (self._STEM_NUM_RE.match(stem) or self._STEM_NUM_RE.search(stem)
+                            or re.search(r'(?:^|[-–\s])(\d{1,4})\.\s+[А-ЯЁA-Z]', stem))
+                    if fn_m:
+                        fn_num = int(next(g for g in fn_m.groups() if g is not None))
+                        if fn_num != meta_num:
+                            # Расхождение: имя файла важнее ошибочных метаданных
+                            return (0, fn_num, 0), 'filename', False, str(fn_num)
+                    return (0, meta_num, 0), 'series_number', False, sn
 
         # Источник Б: число в начале/конце имени файла
         num_m = self._STEM_NUM_RE.match(stem) or self._STEM_NUM_RE.search(stem) or re.search(
