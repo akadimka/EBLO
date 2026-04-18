@@ -629,9 +629,16 @@ class CompilerDialog:
                     self._service.delete_sources_for_result(r)
 
         # Итог
-        lines = [f'Успешно скомпилировано: {len(ok)}']
-        for r in ok:
+        real_ok     = [r for r in ok if not getattr(r.group, 'cleanup_only', False)]
+        cleanup_ok  = [r for r in ok if getattr(r.group, 'cleanup_only', False)]
+        lines = [f'Успешно скомпилировано: {len(real_ok)}']
+        for r in real_ok:
             lines.append(f'  ✓ {r.group.author} / {r.group.series} → {r.output_path.name}')
+        if cleanup_ok:
+            cleaned = sum(len(r.source_paths) for r in cleanup_ok)
+            lines.append(f'\nУдалено устаревших файлов: {cleaned}')
+            for r in cleanup_ok:
+                lines.append(f'  ♻ {r.group.author} / {r.group.series} ({r.group.volume_range})')
         if failed:
             lines.append(f'\nОшибок: {len(failed)}')
             for r in failed:
