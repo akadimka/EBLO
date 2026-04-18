@@ -431,12 +431,17 @@ class FB2CompilerService:
 
                 # ── Нечисловые книги: компиляция по году / по названию ─────
                 # Если нечисловых >= 2 — обычная группа
-                # Если нечисловых < 2, но есть одиночные числовые книги — объединяем всё вместе
+                # Если нечисловых < 2, но есть одиночные числовые книги — объединяем всё вместе.
+                # ИСКЛЮЧЕНИЕ: precompiled книги (volume_label содержит диапазон "N-M") не
+                # объединяем с нечисловыми — они уже содержат несколько томов и не являются
+                # "одиночными" книгами в смысле серии.
+                _RANGE_VL = re.compile(r'^\d+\s*[-–—]\s*\d+$')
+                lone_regular = [b for b in lone_numeric if not _RANGE_VL.match(b.volume_label or '')]
                 all_others = others
-                if len(others) < 2 and lone_numeric:
-                    # Объединяем одиночные числовые + нечисловые в смешанную группу
-                    all_others = sorted(lone_numeric, key=lambda b: b.sort_key) + list(others)
-                    lone_numeric = []
+                if len(others) < 2 and lone_regular:
+                    # Объединяем одиночные обычные (не precompiled) + нечисловые
+                    all_others = sorted(lone_regular, key=lambda b: b.sort_key) + list(others)
+                    lone_numeric = [b for b in lone_numeric if b not in lone_regular]
 
                 if len(all_others) >= 2:
                     all_oth_ambig = all(b.order_ambiguous for b in all_others)
