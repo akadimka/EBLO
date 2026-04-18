@@ -496,11 +496,36 @@ class FB2CompilerService:
         re.IGNORECASE | re.UNICODE,
     )
 
+    # Римские цифры после ключевых слов тома: «Том I», «Том II», «Vol. IV» и т.п.
+    _VOLUME_ROMAN_RE = re.compile(
+        r'(?:свиток|том|книга|часть|выпуск|арка|цикл|эпизод|volume|book|part|vol\.?)'
+        r'\s*[.:-]?\s*(M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))\b',
+        re.IGNORECASE | re.UNICODE,
+    )
+
+    @staticmethod
+    def _roman_to_int(s: str) -> Optional[int]:
+        """Конвертировать римскую цифру в целое. Возвращает None если s пустая или невалидна."""
+        s = s.upper().strip()
+        if not s:
+            return None
+        vals = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+        result = 0
+        prev = 0
+        for ch in reversed(s):
+            if ch not in vals:
+                return None
+            v = vals[ch]
+            result += v if v >= prev else -v
+            prev = v
+        return result if result > 0 else None
+
     @classmethod
     def _extract_inline_volume_number(cls, title: str, stem: str) -> Optional[int]:
         """Извлечь номер тома из ключевых слов внутри названия.
 
-        Ищет паттерны «Свиток 1», «Том 3», «Книга 2», «Часть 4» и т.п.
+        Ищет паттерны «Свиток 1», «Том 3», «Книга 2», «Часть 4» и т.п.,
+        а также римские цифры: «Том I», «Том II», «Vol. IV».
         Возвращает число или None, если паттерн не найден.
 
         Проверяет как file_title, так и stem файла.
@@ -511,6 +536,11 @@ class FB2CompilerService:
             m = cls._VOLUME_KEYWORDS_RE.search(text)
             if m:
                 return int(m.group(1))
+            m = cls._VOLUME_ROMAN_RE.search(text)
+            if m:
+                n = cls._roman_to_int(m.group(1))
+                if n:
+                    return n
         return None
 
     def _precompiled_range(self, book: CompilationBook, series: str) -> Tuple[int, int]:
