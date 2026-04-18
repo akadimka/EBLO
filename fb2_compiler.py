@@ -847,15 +847,17 @@ class FB2CompilerService:
 
         # Cleanup-only: новая компиляция не нужна, только удалить устаревшие файлы
         if getattr(group, 'cleanup_only', False):
-            result = CompilationResult(
-                success=True,
-                output_path=None,
-                message=f"Уже скомпилировано ({group.volume_range}), удалено {len(group.duplicate_paths)} дубликатов",
-            )
             if group.duplicate_paths:
                 self._delete_sources(group.duplicate_paths)
                 self._log(f"   ♻ Удалено {len(group.duplicate_paths)} устаревших файлов")
-            return result
+            return CompilationResult(
+                group=group,
+                output_path=None,
+                books_compiled=0,
+                source_paths=list(group.duplicate_paths),
+                success=True,
+                error="",
+            )
 
         try:
             # --- Читаем содержимое каждого файла ---
