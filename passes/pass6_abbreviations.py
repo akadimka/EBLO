@@ -82,6 +82,28 @@ class Pass6Abbreviations:
         
         self.logger.log(f"[PASS 6] Expanded {expanded_count} author names")
 
+        # Дедупликация: убрать повторяющихся авторов в proposed_author
+        # (возникает когда псевдоним и реальное имя расширяются в одно и то же)
+        dedup_count = 0
+        for record in records:
+            if not record.proposed_author or record.proposed_author == "Сборник":
+                continue
+            sep = '; ' if '; ' in record.proposed_author else (', ' if ', ' in record.proposed_author else None)
+            if sep:
+                parts = record.proposed_author.split(sep)
+                seen_lower: list = []
+                unique: list = []
+                for p in parts:
+                    key = p.strip().lower().replace('ё', 'е')
+                    if key not in seen_lower:
+                        seen_lower.append(key)
+                        unique.append(p.strip())
+                if len(unique) < len(parts):
+                    record.proposed_author = sep.join(unique)
+                    dedup_count += 1
+        if dedup_count:
+            self.logger.log(f"[PASS 6] Deduplicated {dedup_count} author strings")
+
         # Финальная проверка: серия не может совпадать с автором
         cleared_count = 0
         for record in records:

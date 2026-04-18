@@ -99,10 +99,12 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
             author = paren_contents[0].strip().replace(', ', '; ')
     
     elif pattern == "Author (CoAuthor)":
-        # text_before_first is Author1, paren_contents[0] is Author2
-        # Example: "Орлов Алекс (Дарищев Вадим)" → "Орлов Алекс; Дарищев Вадим"
-        if text_before_first and paren_contents:
-            author = f"{text_before_first.strip()}; {paren_contents[0].strip()}"
+        # В библиотечной организации "Псевдоним (Реальное имя)" означает, что
+        # в скобках стоит настоящее имя автора, а не соавтор.
+        # Возвращаем только основное имя (псевдоним), игнорируем скобки.
+        # Example: "Орлов Алекс (Дарищев Вадим)" → "Орлов Алекс"
+        if text_before_first:
+            author = text_before_first.strip()
 
     elif pattern == "Series (Author)":
         # LAST parentheses ← KEY for МВП-2 (1) Одиссея (Чернов)
