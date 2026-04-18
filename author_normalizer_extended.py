@@ -125,7 +125,11 @@ class AuthorNormalizer:
         """
         if not author or author == "Сборник":
             return author
-        
+
+        # Ранний выход: строки вида "Фамилия Имя и другие" не нормализуем — они уже финальные
+        if re.search(r'\s+(?:и\s+другие|и\s+др\.?|et\s+al\.?)\s*$', author, re.IGNORECASE):
+            return author
+
         # Parse metadata_authors first
         metadata_authors_list = []
         if metadata_authors:

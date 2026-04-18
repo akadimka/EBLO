@@ -25,7 +25,7 @@ PASS 2 для СЕРИЙ: Извлечение серий из имён файл
 import re
 import sys
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 try:
     from extraction_constants import FILE_EXTENSION_FOLDER_NAMES, is_no_series_folder
@@ -454,8 +454,19 @@ class Pass2SeriesFilename:
                                 author_folder_series = self._extract_series_from_folder_name(part)
                                 _parens_match = re.search(r'\(([^)]+)\)\s*$', part)
                                 _parens_content = _parens_match.group(1).strip() if _parens_match else ''
-                                _parens_is_author = bool(_parens_content) and _author_matches_folder(
-                                    author_name, _parens_content
+
+                                # Если скобки содержат "и др" / "et al" — это многоавторный хинт,
+                                # а НЕ дизамбигуатор автора: папка является серийной, не авторской.
+                                _ET_AL_RE = re.compile(
+                                    r'(?:и\s+др\.?|и\s+другие|et\s+al\.?|and\s+others)\s*$',
+                                    re.IGNORECASE
+                                )
+                                _is_multiauthor_hint = bool(_parens_content) and bool(_ET_AL_RE.search(_parens_content))
+
+                                _parens_is_author = (
+                                    bool(_parens_content)
+                                    and not _is_multiauthor_hint
+                                    and _author_matches_folder(author_name, _parens_content)
                                 )
                                 has_parent_series = (
                                     bool(author_folder_series) and
@@ -464,11 +475,33 @@ class Pass2SeriesFilename:
                                 )
 
                                 if has_parent_series:
-                                    # Б) Иерархия: {цикл}\{N. Подсерия} (без пробелов вокруг разделителя)
-                                    # Убираем только суффикс "(Автор)" из подпапки, но СОХРАНЯЕМ
-                                    # ведущий номер ("1. ", "2. " и т.д.) для очерёдности чтения.
+                                    # Б) Иерархия: {цикл}\{Подсерия}
+                                    # Убираем суффикс "(Автор)" и числовой префикс "N. " из подпапки.
                                     subfolder_display = re.sub(r'\s*\([^)]*\)\s*$', '', series_folder).strip()
+                                    subfolder_display = re.sub(r'^\d+[\.\)\-]\s*', '', subfolder_display).strip()
                                     record.proposed_series = f"{author_folder_series}\\{subfolder_display}"
+
+                                    # Костыль для многоавторных папок: "Серия (Фамилия и др)" →
+                                    # ищем полное имя в metadata и ставим "Фамилия Имя и другие".
+                                    if _is_multiauthor_hint:
+                                        hint_surname = _ET_AL_RE.sub('', _parens_content).strip().rstrip(',').strip()
+                                        hint_lower = hint_surname.lower().replace('ё', 'е')
+                                        # Ищем полное нормализованное имя в proposed_author (уже "Фамилия Имя")
+                                        full_name = None
+                                        for pa_part in re.split(r'\s*,\s*', record.proposed_author or ''):
+                                            if any(hint_lower in w.lower().replace('ё', 'е') for w in pa_part.split()):
+                                                full_name = pa_part.strip()
+                                                break
+                                        # Fallback: поиск в metadata_authors
+                                        if not full_name:
+                                            for meta_a in re.split(r'[;,]', record.metadata_authors or ''):
+                                                meta_a = meta_a.strip()
+                                                if any(hint_lower in w.lower().replace('ё', 'е') for w in meta_a.split()):
+                                                    full_name = meta_a
+                                                    break
+                                        if full_name:
+                                            record.proposed_author = f"{full_name} и другие"
+                                            record.author_source = 'folder_multiauthor'
                                 else:
                                     # Обычная папка автора → только подсерия (старое поведение)
                                     subseries_name = self._extract_series_from_folder_name(series_folder)
@@ -915,12 +948,153 @@ class Pass2SeriesFilename:
                 # Пример: "Мир Алекса Королева\" должно быть "Мир Алекса Королева"
                 record.proposed_series = record.proposed_series.rstrip('\\')
         
-        # Commented out: folder pattern consensus was also causing issues  
+        # Commented out: folder pattern consensus was also causing issues
         # self._apply_series_folder_pattern_consensus(records)
-        
+
         # Commented out: consensus logic was overwriting properly extracted series
         # TODO: Review and fix consensus logic before re-enabling
         # self._apply_cross_file_consensus(records)
+
+        # 🔑 ФИНАЛЬНЫЙ КОСТЫЛЬ: многоавторные папки "Серия (Фамилия и др)"
+        # После всей обработки исправляем автора для ВСЕХ файлов под такими папками.
+        # ВАЖНО: вызываем до _unify_folder_series_source повторно, потому что
+        # при первом вызове авторы были разные → guard "len(authors)>1" пропустил папку.
+        self._fix_multiauthor_folders(records)
+
+    def _fix_multiauthor_folders(self, records: List[BookRecord]) -> None:
+        """Финальный костыль: папки "Серия (Фамилия и др)" → автор всех файлов = "Фамилия Имя и другие".
+
+        После полной обработки Pass 2 ищем в путях все папки вида "X (Surname и др)".
+        Для каждой такой папки:
+        1. Определяем hint_surname из скобок.
+        2. Среди ВСЕХ записей в этой папке ищем хотя бы одну с proposed_author,
+           содержащим hint_surname → это canonical_name ("Красницкий Евгений").
+        3. Устанавливаем proposed_author = "canonical_name и другие" для ВСЕХ записей
+           в этой папке (включая Соавторство-записи).
+        """
+        _ET_AL_RE = re.compile(
+            r'\s*(?:и\s+др\.?|и\s+другие|et\s+al\.?|and\s+others)\s*$',
+            re.IGNORECASE
+        )
+        _PARENS_ET_AL_RE = re.compile(
+            r'\(([^)]+?)\s*(?:и\s+др\.?|и\s+другие|et\s+al\.?|and\s+others)\s*\)\s*$',
+            re.IGNORECASE
+        )
+
+        # 1. Найти все папки-хинты в путях записей
+        # folder_prefix → hint_surname (lower)
+        hint_map: Dict[str, str] = {}  # folder_prefix_str → hint_surname_lower
+        for record in records:
+            parts = Path(record.file_path).parts[:-1]
+            for i, part in enumerate(parts):
+                m = _PARENS_ET_AL_RE.search(part)
+                if m:
+                    surname_hint = m.group(1).strip().rstrip(',').strip()
+                    # prefix = все папки вплоть до этой (включительно)
+                    prefix = str(Path(*parts[:i + 1])) if i > 0 else parts[0]
+                    hint_lower = surname_hint.lower().replace('ё', 'е')
+                    if prefix not in hint_map:
+                        hint_map[prefix] = hint_lower
+
+        if not hint_map:
+            return
+
+        # 2. Для каждой папки-хинта найти canonical_name среди records
+        canonical_map: Dict[str, str] = {}  # prefix → "Фамилия Имя"
+        for prefix, hint_lower in hint_map.items():
+            canonical = None
+            # Ищем среди всех records что лежат под этим prefix
+            for record in records:
+                record_prefix = str(Path(*Path(record.file_path).parts[:-1]))
+                if not (record_prefix == prefix or record_prefix.startswith(prefix + '\\')):
+                    continue
+                # Ищем hint в proposed_author (приоритет — уже нормализовано)
+                for pa_part in re.split(r'\s*,\s*', record.proposed_author or ''):
+                    pa_part = pa_part.strip()
+                    pa_clean = _ET_AL_RE.sub('', pa_part).strip()
+                    pa_words = pa_clean.split()
+                    if any(hint_lower == w.lower().replace('ё', 'е') for w in pa_words):
+                        if len(pa_words) == 2:
+                            canonical = pa_clean  # Идеальный вариант: "Фамилия Имя"
+                            break
+                        elif len(pa_words) >= 2 and canonical is None:
+                            canonical = pa_clean  # Принимаем пока нет лучшего
+                if canonical and len(canonical.split()) == 2:
+                    break
+                # Fallback: ищем в metadata_authors (могут содержать полное имя)
+                for meta_part in re.split(r'[;,]', record.metadata_authors or ''):
+                    meta_part = meta_part.strip()
+                    meta_clean = _ET_AL_RE.sub('', meta_part).strip()
+                    meta_words = meta_clean.split()
+                    if any(hint_lower == w.lower().replace('ё', 'е') for w in meta_words):
+                        if len(meta_words) == 2:
+                            canonical = meta_clean
+                            break
+                        elif len(meta_words) >= 2 and canonical is None:
+                            canonical = meta_clean
+                if canonical and len(canonical.split()) == 2:
+                    break
+            if canonical:
+                canonical_map[prefix] = canonical
+
+        if not canonical_map:
+            self.logger.log(f"[PASS 2 Multiauthor] hint_map found {len(hint_map)} folders but no canonical names resolved")
+            return
+
+        self.logger.log(f"[PASS 2 Multiauthor] canonical_map: {canonical_map}")
+
+        # Вычислить series_name для каждого prefix ("Отрок_Сотник (Красницкий и др)" → "Отрок_Сотник")
+        prefix_series: Dict[str, str] = {}
+        for prefix in canonical_map:
+            folder_name = Path(prefix).name if Path(prefix).name else prefix
+            series_name = self._extract_series_from_folder_name(folder_name)
+            prefix_series[prefix] = series_name or folder_name
+
+        # 3. Применить canonical_name и серию ко ВСЕМ records под этим prefix
+        fixed_author = 0
+        fixed_series = 0
+        for record in records:
+            record_parts = Path(record.file_path).parts
+            record_prefix = str(Path(*record_parts[:-1]))
+            for prefix, canonical in canonical_map.items():
+                if not (record_prefix == prefix or record_prefix.startswith(prefix + '\\')):
+                    continue
+
+                # Автор
+                new_author = f"{canonical} и другие"
+                if record.proposed_author != new_author:
+                    record.proposed_author = new_author
+                    record.author_source = 'folder_multiauthor'
+                    fixed_author += 1
+
+                # Серия: определяем подпапку сразу под prefix
+                root_series = prefix_series[prefix]
+                prefix_parts = Path(prefix).parts
+                # Индекс папки-хинта в record_parts
+                hint_depth = len(prefix_parts)  # сколько частей составляет prefix
+                # Следующий элемент после prefix — подпапка серии (если есть)
+                if hint_depth < len(record_parts) - 1:
+                    subfolder_raw = record_parts[hint_depth]
+                    if not subfolder_raw.endswith('.fb2'):
+                        # Убрать числовой префикс "1. " "2) " и т.п.
+                        subfolder_display = re.sub(r'^\d+[\.\)\-]\s*', '', subfolder_raw).strip()
+                        new_series = f"{root_series}\\{subfolder_display}"
+                        # Устанавливаем серию только если не было более авторитетного источника
+                        if record.series_source not in ("folder_dataset",):
+                            if record.proposed_series != new_series:
+                                record.proposed_series = new_series
+                                record.series_source = "folder_hierarchy"
+                                fixed_series += 1
+                elif not record.proposed_series:
+                    # Файл прямо в корневой папке серии
+                    if record.proposed_series != root_series:
+                        record.proposed_series = root_series
+                        record.series_source = "folder_hierarchy"
+                        fixed_series += 1
+                break
+
+        if fixed_author or fixed_series:
+            self.logger.log(f"[PASS 2 Series] Multiauthor fix: {fixed_author} authors, {fixed_series} series updated")
 
     def _is_variant_folder(self, folder_name: str) -> bool:
         """Вернуть True если имя подпапки указывает на альтернативную версию текста.
