@@ -244,6 +244,14 @@ class FB2CompilerService:
             for book in books:
                 lo, hi = self._precompiled_range(book, series)
                 if hi > lo:
+                    # Обновляем sort_key и volume_label по реальному диапазону файла.
+                    # Без этого "1-2. Название.fb2" получает sk=(0,2,0) vl='2' вместо
+                    # sk=(0,1,0) vl='1-2', и _split_into_consecutive_runs считает
+                    # что "1-2" и "3-4" не идут подряд (lo=4 ≠ hi=2+1).
+                    book.sort_key = (0, lo, 0)
+                    book.volume_label = f'{lo}-{hi}'
+                    book.sort_source = 'filename_range'
+                    book.order_ambiguous = False
                     precompiled.append((book, lo, hi))
                 else:
                     regular_books.append(book)
@@ -400,15 +408,16 @@ class FB2CompilerService:
                 first_group = True  # для назначения duplicate_paths только один раз
 
                 # ── Числовые книги: непрерывные блоки ──────────────────────
-                for run in self._split_into_consecutive_runs(numeric):
-                    if len(run) < 2:
-                        continue  # одиночный том или изолированный — пропуск
+                valid_runs = [r for r in self._split_into_consecutive_runs(numeric) if len(r) >= 2]
+                lone_numeric = [b for r in self._split_into_consecutive_runs(numeric) if len(r) < 2 for b in r]
+
+                for run in valid_runs:
                     run_range = self._compute_volume_range(run)
                     groups.append(CompilationGroup(
                         author=author,
                         series=series,
                         books=run,
-                        order_determined=True,   # level-0 книги никогда не ambiguous
+                        order_determined=True,
                         volume_range=run_range,
                         duplicate_paths=duplicate_paths if first_group else [],
                         alphabetical_order=False,
@@ -416,20 +425,28 @@ class FB2CompilerService:
                     first_group = False
 
                 # ── Нечисловые книги: компиляция по году / по названию ─────
-                if len(others) >= 2:
-                    all_oth_ambig = all(b.order_ambiguous for b in others)
+                # Если нечисловых >= 2 — обычная группа
+                # Если нечисловых < 2, но есть одиночные числовые книги — объединяем всё вместе
+                all_others = others
+                if len(others) < 2 and lone_numeric:
+                    # Объединяем одиночные числовые + нечисловые в смешанную группу
+                    all_others = sorted(lone_numeric, key=lambda b: b.sort_key) + list(others)
+                    lone_numeric = []
+
+                if len(all_others) >= 2:
+                    all_oth_ambig = all(b.order_ambiguous for b in all_others)
                     if all_oth_ambig:
                         oth_sorted = sorted(
-                            others,
+                            all_others,
                             key=lambda b: (b.record.file_title or b.abs_path.stem).lower(),
                         )
                     else:
-                        oth_sorted = sorted(others, key=lambda b: b.sort_key)
+                        oth_sorted = sorted(all_others, key=lambda b: b.sort_key)
                     groups.append(CompilationGroup(
                         author=author,
                         series=series,
                         books=oth_sorted,
-                        order_determined=not any(b.order_ambiguous for b in others),
+                        order_determined=not any(b.order_ambiguous for b in all_others),
                         volume_range='',
                         duplicate_paths=duplicate_paths if first_group else [],
                         alphabetical_order=all_oth_ambig,
