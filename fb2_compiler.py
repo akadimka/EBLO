@@ -411,6 +411,20 @@ class FB2CompilerService:
                 numeric = [b for b in books_sorted if b.sort_key[0] == 0]
                 others  = [b for b in books_sorted if b.sort_key[0] != 0]
 
+                # Эвристика «неопределённый = том 1»:
+                # Если ровно один файл без номера тома (год/неизвестен),
+                # а среди числовых нет тома 1 — считаем его первым томом.
+                if (len(others) == 1
+                        and numeric
+                        and min(b.sort_key[1] for b in numeric if b.sort_key[0] == 0) >= 2):
+                    lone = others[0]
+                    lone.sort_key = (0, 1, 0)
+                    lone.sort_source = 'assumed_first'
+                    lone.order_ambiguous = False
+                    lone.volume_label = '1'
+                    numeric = sorted(numeric + [lone], key=lambda b: b.sort_key)
+                    others = []
+
                 first_group = True  # для назначения duplicate_paths только один раз
 
                 # ── Числовые книги: непрерывные блоки ──────────────────────
