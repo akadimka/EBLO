@@ -182,9 +182,10 @@ class CompilerDialog:
         self._tree.column('order',  width=200, minwidth=140)
         self._tree.column('range',  width=80,  minwidth=60,  anchor='center')
 
-        self._tree.tag_configure('ok',    background=_ORDER_OK_COLOR)
-        self._tree.tag_configure('warn',  background=_ORDER_WARN_COLOR)
-        self._tree.tag_configure('alpha', background='#E8F4FD')  # бледно-голубой
+        self._tree.tag_configure('ok',      background=_ORDER_OK_COLOR)
+        self._tree.tag_configure('warn',    background=_ORDER_WARN_COLOR)
+        self._tree.tag_configure('alpha',   background='#E8F4FD')  # бледно-голубой
+        self._tree.tag_configure('cleanup', background='#F5F5F5', foreground='#888888')  # серый — уже скомпилировано
 
         self._tree.grid(row=0, column=0, sticky='nsew')
         vsb.grid(row=0, column=1, sticky='ns')
@@ -382,10 +383,28 @@ class CompilerDialog:
             self._status_var.set('Групп для компиляции не найдено')
             return
 
-        total      = len(groups)
+        compilable_groups = [g for g in groups if not getattr(g, 'cleanup_only', False)]
+        cleanup_groups    = [g for g in groups if getattr(g, 'cleanup_only', False)]
+        total      = len(compilable_groups)
         compilable = total
 
         for idx, g in enumerate(groups):
+            if getattr(g, 'cleanup_only', False):
+                dup_count = len(g.duplicate_paths)
+                self._tree.insert(
+                    '', tk.END,
+                    iid=str(idx),
+                    values=(
+                        g.author,
+                        g.series,
+                        f'0 (удалить: {dup_count})',
+                        '✓ Уже скомпилировано',
+                        g.volume_range or '—',
+                    ),
+                    tags=('cleanup',),
+                )
+                continue
+
             sources = {b.sort_source for b in g.books}
             sources.discard('unknown')
             if getattr(g, 'alphabetical_order', False):
@@ -411,26 +430,20 @@ class CompilerDialog:
                 tags=(tag,),
             )
 
-        alpha = sum(1 for g in groups if getattr(g, 'alphabetical_order', False))
-        warn  = sum(1 for g in groups if not g.order_determined
+        alpha = sum(1 for g in compilable_groups if getattr(g, 'alphabetical_order', False))
+        warn  = sum(1 for g in compilable_groups if not g.order_determined
                     and not getattr(g, 'alphabetical_order', False))
 
-        # Подсчёт файлов и размеров
-        files_before = sum(len(g.books) for g in groups)
-        files_after  = len(groups)  # каждая группа → 1 файл
+        # Подсчёт файлов и размеров (только компилируемые группы)
+        files_before = sum(len(g.books) for g in compilable_groups)
+        files_after  = len(compilable_groups)  # каждая группа → 1 файл
         freed_bytes  = 0
-        for g in groups:
-            total_size = 0
+        for g in compilable_groups:
             for b in g.books:
                 try:
-                    total_size += b.abs_path.stat().st_size
+                    freed_bytes += b.abs_path.stat().st_size
                 except OSError:
                     pass
-            # Результат ~= суммарный размер книг (без учёта overhead).
-            # Экономия считается по числу файлов: N→1, т.е. N-1 файла исчезнет.
-            # Точный размер результата неизвестен, но обычно он ≈ сумме исходников.
-            # Показываем «файлов до / после» и суммарный размер исходников.
-            freed_bytes += total_size  # суммарный объём всех групп
 
         def _fmt_size(b: int) -> str:
             if b >= 1_073_741_824:
@@ -444,6 +457,9 @@ class CompilerDialog:
             f'  |  Файлов: {files_before} → {files_after}'
             f'  |  Объём исходников: {_fmt_size(freed_bytes)}'
         )
+        if cleanup_groups:
+            cleanup_dups = sum(len(g.duplicate_paths) for g in cleanup_groups)
+            status += f'  |  Устаревших: {cleanup_dups}'
         if alpha:
             status += f'  |  По названию: {alpha}'
         if warn:

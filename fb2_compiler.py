@@ -57,6 +57,7 @@ class CompilationGroup:
     volume_range: str       # "1-7" или ""
     duplicate_paths: List[Path] = None  # Файлы-дубликаты для автоматического удаления
     alphabetical_order: bool = False    # True — порядок не определён, отсортировано по названию
+    cleanup_only: bool = False          # True — новая компиляция не нужна, только удалить дубликаты
 
     def __post_init__(self):
         if self.duplicate_paths is None:
@@ -273,9 +274,19 @@ class FB2CompilerService:
                 if all_covered:
                     # 1. АКТУАЛЬНА — компиляция уже сделана, новая не нужна.
                     # Отдельные тома, уже покрытые компиляцией, — на удаление.
-                    # В список компиляции НЕ добавляем: один файл ≠ задача компиляции.
                     for book in regular_books:
                         duplicate_paths.append(book.abs_path)
+                    if duplicate_paths:
+                        # Есть что удалить — сообщаем через cleanup_only группу
+                        groups.append(CompilationGroup(
+                            author=author,
+                            series=series,
+                            books=[],
+                            order_determined=True,
+                            volume_range=f'{best_lo}-{best_hi}' if best_lo != best_hi else str(best_lo),
+                            duplicate_paths=duplicate_paths,
+                            cleanup_only=True,
+                        ))
                     continue
                 else:
                     # Определяем, какие тома предкомпиляции присутствуют отдельно
@@ -833,6 +844,18 @@ class FB2CompilerService:
             CompilationResult с результатами.
         """
         self._log(f"Компиляция: {group.author} / {group.series} ({len(group.books)} книг)")
+
+        # Cleanup-only: новая компиляция не нужна, только удалить устаревшие файлы
+        if getattr(group, 'cleanup_only', False):
+            result = CompilationResult(
+                success=True,
+                output_path=None,
+                message=f"Уже скомпилировано ({group.volume_range}), удалено {len(group.duplicate_paths)} дубликатов",
+            )
+            if group.duplicate_paths:
+                self._delete_sources(group.duplicate_paths)
+                self._log(f"   ♻ Удалено {len(group.duplicate_paths)} устаревших файлов")
+            return result
 
         try:
             # --- Читаем содержимое каждого файла ---
