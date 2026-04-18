@@ -856,6 +856,14 @@ class FB2CompilerService:
             if level == 0 and isinstance(val, int):
                 nums.append(val)
 
+        # Также из volume_label (для прекомпилированных диапазонов типа "3-5")
+        for b in books:
+            vl = (b.volume_label or '').strip()
+            rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', vl)
+            if rng:
+                lo2, hi2 = int(rng.group(1)), int(rng.group(2))
+                nums.extend(range(lo2, hi2 + 1))
+
         # Также из series_number самой записи (может быть уже диапазоном "1-3")
         for b in books:
             sn = (b.record.series_number or '').strip()
