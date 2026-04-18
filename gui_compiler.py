@@ -346,8 +346,6 @@ class CompilerDialog:
                 records = getattr(svc, 'records', []) or []
 
             self._set_status('Поиск групп для компиляции…')
-            # Debug: установить '_debug_filter' для вывода диагностики
-            # self._service._debug_filter = {'аберкромби', 'земной круг'}
             groups = self._service.find_groups(records, work_dir)
 
             self._win.after(0, lambda: self._populate_groups(groups))
@@ -391,7 +389,7 @@ class CompilerDialog:
         compilable_groups = [g for g in groups if not getattr(g, 'cleanup_only', False)]
         cleanup_groups    = [g for g in groups if getattr(g, 'cleanup_only', False)]
         total      = len(compilable_groups)
-        compilable = total
+        compilable = total or len(cleanup_groups)
 
         for idx, g in enumerate(groups):
             if getattr(g, 'cleanup_only', False):

@@ -217,12 +217,14 @@ class FB2CompilerService:
 
             # Debug: вывести классификацию файлов для конкретной пары автор/серия
             _debug = getattr(self, '_debug_filter', None)
-            if _debug and (author.lower() in _debug or series.lower() in _debug):
-                print(f"\n[DEBUG] {author} / {series} ({len(books)} файлов):")
+            import sys as _sys
+            _dbg_out = _sys.__stdout__  # bypass any stdout redirect
+            if _debug and any(kw in author.lower() or kw in series.lower() for kw in _debug):
+                print(f"\n[DEBUG] {author} / {series} ({len(books)} файлов):", file=_dbg_out)
                 for b in books:
                     lo, hi = self._precompiled_range(b, series)
                     print(f"  {'PRE' if hi>lo else 'REG'} sk={b.sort_key} vl={b.volume_label!r} "
-                          f"pre=({lo},{hi}) | {b.abs_path.name}")
+                          f"pre=({lo},{hi}) | {b.abs_path.name}", file=_dbg_out)
 
             # --- Фильтр 1: обработка заранее скомпилированных файлов ----------
             # Признак: stem/title содержит сервисное слово (Трилогия …) или
@@ -368,9 +370,9 @@ class FB2CompilerService:
                 # Даже если группа не идёт на компиляцию, дубликаты запомняем для удаления
                 # (но они будут обработаны отдельно, если потребуется)
                 continue
-            if _debug and (author.lower() in _debug or series.lower() in _debug):
-                print(f"  → to_compile: {[b.abs_path.name for b in books]}")
-                print(f"  → to_delete:  {[p.name for p in duplicate_paths]}")
+            if _debug and any(kw in author.lower() or kw in series.lower() for kw in _debug):
+                print(f"  → to_compile: {[b.abs_path.name for b in books]}", file=_dbg_out)
+                print(f"  → to_delete:  {[p.name for p in duplicate_paths]}", file=_dbg_out)
 
             books_sorted, order_determined, alphabetical_order = self._sort_books(books)
 
@@ -494,15 +496,6 @@ class FB2CompilerService:
         2. Диапазон "N-M" в stem/title с привязкой к серии.
         3. stem/title содержит сервисное слово (Трилогия → 3 тома) — lo=1, hi=count.
         """
-        # Критерий 1: series_number — диапазон "N-M"
-        sn = (book.record.series_number or '').strip()
-        if sn:
-            m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', sn)
-            if m:
-                lo, hi = int(m.group(1)), int(m.group(2))
-                if hi > lo:
-                    return lo, hi
-
         series_lower = series.lower()
         series_words = [w for w in series_lower.split() if len(w) >= 4]
 
@@ -510,12 +503,22 @@ class FB2CompilerService:
             tl = txt.lower()
             return not series_words or any(w in tl for w in series_words)
 
-        # Критерий 2: диапазон "N-M" в имени файла (stem) или title
+        # Критерий 1: диапазон "N-M" в имени файла (stem) или title — приоритет выше метаданных
+        # Имя файла отражает реальную организацию библиотеки, метаданные могут быть неточными.
         _RANGE_RE = re.compile(r'(\d+)\s*[-–—]\s*(\d+)', re.UNICODE)
         for candidate in (book.abs_path.stem, book.record.file_title or ''):
             if not _has_series_link(candidate):
                 continue
             m = _RANGE_RE.search(candidate)
+            if m:
+                lo, hi = int(m.group(1)), int(m.group(2))
+                if hi > lo:
+                    return lo, hi
+
+        # Критерий 2: series_number — диапазон "N-M" из метаданных (запасной вариант)
+        sn = (book.record.series_number or '').strip()
+        if sn:
+            m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', sn)
             if m:
                 lo, hi = int(m.group(1)), int(m.group(2))
                 if hi > lo:
