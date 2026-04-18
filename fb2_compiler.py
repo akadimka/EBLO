@@ -203,39 +203,6 @@ class FB2CompilerService:
             key = (author.lower(), series.lower())
             buckets.setdefault(key, []).append(rec)
 
-        # Дополнительная группировка по (folder, series_lower) для многоавторских серий.
-        # Если одна и та же серия в одной папке имеет ≥2 файлов с РАЗНЫМИ авторами —
-        # это сборник, который тоже нужно компилировать.
-        folder_series_buckets: Dict[Tuple[str, str], List] = {}
-        for rec in records:
-            series = (rec.proposed_series or '').strip()
-            rel_path = (rec.file_path or '').strip()
-            if not series or not rel_path:
-                continue
-            folder = str(Path(rel_path).parent)
-            key = (folder.lower(), series.lower())
-            folder_series_buckets.setdefault(key, []).append(rec)
-
-        # Из folder_series добавляем только те группы, которые уже не покрыты author+series
-        already_covered = set()
-        for (ak, sk), recs in buckets.items():
-            for rec in recs:
-                already_covered.add(id(rec))
-
-        multi_author_buckets: Dict[Tuple[str, str], List] = {}
-        for (folder_k, series_k), recs in folder_series_buckets.items():
-            if len(recs) < 2:
-                continue
-            # Проверить, есть ли среди записей хоть одна, не попавшая в author+series группу,
-            # ИЛИ записи из разных author-групп (=разные авторы при одной серии)
-            authors_in_group = set((rec.proposed_author or '').strip().lower() for rec in recs)
-            if len(authors_in_group) < 2:
-                continue  # все одного автора — уже покрыто обычной группировкой
-            # Проверить, что обычная группировка НЕ покрывает все записи целиком
-            uncovered = [r for r in recs if id(r) not in already_covered]
-            if uncovered or len(recs) >= 2:
-                multi_author_buckets[(folder_k, series_k)] = recs
-
         groups: List[CompilationGroup] = []
         for (_, _), recs in buckets.items():
             if len(recs) < 2:
@@ -468,61 +435,6 @@ class FB2CompilerService:
                         alphabetical_order=all_oth_ambig,
                     ))
                     first_group = False
-
-        # ── Многоавторские серии (разные авторы, одна серия, одна папка) ──────
-        # Для таких групп автором компиляции считается "Сборник".
-        # Записи из этих групп могли частично уже войти в одноавторские группы —
-        # пересечений нет, т.к. len(authors_in_group) >= 2 гарантирует многоавторность.
-        for (folder_k, series_k), recs in multi_author_buckets.items():
-            series = recs[0].proposed_series.strip()
-            author = 'Сборник'
-            books = [self._make_book(rec, work_dir) for rec in recs]
-            duplicate_paths_ma: List[Path] = []
-            books_sorted, order_determined, alphabetical_order = self._sort_books(books)
-            if alphabetical_order:
-                volume_range = ''
-                groups.append(CompilationGroup(
-                    author=author,
-                    series=series,
-                    books=books_sorted,
-                    order_determined=order_determined,
-                    volume_range=volume_range,
-                    duplicate_paths=duplicate_paths_ma,
-                    alphabetical_order=True,
-                ))
-            else:
-                numeric = [b for b in books_sorted if b.sort_key[0] == 0]
-                others  = [b for b in books_sorted if b.sort_key[0] != 0]
-                first_group = True
-                for run in self._split_into_consecutive_runs(numeric):
-                    if len(run) < 2:
-                        continue
-                    groups.append(CompilationGroup(
-                        author=author,
-                        series=series,
-                        books=run,
-                        order_determined=True,
-                        volume_range=self._compute_volume_range(run),
-                        duplicate_paths=duplicate_paths_ma if first_group else [],
-                        alphabetical_order=False,
-                    ))
-                    first_group = False
-                if len(others) >= 2:
-                    all_oth_ambig = all(b.order_ambiguous for b in others)
-                    oth_sorted = sorted(
-                        others,
-                        key=lambda b: (b.record.file_title or b.abs_path.stem).lower()
-                        if all_oth_ambig else b.sort_key,
-                    )
-                    groups.append(CompilationGroup(
-                        author=author,
-                        series=series,
-                        books=oth_sorted,
-                        order_determined=not any(b.order_ambiguous for b in others),
-                        volume_range='',
-                        duplicate_paths=duplicate_paths_ma if first_group else [],
-                        alphabetical_order=all_oth_ambig,
-                    ))
 
         groups.sort(key=lambda g: (g.author.lower(), g.series.lower()))
         self._log(f"Найдено групп для компиляции: {len(groups)}")
