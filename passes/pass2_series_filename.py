@@ -756,8 +756,12 @@ class Pass2SeriesFilename:
                 
                 # ✅ НОВОЕ: Попробуем "Author - Series NUM или N-M" паттерн
                 # "Шалашов Евгений - Господин следователь 2" → "Господин следователь"
+                # Также: "Author - Series N. Title" (число не в конце, за ним ". Title")
                 if not series_candidate and ' - ' in file_name_for_fallback:
                     match = re.match(r'^(.+?)\s*-\s*(.+?)\s+(?:\d+[-\u2013\u2014]\d+|\d+|[IVX]+)\s*$', file_name_for_fallback)
+                    if not match:
+                        # Попытка: "Author - Series N. Title"
+                        match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d{1,2}\.\s+.+$', file_name_for_fallback)
                     if match:
                         first_part = match.group(1).strip()
                         series_part = match.group(2).strip()
@@ -2050,7 +2054,12 @@ class Pass2SeriesFilename:
         # 🔑 ВАЖНО: Если паттерн явно БЕЗ Series - не применяем fallback правила скобок/точки!
         # НО: если в конце имени файла явный числовой суффикс (N или N-M), это признак серии —
         # Rule 3B/4 должны попробовать его найти независимо от паттерна.
-        _has_numeric_suffix = bool(re.search(r'\s+\d+(?:[-–—]\d+)?\s*$', name_for_parsing))
+        # Числовой суффикс: в конце строки ИЛИ в середине перед ". Title"
+        # "Серия 2. Заголовок" → тоже признак серийности
+        _has_numeric_suffix = bool(
+            re.search(r'\s+\d+(?:[-–—]\d+)?\s*$', name_for_parsing) or
+            re.search(r'\s+\d+\.\s+\S', name_for_parsing)
+        )
         if pattern_found_without_series and not _has_numeric_suffix:
             # Паттерн явно БЕЗ серии и нет числового суффикса — возвращаем пусто или metadata
             if metadata_series:
@@ -2191,6 +2200,19 @@ class Pass2SeriesFilename:
                 if not validate or self._is_valid_series(potential_series):
                     return potential_series
         
+        # Правило 4B: Author - Series N. Title (число в середине, за ним точка и заголовок)
+        # "Тидхар Леви - Центральная станция 2. Неом" → "Центральная станция"
+        # Отличие от Правила 4: здесь после номера идёт '. Title', а не конец строки
+        if ' - ' in name_for_parsing:
+            match = re.match(
+                r'^(.+?)\s*-\s*(.+?)\s+(\d{1,2})\.\s+.+$',
+                name_for_parsing,
+            )
+            if match:
+                potential_series = match.group(2).strip()
+                if not validate or self._is_valid_series(potential_series):
+                    return potential_series
+
         # Правило 5: Author - Title. Subtitle (fallback для файлов без номея)
         # "Земляной Андрей - Отморозки. Другим путем" → "Отморозки"
         # Попытаемся извлечь часть после " - " и до первой точки как Title (которая может быть Series)
