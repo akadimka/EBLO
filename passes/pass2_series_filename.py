@@ -591,7 +591,7 @@ class Pass2SeriesFilename:
                 # ВАЖНО: проверки ниже — независимые (не elif), чтобы срабатывать
                 # даже когда кандидат прошёл comma-check (например "о том, как")
                 if series_candidate and self._is_author_surname(series_candidate, record.proposed_author):
-                    series_candidate = None  # Фамилия или полное имя автора
+                                series_candidate = None  # Фамилия или полное имя автора
                 if series_candidate and record.file_title:
                     # TITLE-AS-SERIES GUARD: если кандидат совпадает с названием книги,
                     # это ложный матч (например "Книга" в service_words увела нас не туда).
@@ -670,7 +670,7 @@ class Pass2SeriesFilename:
                        # Пример: candidate="Рязань, год" (блок из "Время умирать. Рязань, год 1237")
                        # title="Время умирать. Рязань, год 1237" → candidate in title → не серия.
                        (_title_lower and _cand_lower in _title_lower and len(_cand_lower) >= 8)):
-                        series_candidate = None  # Название книги ≠ серия
+                                        series_candidate = None  # Название книги ≠ серия
 
                 # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)
                 if series_candidate:
@@ -679,17 +679,16 @@ class Pass2SeriesFilename:
             # Если прошел базовые фильтры → валидация
             if series_candidate:
                 clean = self._clean_series_name(
-                    series_candidate, 
+                    series_candidate,
                     keep_trailing_number=self._last_was_hierarchical
                 )
-                
+
                 # ✅ НОВОЕ: Удалить слова из blacklist вместо полного отвергания
-                # Пример: "Господин следователь (СИ)" → удаляем "(СИ)" → "Господин следователь"
                 clean = self._remove_blacklist_words(clean)
-                
+        
                 if clean:  # Проверяем что что-то осталось после очистки
                     author_for_validation = record.proposed_author or None
-                    
+
                     if self._is_valid_series(clean, extracted_author=author_for_validation):
                         # ✅ Если extracted series является частью metadata_series
                         # (например "Амур" ⊂ "Амур. Лицом к лицу") → расширяем до полного имени.
@@ -1868,10 +1867,6 @@ class Pass2SeriesFilename:
                             # processed_series пуст (напр. аббревиатура О.Р.З.) → не возвращаем сырое значение
                     else:
                         # Нет metadata для проверки, используем результат BlockLevelPatternMatcher как есть
-                        # Обработать через _extract_main_series_from_multi_level() для удаления номеров томов/иерархии
-                        # Examples:
-                        #   "Сид 1. Принцип талиона 1. Геката 1" → "Сид\Принцип талиона\Геката"
-                        #   "Варлок 1-3" → "Варлок"
                         processed_series = self._extract_main_series_from_multi_level(series_from_block)
                         if processed_series:
                             # Без metadata нельзя подтвердить многоуровневую иерархию.
@@ -2004,7 +1999,7 @@ class Pass2SeriesFilename:
                     best_pattern = pattern_str
         
         if best_series:
-            
+
             # Проверка 1: если best_series - это serve_word, не возвращаем его
             # Serve_words это служебные слова, не названия серий
             # ВАЖНО: сравниваем целое слово, не префикс!

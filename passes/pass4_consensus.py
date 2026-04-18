@@ -154,6 +154,10 @@ class Pass4Consensus:
                     # Пример: "Leach23 (Михалек). Игрок, забравшийся на вершину 1-12"
                     elif re.search(r'\s+\d+\s*$', filename_no_ext):
                         has_pattern_evidence = True
+                    # Число в середине перед ". Title" — паттерн "Author - Series N. Title"
+                    # Пример: "Тидхар Леви - Центральная станция 2. Неом"
+                    elif re.search(r'\s+\d+\.\s+\S', filename_no_ext):
+                        has_pattern_evidence = True
                     
                     # Find ALL brackets in the filename
                     all_brackets = re.findall(r'\([^)]*\)', filename)
