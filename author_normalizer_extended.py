@@ -125,13 +125,7 @@ class AuthorNormalizer:
         """
         if not author or author == "Сборник":
             return author
-
-        # Строки вида "Фамилия Имя и другие" / "Name et al." — не трогаем:
-        # это многоавторный флаг-суффикс, нормализация разрушит его структуру.
-        import re as _re
-        if _re.search(r'\s+(?:и\s+другие|и\s+др\.?|et\s+al\.?)\s*$', author, _re.IGNORECASE):
-            return author
-
+        
         # Parse metadata_authors first
         metadata_authors_list = []
         if metadata_authors:

@@ -1069,15 +1069,16 @@ class Pass2SeriesFilename:
 
                 # Серия
                 if subfolder:
-                    # Папочная подсерия всегда авторитетнее метаданных в рамках ma_folder
                     record.proposed_series = f"{series_name}\\{subfolder}"
                     record.series_source = 'folder_multiauthor'
                 elif not record.proposed_series:
                     # Файл в корне ma_folder без серии → присваиваем родительскую
                     record.proposed_series = series_name
                     record.series_source = 'folder_multiauthor'
-                # Если subfolder=None и proposed_series уже есть — не трогаем
-                # (файл в корне ma_folder с явно заданной серией из метаданных)
+                elif record.proposed_series and '\\' not in record.proposed_series:
+                    # Есть подсерия но без родителя → добавляем родителя
+                    record.proposed_series = f"{series_name}\\{record.proposed_series}"
+                    record.series_source = 'folder_multiauthor'
 
                 applied += 1
 
