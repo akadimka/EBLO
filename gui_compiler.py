@@ -346,6 +346,8 @@ class CompilerDialog:
                 records = getattr(svc, 'records', []) or []
 
             self._set_status('Поиск групп для компиляции…')
+            # Debug: установить '_debug_filter' для вывода диагностики
+            # self._service._debug_filter = {'аберкромби', 'земной круг'}
             groups = self._service.find_groups(records, work_dir)
 
             self._win.after(0, lambda: self._populate_groups(groups))

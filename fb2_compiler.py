@@ -215,6 +215,15 @@ class FB2CompilerService:
 
             duplicate_paths: List[Path] = []
 
+            # Debug: вывести классификацию файлов для конкретной пары автор/серия
+            _debug = getattr(self, '_debug_filter', None)
+            if _debug and (author.lower() in _debug or series.lower() in _debug):
+                print(f"\n[DEBUG] {author} / {series} ({len(books)} файлов):")
+                for b in books:
+                    lo, hi = self._precompiled_range(b, series)
+                    print(f"  {'PRE' if hi>lo else 'REG'} sk={b.sort_key} vl={b.volume_label!r} "
+                          f"pre=({lo},{hi}) | {b.abs_path.name}")
+
             # --- Фильтр 1: обработка заранее скомпилированных файлов ----------
             # Признак: stem/title содержит сервисное слово (Трилогия …) или
             # series_number — диапазон вида "1-3".
@@ -359,6 +368,10 @@ class FB2CompilerService:
                 # Даже если группа не идёт на компиляцию, дубликаты запомняем для удаления
                 # (но они будут обработаны отдельно, если потребуется)
                 continue
+            if _debug and (author.lower() in _debug or series.lower() in _debug):
+                print(f"  → to_compile: {[b.abs_path.name for b in books]}")
+                print(f"  → to_delete:  {[p.name for p in duplicate_paths]}")
+
             books_sorted, order_determined, alphabetical_order = self._sort_books(books)
 
             if alphabetical_order:
