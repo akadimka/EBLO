@@ -198,7 +198,37 @@ class AuthorNormalizer:
         # Одиночный автор - проверить версию в metadata
         name_obj = AuthorName(author)
         normalized = name_obj.normalized if name_obj.is_valid else author
-        
+
+        # Если AuthorName выбросил ВСЕ инициалы (вернул только фамилию) — вернуть исходный.
+        # Пример: "Умиралиев А" → AuthorName → "Умиралиев" (инициал выброшен) → вернуть "Умиралиев А".
+        # НЕ применять если результат всё равно содержит инициал — значит AuthorName корректно
+        # переставил порядок и убрал лишний инициал ("А. А Умиралиев" → "Умиралиев А." — правильно).
+        # ФИНАЛЬНАЯ НОРМАЛИЗАЦИЯ в Pass 3 добавит точку к инициалу без точки.
+        if len(normalized.split()) < len(author.split()):
+            has_initial_in_result = bool(re.search(r'\b[А-ЯЁA-Z]\.?\b', normalized))
+            if not has_initial_in_result:
+                normalized = author
+
+        # Если автор — одно слово (только фамилия) и metadata содержит ровно одного
+        # автора с этой фамилией + инициал/имя → используем более полную версию.
+        # Пример: proposed="Мосов", metadata="Мосов А" → normalized="Мосов А."
+        if len(author.split()) == 1 and metadata_authors_list and len(metadata_authors_list) == 1:
+            meta_full = metadata_authors_list[0]
+            meta_words = meta_full.split()
+            if len(meta_words) > 1:
+                author_lower = author.lower().replace('ё', 'е')
+                # Фамилия может быть первым или последним словом в строке метаданных
+                first_lower = meta_words[0].lower().replace('ё', 'е').rstrip('.')
+                last_lower = meta_words[-1].lower().replace('ё', 'е').rstrip('.')
+                if first_lower == author_lower or last_lower == author_lower:
+                    meta_name_obj = AuthorName(meta_full)
+                    candidate = meta_name_obj.normalized if meta_name_obj.is_valid else meta_full
+                    # Если AuthorName выбросил инициалы — использовать сырые данные из metadata.
+                    # Pass 3 ФИНАЛЬНАЯ НОРМАЛИЗАЦИЯ добавит точку к инициалу.
+                    if len(candidate.split()) < len(meta_words):
+                        candidate = meta_full
+                    normalized = candidate
+
         # Если в metadata есть несколько авторов И основной автор совпадает с одним из них
         # → используем всех авторов из metadata (восстановление потерянных соавторов)
         if metadata_authors_list and len(metadata_authors_list) > 1:

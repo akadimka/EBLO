@@ -3,8 +3,19 @@ PASS 4: Apply consensus author to files in same folder.
 """
 
 import re
+import unicodedata
 from pathlib import Path
 from typing import List, Dict, Optional
+
+
+def _nfc_lower_yo(s: str) -> str:
+    """NFC-нормализация + lower + ё→е.
+
+    NFC нужна: если строка в NFD-форме, ё = е + U+0308, и replace('ё','е') не работает.
+    """
+    return unicodedata.normalize('NFC', s).lower().replace('\u0451', '\u0435')
+
+
 from author_normalizer_extended import AuthorNormalizer
 from settings_manager import SettingsManager
 
@@ -484,8 +495,8 @@ class Pass4Consensus:
                         pass  # обычный случай — применяем
                     elif esc == '':
                         # Пустая строка: разрешаем только если имя файла содержит серию
-                        stem = Path(record.file_path).stem.lower().replace('ё', 'е')
-                        cs_norm = consensus_series.lower().replace('ё', 'е')
+                        stem = _nfc_lower_yo(Path(record.file_path).stem)
+                        cs_norm = _nfc_lower_yo(consensus_series)
                         if cs_norm not in stem:
                             continue
                     else:
@@ -758,7 +769,7 @@ class Pass4Consensus:
         _MIXED_SCRIPT_NORM = str.maketrans('ZzАВЕКМНОРСТХ', 'ЗзАВЕКМНОРСТХ')  # Latin→Cyrillic lookalikes
 
         def _norm_for_prefix(s: str) -> str:
-            return s.lower().replace('ё', 'е').translate(_MIXED_SCRIPT_NORM)
+            return _nfc_lower_yo(s).translate(_MIXED_SCRIPT_NORM)
 
         prefix_fixed_count = 0
         for folder, group_records in groups.items():
@@ -796,7 +807,7 @@ class Pass4Consensus:
         import re as _re_ser
         multiauthor_series_cleared = 0
         for folder, group_records in groups.items():
-            folder_name_lower = folder.name.lower().replace('ё', 'е') if folder.name else ''
+            folder_name_lower = _nfc_lower_yo(folder.name) if folder.name else ''
             if not folder_name_lower or len(folder_name_lower) < 4:
                 continue
 
@@ -824,7 +835,7 @@ class Pass4Consensus:
             for record in group_records:
                 if not record.proposed_series:
                     continue
-                rec_series_norm = record.proposed_series.lower().replace('ё', 'е')
+                rec_series_norm = _nfc_lower_yo(record.proposed_series)
                 # Проверяем что имя серии содержится в имени папки (покрывает "Серия - «X»" формат)
                 if rec_series_norm in folder_name_lower:
                     record.proposed_series = ''
@@ -886,8 +897,8 @@ class Pass4Consensus:
                     continue
 
                 # Условие 2: база серии присутствует в имени файла
-                stem = Path(rec.file_path).stem.lower().replace('ё', 'е')
-                if meta_base.lower().replace('ё', 'е') not in stem:
+                stem = _nfc_lower_yo(Path(rec.file_path).stem)
+                if _nfc_lower_yo(meta_base) not in stem:
                     continue
 
                 # Оба условия выполнены — исправляем
@@ -920,9 +931,9 @@ class Pass4Consensus:
                 cur = rec.proposed_series or ''
                 if not cur or rec.series_source not in ('filename',):
                     continue
-                cur_lower = cur.lower().replace('ё', 'е')
+                cur_lower = _nfc_lower_yo(cur)
                 for full in full_series:
-                    full_lower = full.lower().replace('ё', 'е')
+                    full_lower = _nfc_lower_yo(full)
                     if full_lower == cur_lower:
                         break  # уже правильно
                     if full_lower.endswith(cur_lower) and full_lower != cur_lower:
@@ -971,7 +982,7 @@ class Pass4Consensus:
                 if not raw:
                     continue
                 clean = _strip_author_suffix(raw)
-                base = self._normalize_series_for_consensus(clean).lower().replace('ё', 'е')
+                base = _nfc_lower_yo(self._normalize_series_for_consensus(clean))
                 if not base:
                     continue
                 if base not in meta_votes:
@@ -992,17 +1003,17 @@ class Pass4Consensus:
                 continue
 
             for rec in grp:
-                current_base = self._normalize_series_for_consensus(
+                current_base = _nfc_lower_yo(self._normalize_series_for_consensus(
                     rec.proposed_series or ''
-                ).lower().replace('ё', 'е')
+                ))
                 if current_base == best_base:
                     continue  # уже правильно
                 # Применяем только если у файла есть metadata_series совпадающая с базой
                 rec_meta_raw = (rec.metadata_series or '').strip()
                 if rec_meta_raw:
-                    rec_meta_base = self._normalize_series_for_consensus(
+                    rec_meta_base = _nfc_lower_yo(self._normalize_series_for_consensus(
                         _strip_author_suffix(rec_meta_raw)
-                    ).lower().replace('ё', 'е')
+                    ))
                     if rec_meta_base != best_base:
                         continue  # метаданные указывают на другую серию
                 else:
@@ -1011,14 +1022,14 @@ class Pass4Consensus:
                     #    (парсер обрезал префикс через " - ").
                     # 2. proposed_series пустая, но имя файла содержит консенсусную серию
                     #    (первая книга серии без номера — esc='', proposed='').
-                    cur_series = (rec.proposed_series or '').lower().replace('ё', 'е')
-                    best_lower = best_clean.lower().replace('ё', 'е')
+                    cur_series = (rec.proposed_series or _nfc_lower_yo(''))
+                    best_lower = _nfc_lower_yo(best_clean)
                     if cur_series:
                         if cur_series not in best_lower:
                             continue
                     else:
                         # Пустая серия — применяем только если имя файла содержит серию
-                        stem = Path(rec.file_path).stem.lower().replace('ё', 'е')
+                        stem = _nfc_lower_yo(Path(rec.file_path).stem)
                         if best_lower not in stem:
                             continue
                 # Не применяем если серия в blacklist (издательская/жанровая метка)
@@ -1056,9 +1067,9 @@ class Pass4Consensus:
 
         def _strip_author_from_stem(stem: str, author: str) -> str:
             """Убрать имя автора с начала стема. Пробует 'Author. ' и 'Author - '."""
-            sl = stem.lower().replace('ё', 'е')
+            sl = _nfc_lower_yo(stem)
             for sep in ('. ', ' - '):
-                prefix = author.lower().replace('ё', 'е') + sep
+                prefix = _nfc_lower_yo(author) + sep
                 if sl.startswith(prefix):
                     return stem[len(prefix):]
             # Попробовать reversed "Фамилия Имя" → "Имя Фамилия"
@@ -1066,7 +1077,7 @@ class Pass4Consensus:
             if len(parts) == 2:
                 rev = f"{parts[1]} {parts[0]}"
                 for sep in ('. ', ' - '):
-                    prefix = rev.lower().replace('ё', 'е') + sep
+                    prefix = _nfc_lower_yo(rev) + sep
                     if sl.startswith(prefix):
                         return stem[len(prefix):]
             return stem
@@ -1100,7 +1111,7 @@ class Pass4Consensus:
                 if not raw_meta:
                     continue
                 clean = _strip_author_suffix(raw_meta)
-                norm = self._normalize_series_for_consensus(clean).lower().replace('ё', 'е')
+                norm = _nfc_lower_yo(self._normalize_series_for_consensus(clean))
                 if norm and norm not in meta_confirmed:
                     meta_confirmed[norm] = clean
 
@@ -1113,7 +1124,7 @@ class Pass4Consensus:
             for rec in auth_recs:
                 stem = Path(rec.file_path).stem
                 title = _strip_author_from_stem(stem, author)
-                title_norm = title.lower().replace('ё', 'е')
+                title_norm = _nfc_lower_yo(title)
                 phrases = _title_phrases(title_norm)
                 file_phrases.append((rec, phrases))
                 for ph in set(phrases):
@@ -1175,4 +1186,14 @@ class Pass4Consensus:
                 hier_count += 1
 
         self.logger.log(f"[PASS 4] Hierarchical series conversions (dot→backslash): {hier_count}")
+
+        # Финальная нормализация ё→е во всех proposed_series.
+        # Pass3SeriesNormalize делает это до Pass4, но Pass4 может перезаписать
+        # proposed_series значениями с ё (через консенсус). Делаем NFC + ё→е здесь,
+        # чтобы гарантировать единообразие ПОСЛЕ всех консенсусных операций.
+        for record in records:
+            if record.proposed_series:
+                _s = unicodedata.normalize('NFC', record.proposed_series).replace('\u0451', '\u0435').replace('\u0401', '\u0415')
+                if _s != record.proposed_series:
+                    record.proposed_series = _s
 

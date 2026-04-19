@@ -574,12 +574,13 @@ class Pass2Filename:
         # Split metadata into individual authors (separated by "; " or ", ")
         meta_authors = [a.strip() for a in metadata_authors.replace('; ', '|').replace(', ', '|').split('|')]
         
+        matched_authors = []
         for meta_author in meta_authors:
             if not meta_author:
                 continue
-            
+
             meta_words = meta_author.split()
-            
+
             # Try to find matching surname in metadata
             # E.g., if looking for "Кумин", check if metadata has "...Кумин..."
             for idx, word in enumerate(meta_words):
@@ -589,11 +590,19 @@ class Pass2Filename:
                     # Metadata stores names in ИФ order ("Хуан Франсиско Феррандис"),
                     # but our canonical format is ФИ ("Феррандис Хуан Франсиско").
                     if idx == 0:
-                        return meta_author  # Already in ФИ order
+                        matched_authors.append(meta_author)
                     else:
                         rest = [w for i, w in enumerate(meta_words) if i != idx]
-                        return word + ' ' + ' '.join(rest)
-        
+                        matched_authors.append(word + ' ' + ' '.join(rest))
+                    break  # одна запись metadata → один совпавший автор
+
+        if len(matched_authors) == 1:
+            return matched_authors[0]
+        elif len(matched_authors) > 1:
+            # Несколько авторов с одной фамилией (например "Белаш Александр" и "Белаш Людмила").
+            # Возвращаем всех через ", " — Pass 3 нормализует каждого отдельно.
+            return ', '.join(matched_authors)
+
         # No clear match found - return original
         return incomplete_author
     

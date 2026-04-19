@@ -124,7 +124,8 @@ class Pass3SeriesNormalize:
         # "Тёмный век" → "Темный век"
         # "Чужие звёзды" → "Чужие звезды"
         # "Ёлка" → "Елка"
-        series = series.replace('ё', 'е').replace('Ё', 'Е')
+        import unicodedata as _ud
+        series = _ud.normalize('NFC', series).replace('\u0451', '\u0435').replace('\u0401', '\u0415')
         
         # Шаг 1.7: Убрать суффикс-дизамбигуатор в квадратных скобках
         # "Золотой век[Иггульден]" → "Золотой век"

@@ -2,9 +2,15 @@
 PASS 3: Normalize author names to standard format.
 """
 
+import unicodedata
 from typing import List, Optional
 from author_normalizer_extended import AuthorNormalizer
 from settings_manager import SettingsManager
+
+
+def _nfc_yo_to_ye(s: str) -> str:
+    """NFC + ё→е: единообразие написания серий и авторов."""
+    return unicodedata.normalize('NFC', s).replace('\u0451', '\u0435')
 
 
 class Pass3Normalize:
@@ -305,13 +311,22 @@ class Pass3Normalize:
             raw = record.proposed_author.replace('; ', ', ')
             # Разбиваем по соавторам
             authors = [a.strip() for a in raw.split(', ') if a.strip()]
-            # Каждый автор — не более 2 слов (Фамилия Имя), отчество отбрасываем
+            # Каждый автор — не более 2 слов (Фамилия Имя), отчество отбрасываем.
+            # Одиночная буква (инициал) всегда заканчивается точкой: "А" → "А."
             trimmed = []
             for auth in authors:
                 words = auth.split()
                 if len(words) > 2:
                     auth = ' '.join(words[:2])
-                trimmed.append(auth)
+                # Гарантируем точку после инициалов (одиночная кириллическая/латинская буква)
+                import re as _re_dot
+                fixed = []
+                for w in auth.split():
+                    if _re_dot.match(r'^[А-ЯЁA-Z]\.?$', w):
+                        fixed.append(w[0] + '.')
+                    else:
+                        fixed.append(w)
+                trimmed.append(' '.join(fixed))
             # Дедупликация
             seen: list = []
             for a in trimmed:
@@ -320,5 +335,14 @@ class Pass3Normalize:
             result = ', '.join(seen)
             if result != record.proposed_author:
                 record.proposed_author = result
+
+        # Нормализация ё→е в proposed_series:
+        # Разные FB2-файлы одной серии могут иметь ё в одних и е в других,
+        # что приводит к расхождению proposed_series ("Тёмные звёзды" vs "Темные звезды").
+        for record in records:
+            if record.proposed_series:
+                normalized_series = _nfc_yo_to_ye(record.proposed_series)
+                if normalized_series != record.proposed_series:
+                    record.proposed_series = normalized_series
 
         self.logger.log(f"[PASS 3] Normalized {normalized_count} author names")

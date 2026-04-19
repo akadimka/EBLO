@@ -19,8 +19,18 @@ FB2 Compilation Service
 
 import re
 import html as _html
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def _norm_key(s: str) -> str:
+    """Нормализовать строку для сравнения: NFC + lower + ё→е.
+
+    NFC нужна потому что ё может быть в NFD-форме (е + U+0308),
+    при которой обычный replace('ё','е') не работает.
+    """
+    return unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
 from typing import List, Tuple, Optional, Dict
 
 try:
@@ -200,13 +210,14 @@ class FB2CompilerService:
             Список CompilationGroup, отсортированный по (author, series).
         """
         # Группировка по (author_lower, series_lower)
+        # Нормализуем ё→е в ключах, чтобы "Тёмные звёзды" и "Темные звезды" попали в одну группу.
         buckets: Dict[Tuple[str, str], List] = {}
         for rec in records:
             author = (rec.proposed_author or '').strip()
             series = (rec.proposed_series or '').strip()
             if not author or not series:
                 continue
-            key = (author.lower(), series.lower())
+            key = (_norm_key(author), _norm_key(series))
             buckets.setdefault(key, []).append(rec)
 
         groups: List[CompilationGroup] = []
@@ -278,8 +289,12 @@ class FB2CompilerService:
                     if best_lo <= lo and hi <= best_hi:
                         # Полностью покрыта лучшей → дубликат
                         duplicate_paths.append(book.abs_path)
+                    elif best_lo <= lo <= best_hi:
+                        # Начинается внутри best_pre, но заканчивается позже → перекрывающийся дубликат.
+                        # Пример: best=[1-42], other=[31-43] — «31» внутри [1,42] → устаревшая предкомп.
+                        duplicate_paths.append(book.abs_path)
                     else:
-                        # Не покрыта → сохраняем как источник
+                        # Не пересекается → сохраняем как источник
                         other_precompiled.append(entry)
 
                 # АКТУАЛЬНА только если ВСЕ обычные тома входят в диапазон предкомпиляции
@@ -335,16 +350,50 @@ class FB2CompilerService:
                         duplicate_paths.append(best_pre.abs_path)
                         books = regular_books
                     else:
-                        # 2. ЧАСТИЧНО УСТАРЕЛА — включаем предкомпиляцию как источник,
-                        # тома, уже покрытые ею, помечаем как дубликаты
+                        # 2. ЧАСТИЧНО УСТАРЕЛА
                         covered_individually = [
                             r for r in regular_books
                             if (n := _vol_num(r)) is not None and best_lo <= n <= best_hi
                         ]
-                        for r in covered_individually:
-                            duplicate_paths.append(r.abs_path)
                         remaining = [r for r in regular_books if r not in covered_individually]
-                        books = [best_pre] + remaining
+
+                        # Проверяем: продолжают ли оставшиеся книги диапазон предкомпиляции?
+                        # Пример: предкомп [1-4] + книги [5,6,7] → консекутивны (5 = 4+1)
+                        #          → компилируем вместе → один файл 1-7
+                        # Пример: предкомп [1-3] + книга [7] → НЕ консекутивны
+                        #          → cleanup_only (удаляем покрытые) + книга [7] standalone
+                        remaining_known_positions = [
+                            n for r in remaining if (n := _vol_num(r)) is not None
+                        ]
+                        remaining_has_unknown = any(_vol_num(r) is None for r in remaining)
+                        remaining_extends_pre = (
+                            remaining_known_positions and
+                            min(remaining_known_positions) == best_hi + 1
+                        )
+
+                        if covered_individually and not remaining_extends_pre and not remaining_has_unknown:
+                            # Оставшиеся книги не продолжают предкомпиляцию и нет книг
+                            # с неизвестной позицией → cleanup_only: предкомп остаётся,
+                            # покрытые тома — на удаление; оставшиеся обрабатываются отдельно.
+                            cov_dup_paths = list(duplicate_paths) + [r.abs_path for r in covered_individually]
+                            groups.append(CompilationGroup(
+                                author=author, series=series, books=[],
+                                order_determined=True,
+                                volume_range=(
+                                    f'{best_lo}-{best_hi}' if best_lo != best_hi else str(best_lo)
+                                ),
+                                duplicate_paths=cov_dup_paths,
+                                kept_paths=[best_pre.abs_path],
+                                cleanup_only=True,
+                            ))
+                            duplicate_paths = []
+                            books = remaining
+                        else:
+                            # Оставшиеся книги продолжают серию (или есть книги без номера)
+                            # → включаем предкомпиляцию как источник, компилируем вместе.
+                            for r in covered_individually:
+                                duplicate_paths.append(r.abs_path)
+                            books = [best_pre] + remaining
 
                     # Добавляем прочие предкомпиляции с непересекающимися диапазонами
                     # как дополнительные источники (они уже НЕ в duplicate_paths).
@@ -381,8 +430,20 @@ class FB2CompilerService:
             books = self._dedup_by_position(books, duplicate_paths)
 
             if len(books) < 2:
-                # Даже если группа не идёт на компиляцию, дубликаты запомняем для удаления
-                # (но они будут обработаны отдельно, если потребуется)
+                # Если после dedup остался один файл, но есть дубликаты — создаём cleanup_only.
+                # Пример: два файла с одинаковым sort_key (01. vs 1.) — dedup оставляет один,
+                # другой попадает в duplicate_paths, но без группы они не удаляются.
+                if duplicate_paths and books:
+                    groups.append(CompilationGroup(
+                        author=author,
+                        series=series,
+                        books=[],
+                        order_determined=True,
+                        volume_range='',
+                        duplicate_paths=duplicate_paths,
+                        kept_paths=[books[0].abs_path],
+                        cleanup_only=True,
+                    ))
                 continue
             if _debug and any(kw in author.lower() or kw in series.lower() for kw in _debug):
                 print(f"  → to_compile: {[b.abs_path.name for b in books]}", file=_dbg_out)
@@ -574,38 +635,56 @@ class FB2CompilerService:
         """
         series_lower = series.lower()
         series_words = [w for w in series_lower.split() if len(w) >= 4]
+        is_subseries = '\\' in series
 
         def _has_series_link(txt: str) -> bool:
             tl = txt.lower()
             return not series_words or any(w in tl for w in series_words)
 
+        # Regex для удаления пометок тома родительской серии вида «(т. 7-8)»
+        _VOL_ANNOT_STRIP = re.compile(
+            r'\((?:т|том|vol|book|ч|часть)\.?\s*\d+[-–—]\d+\)', re.IGNORECASE | re.UNICODE
+        )
+
         # Критерий 1: диапазон "N-M" в имени файла (stem) или title — приоритет выше метаданных
         # Имя файла отражает реальную организацию библиотеки, метаданные могут быть неточными.
         _RANGE_RE = re.compile(r'(\d+)\s*[-–—]\s*(\d+)', re.UNICODE)
         for candidate in (book.abs_path.stem, book.record.file_title or ''):
-            if not _has_series_link(candidate):
-                continue
-            m = _RANGE_RE.search(candidate)
+            if is_subseries:
+                # Для подсерий: убираем пометки тома родительской серии вида «(т. 7-8)»,
+                # затем ищем диапазон без проверки series_link (имя подсерии редко
+                # фигурирует в имени файла компиляции).
+                bare = _VOL_ANNOT_STRIP.sub('', candidate).strip()
+                m = _RANGE_RE.search(bare)
+            else:
+                if not _has_series_link(candidate):
+                    continue
+                m = _RANGE_RE.search(candidate)
             if m:
                 lo, hi = int(m.group(1)), int(m.group(2))
                 if hi > lo:
                     return lo, hi
 
         # Критерий 2: series_number — диапазон "N-M" из метаданных (запасной вариант)
-        sn = (book.record.series_number or '').strip()
-        if sn:
-            m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', sn)
-            if m:
-                lo, hi = int(m.group(1)), int(m.group(2))
-                if hi > lo:
-                    return lo, hi
+        # Для подсерий пропускаем: series_number ссылается на родительскую серию.
+        if not is_subseries:
+            sn = (book.record.series_number or '').strip()
+            if sn:
+                m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', sn)
+                if m:
+                    lo, hi = int(m.group(1)), int(m.group(2))
+                    if hi > lo:
+                        return lo, hi
 
-        # Критерий 3: stem/title содержит сервисное слово + признак серии
-        text = (book.record.file_title or book.abs_path.stem).lower()
-        for idx, kw in enumerate(self._SERIES_WORDS):
-            if kw and kw.lower() in text:
-                if _has_series_link(text):
-                    return 1, idx  # сервисное слово → предполагаем lo=1
+        # Критерий 3: stem/title содержит сервисное слово + признак серии.
+        # Проверяем оба: stem может содержать "Трилогия" даже если file_title не содержит.
+        for _kw_text in (book.abs_path.stem.lower(), (book.record.file_title or '').lower()):
+            if not _kw_text:
+                continue
+            for idx, kw in enumerate(self._SERIES_WORDS):
+                if kw and kw.lower() in _kw_text:
+                    if _has_series_link(_kw_text):
+                        return 1, idx  # сервисное слово → предполагаем lo=1
 
         # Критерий 4: файл выглядит как компиляция (по имени/title) — читаем FB2-контент
         _COMPILATION_WORDS = re.compile(
@@ -816,6 +895,14 @@ class FB2CompilerService:
                             # Расхождение: имя файла важнее ошибочных метаданных
                             return (0, fn_num, 0), 'filename', False, str(fn_num)
                     return (0, meta_num, 0), 'series_number', False, sn
+
+        # Для подсерий: «Том N» в названии файла/title важнее общего числа в stem.
+        # Пример: "Хроника 2. День второй. Том 1" — «2» это арк родительской серии,
+        # «Том 1» — реальный номер тома внутри подсерии.
+        if is_subseries:
+            inline = self._extract_inline_volume_number(rec.file_title or stem, stem)
+            if inline is not None:
+                return (0, inline, 0), 'inline_title', False, str(inline)
 
         # Источник Б: число в начале/конце имени файла
         num_m = self._STEM_NUM_RE.match(stem) or self._STEM_NUM_RE.search(stem) or re.search(

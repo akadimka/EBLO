@@ -771,18 +771,26 @@ class Pass2SeriesFilename:
                         )
                         
                         if looks_like_author:
+                            # Убрать аннотацию в скобках с конца перед матчингом диапазона:
+                            # "Маршал 1-9 (без иллюстраций)" → "Маршал 1-9"
+                            second_part_bare = re.sub(r'\s*\([^)]*\)\s*$', '', second_part).strip()
                             # Диапазон N-M: "Совок 1-5", "Попаданец в Дракона 1-8"
-                            match = re.search(r'^(.+?)\s+\d+[-\u2013\u2014]\d+\s*$', second_part)
+                            match = re.search(r'^(.+?)\s+\d+[-\u2013\u2014]\d+\s*$', second_part_bare)
+                            is_range_match = bool(match)
                             if not match:
                                 # Одиночное арабское число: "Охотник 1"
-                                match = re.search(r'^(.+?)\s+\d+\s*$', second_part)
+                                match = re.search(r'^(.+?)\s+\d+\s*$', second_part_bare)
                             if not match:
                                 # Римские цифры: "Бесноватый Цесаревич I"
-                                match = re.search(r'^(.+?)\s+[IVX]+\s*$', second_part)
+                                match = re.search(r'^(.+?)\s+[IVX]+\s*$', second_part_bare)
                             if match:
                                 simple_series = match.group(1).strip()
                                 _ftitle = (record.file_title or '').lower()
-                                _in_title = bool(_ftitle and simple_series.lower() in _ftitle)
+                                # Диапазон N-M в имени файла — однозначный признак серии,
+                                # даже если название совпадает с заголовком книги.
+                                # Пример: "Хакер 1-2.fb2", file_title="Хакер" → серия "Хакер" корректна.
+                                _in_title = (not is_range_match and
+                                             bool(_ftitle and simple_series.lower() in _ftitle))
                                 if not _in_title and self._is_valid_series(simple_series, extracted_author=record.proposed_author):
                                     series_candidate = simple_series
                 
@@ -867,7 +875,10 @@ class Pass2SeriesFilename:
                     else:
                         # Fallback к metadata - только если из filename ничего не нашли
                         series = self._extract_series_from_metadata(record.metadata_series.strip())
-                        
+                        # Очищаем от скобочных суффиксов (автор в скобках, номера томов и т.п.)
+                        # Пример: "Путь (Михаил Игнатов)" → "Путь"
+                        series = self._clean_series_name(series)
+
                         # ✅ Удалить слова из blacklist также из metadata серии
                         series = self._remove_blacklist_words(series)
                         
