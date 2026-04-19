@@ -539,6 +539,21 @@ class CompilerDialog:
                 ),
             )
 
+        # Файлы-дубликаты, которые будут удалены при компиляции
+        offset = len(group.books)
+        for pos, dup_path in enumerate(group.duplicate_paths or [], offset + 1):
+            self._det_tree.insert(
+                '', tk.END,
+                values=(
+                    pos,
+                    dup_path.stem,
+                    dup_path.name,
+                    '🗑 К удалению',
+                    '—',
+                ),
+                tags=('to_delete',),
+            )
+
         # Предпросмотр имени файла компиляции
         try:
             import re as _re
