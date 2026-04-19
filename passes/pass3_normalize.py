@@ -181,7 +181,11 @@ class Pass3Normalize:
             else:
                 metadata_for_normalization = record.metadata_authors
             
-            if '; ' in record.proposed_author or ', ' in record.proposed_author:
+            # folder_multiauthor: автор уже установлен Pass 2 как единый для всей папки — не трогаем
+            if record.author_source == 'folder_multiauthor':
+                normalized = record.proposed_author
+
+            elif '; ' in record.proposed_author or ', ' in record.proposed_author:
                 # Determine separator
                 sep = '; ' if '; ' in record.proposed_author else ', '
                 # Only normalize if not restored from metadata (which are already correct)
