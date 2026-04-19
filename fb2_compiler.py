@@ -417,6 +417,12 @@ class FB2CompilerService:
                 title_key = self._normalize_title_key(
                     book.record.file_title or book.abs_path.stem, series
                 )
+                # Для книг с известной позицией тома (level-0) добавляем позицию к ключу,
+                # чтобы не дедуплицировать разные тома с одинаковым названием.
+                # Пример: «Маршал 1-5» и «Маршал 6-9» оба имеют file_title="Маршал" —
+                # без этой защиты они бы считались дублями.
+                if book.sort_key[0] == 0:
+                    title_key = f"{title_key}\x00{book.sort_key[1]}"
                 if title_key not in seen_titles:
                     seen_titles[title_key] = book
                 else:
