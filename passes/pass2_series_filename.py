@@ -1060,8 +1060,9 @@ class Pass2SeriesFilename:
                 if not (record_prefix == prefix or record_prefix.startswith(prefix + '\\')):
                     continue
 
-                # Автор
-                new_author = f"{canonical} и другие"
+                # Автор — без суффикса "и другие", чтобы все файлы получили идентичную строку
+                # и компилятор мог сгруппировать их в одну группу
+                new_author = canonical
                 if record.proposed_author != new_author:
                     record.proposed_author = new_author
                     record.author_source = 'folder_multiauthor'
@@ -1079,9 +1080,10 @@ class Pass2SeriesFilename:
                         # Убрать числовой префикс "1. " "2) " и т.п.
                         subfolder_display = re.sub(r'^\d+[\.\)\-]\s*', '', subfolder_raw).strip()
                         new_series = f"{root_series}\\{subfolder_display}"
-                        # Устанавливаем серию только если нет более авторитетного источника.
-                        # filename и folder_hierarchy уже правильно определили серию — не трогаем.
-                        if record.series_source not in ("folder_dataset", "folder_hierarchy", "filename"):
+                        # Устанавливаем серию для всех файлов в мультиавторной папке:
+                        # физическое расположение в подпапке авторитетнее имени файла.
+                        # Только folder_dataset (явный датасет) не трогаем.
+                        if record.series_source not in ("folder_dataset",):
                             if record.proposed_series != new_series:
                                 record.proposed_series = new_series
                                 record.series_source = "folder_hierarchy"
