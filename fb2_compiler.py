@@ -690,7 +690,8 @@ class FB2CompilerService:
         _COMPILATION_WORDS = re.compile(
             r'компилян|компиляц|сборник|omnibus|антолог|собрани', re.IGNORECASE | re.UNICODE
         )
-        if _COMPILATION_WORDS.search(text) or _COMPILATION_WORDS.search(book.abs_path.stem.lower()):
+        _title_text = (book.record.file_title or book.abs_path.stem).lower()
+        if _COMPILATION_WORDS.search(_title_text) or _COMPILATION_WORDS.search(book.abs_path.stem.lower()):
             lo, hi = self._precompiled_range_from_content(book.abs_path, series)
             if hi > lo:
                 return lo, hi
