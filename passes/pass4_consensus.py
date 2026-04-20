@@ -730,14 +730,21 @@ class Pass4Consensus:
             # Check 3: short author words appear in series (e.g. "Мо Янь" in "Мо Яня")
             _blacklist = [bl.lower() for bl in (self.settings.get_list('filename_blacklist') if self.settings else [])]
             _series_lower = record.proposed_series.lower()
+            _series_word_count = len(record.proposed_series.split())
             import re as _re2
-            def _bl_matches(bl, text):
+            def _bl_matches(bl, text, multi_word_series=False):
+                # Для многословных серий (2+ слов) требуем точного совпадения всей строки.
+                # Это предотвращает блокировку реальных серий вроде "Попаданец на рыбалке"
+                # из-за того что "попаданец" есть в blacklist как жанровый ярлык.
+                if multi_word_series:
+                    return bl == text.strip()
                 # Short blacklist entries must match as whole words to avoid
                 # substring false positives (e.g. "си" inside "цусимские")
                 if len(bl) < 4:
                     return bool(_re2.search(r'(?<![а-яёa-z])' + _re2.escape(bl) + r'(?![а-яёa-z])', text, _re2.IGNORECASE))
                 return bl in text
-            is_publisher_branding = any(_bl_matches(bl, _series_lower) for bl in _blacklist)
+            _multi = _series_word_count >= 2
+            is_publisher_branding = any(_bl_matches(bl, _series_lower, multi_word_series=_multi) for bl in _blacklist)
             is_author_in_series = bool(author_prefixes & series_prefixes) or bool(author_short & series_words_lower)
 
             if is_publisher_branding or is_author_in_series:
