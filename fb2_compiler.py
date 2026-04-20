@@ -346,7 +346,10 @@ class FB2CompilerService:
                             return b.sort_key[1]
                         return None
 
-                    pre_covered_individually = all(
+                    # Если regular_books пуст — нечем покрывать тома по отдельности.
+                    # all(...) при пустом range даёт vacuous True — это неверно:
+                    # «0 книг покрывают 4 тома» не означает «покрыты».
+                    pre_covered_individually = bool(regular_books) and all(
                         any(_vol_num(r) == v for r in regular_books)
                         for v in range(best_lo, best_hi + 1)
                     )
@@ -405,7 +408,7 @@ class FB2CompilerService:
                     # как дополнительные источники (они уже НЕ в duplicate_paths).
                     for other_book, other_lo, other_hi in other_precompiled:
                         # Проверяем: все тома этой предкомпиляции уже есть отдельно?
-                        other_fully_individual = all(
+                        other_fully_individual = bool(regular_books) and all(
                             any(_vol_num(r) == v for r in regular_books)
                             for v in range(other_lo, other_hi + 1)
                         )
@@ -650,7 +653,8 @@ class FB2CompilerService:
         is_subseries = '\\' in series
 
         def _has_series_link(txt: str) -> bool:
-            tl = txt.lower()
+            import unicodedata as _ud2
+            tl = _ud2.normalize('NFC', txt).lower().replace('\u0451', '\u0435')
             return not series_words or any(w in tl for w in series_words)
 
         # Regex для удаления пометок тома родительской серии вида «(т. 7-8)»
@@ -677,6 +681,15 @@ class FB2CompilerService:
                 if hi > lo:
                     return lo, hi
 
+        # Критерий 2.5: сервисное слово в имени ФАЙЛА (stem) — filename авторитетнее метаданных.
+        # Пример: «Орел (Тетралогия)» → Тетралогия=4, хотя series_number может быть "1-2".
+        # Проверяем stem ДО series_number, чтобы явное слово в имени файла не было перебито.
+        _stem_lower = book.abs_path.stem.lower()
+        for idx, kw in enumerate(self._SERIES_WORDS):
+            if kw and kw.lower() in _stem_lower:
+                if _has_series_link(_stem_lower):
+                    return 1, idx
+
         # Критерий 2: series_number — диапазон "N-M" из метаданных (запасной вариант)
         # Для подсерий пропускаем: series_number ссылается на родительскую серию.
         if not is_subseries:
@@ -688,9 +701,9 @@ class FB2CompilerService:
                     if hi > lo:
                         return lo, hi
 
-        # Критерий 3: stem/title содержит сервисное слово + признак серии.
-        # Проверяем оба: stem может содержать "Трилогия" даже если file_title не содержит.
-        for _kw_text in (book.abs_path.stem.lower(), (book.record.file_title or '').lower()):
+        # Критерий 3: title содержит сервисное слово + признак серии.
+        # (stem уже проверен в Критерии 2.5)
+        for _kw_text in ((book.record.file_title or '').lower(),):
             if not _kw_text:
                 continue
             for idx, kw in enumerate(self._SERIES_WORDS):
