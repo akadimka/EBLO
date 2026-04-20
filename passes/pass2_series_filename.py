@@ -723,21 +723,9 @@ class Pass2SeriesFilename:
                     author_for_validation = record.proposed_author or None
 
                     if self._is_valid_series(clean, extracted_author=author_for_validation):
-                        # ✅ Если extracted series является частью metadata_series
-                        # (например "Амур" ⊂ "Амур. Лицом к лицу") → расширяем до полного имени.
-                        # Это покрывает серии с точкой в названии, которые токенайзер разбивает.
-                        if record.metadata_series:
-                            meta_clean = record.metadata_series.strip()
-                            meta_lower = meta_clean.lower().replace('ё', 'е')
-                            clean_lower_norm = clean.lower().replace('ё', 'е')
-                            if (meta_lower != clean_lower_norm and
-                                    (meta_lower.startswith(clean_lower_norm + '.') or
-                                     meta_lower.startswith(clean_lower_norm + ' ') or
-                                     clean_lower_norm in meta_lower)):
-                                clean = self._fix_russian_grammar(meta_clean)
-                                record.proposed_series = clean
-                                record.series_source = "filename+meta_confirmed"
-                                continue
+                        # Мета используется ТОЛЬКО для подтверждения серии из имени файла,
+                        # но НЕ для её расширения. Если из файла извлечено "Чингисхан",
+                        # а мета говорит "Чингисхан. Хроники завоевателя" — оставляем "Чингисхан".
                         # Исправляем грамматику русского языка (добавляем запятую перед "что")
                         clean = self._fix_russian_grammar(clean)
                         record.proposed_series = clean
