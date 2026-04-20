@@ -1173,8 +1173,19 @@ class FB2CompilerService:
             # которые не покрыты первым (тома 43-45).
             bodies: List[Tuple[str, str]] = []  # (book_title, body_xml)
             covered_hi = 0  # максимальный номер тома, уже добавленного в bodies
+            # Бинари (обложки, иллюстрации) из всех исходников; дедупликация по id
+            collected_binaries: List[str] = []
+            seen_binary_ids: set = set()
 
             for book in group.books:
+                # Собираем бинари из каждого исходника (дедупликация по id)
+                for bin_block in self._extract_binaries(book):
+                    id_m = re.search(r'<binary[^>]+id=["\']([^"\']+)["\']', bin_block, re.IGNORECASE)
+                    bin_id = id_m.group(1) if id_m else bin_block[:40]
+                    if bin_id not in seen_binary_ids:
+                        seen_binary_ids.add(bin_id)
+                        collected_binaries.append(bin_block)
+
                 rng_m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', book.volume_label or '')
                 if rng_m:
                     # Предкомпиляция с известным диапазоном — разбиваем на секции
@@ -1237,6 +1248,7 @@ class FB2CompilerService:
                 volume_range=volume_range,
                 genre=meta.get('genre', ''),
                 bodies=bodies,
+                binaries=collected_binaries,
             )
 
             # --- Имя выходного файла ---
@@ -1386,9 +1398,11 @@ class FB2CompilerService:
             if kw_m:
                 return int(kw_m.group(1))
             # Римские цифры после ключевых слов
+            # (?=[MDCLXVI]) гарантирует непустое совпадение;
+            # V?I{0,3} вместо V?I{1,3} позволяет матчить V, X, XL, XLV и т.п.
             roman_m = re.search(
                 r'(?:книга|том|часть|book|vol(?:ume)?|part)\s*[.:\-]?\s*'
-                r'(M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{1,3}))',
+                r'((?=[MDCLXVI])M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))',
                 title_text, re.IGNORECASE,
             )
             if roman_m and roman_m.group(1):
@@ -1488,6 +1502,22 @@ class FB2CompilerService:
             for i, (_, t, bx) in enumerate(detected)
         ]
 
+    def _extract_binaries(self, book: CompilationBook) -> List[str]:
+        """Извлечь все <binary>...</binary> блоки из файла.
+
+        Возвращает список XML-фрагментов, каждый — один <binary> блок.
+        """
+        if not book.abs_path.exists():
+            return []
+        try:
+            text = self._read_file_text(book.abs_path)
+        except Exception:
+            return []
+        return re.findall(
+            r'<binary\b[^>]*>.*?</binary>',
+            text, re.DOTALL | re.IGNORECASE,
+        )
+
     def _extract_metadata(self, book: CompilationBook) -> dict:
         """Извлечь жанр из записи."""
         return {
@@ -1501,6 +1531,7 @@ class FB2CompilerService:
         volume_range: str,
         genre: str,
         bodies: List[Tuple[str, str]],
+        binaries: Optional[List[str]] = None,
     ) -> str:
         """Собрать итоговый FB2 XML из компонентов."""
         # Разбиваем автора на фамилию и имя
@@ -1583,7 +1614,8 @@ class FB2CompilerService:
                 f'</body>'
             )
 
-        return description + '\n'.join(body_parts) + '\n</FictionBook>\n'
+        binary_section = ('\n' + '\n'.join(binaries)) if binaries else ''
+        return description + '\n'.join(body_parts) + binary_section + '\n</FictionBook>\n'
 
     # ------------------------------------------------------------------
     # Удаление исходников
