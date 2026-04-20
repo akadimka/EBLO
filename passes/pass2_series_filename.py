@@ -762,6 +762,9 @@ class Pass2SeriesFilename:
                             # Убрать аннотацию в скобках с конца перед матчингом диапазона:
                             # "Маршал 1-9 (без иллюстраций)" → "Маршал 1-9"
                             second_part_bare = re.sub(r'\s*\([^)]*\)\s*$', '', second_part).strip()
+                            # Убрать год-суффикс (1900–2099) — не должен трактоваться как номер тома:
+                            # "Том Ⅰ - 2022" → "Том Ⅰ"  /  "Серия 1 2023" → "Серия 1"
+                            second_part_bare = re.sub(r'(?:\s*[-–—])?\s*(?:19|20)\d{2}\s*$', '', second_part_bare).strip()
                             # Диапазон N-M: "Совок 1-5", "Попаданец в Дракона 1-8"
                             match = re.search(r'^(.+?)\s+\d+[-\u2013\u2014]\d+\s*$', second_part_bare)
                             is_range_match = bool(match)
@@ -1953,7 +1956,11 @@ class Pass2SeriesFilename:
         # Эти метатеги не должны влиять на извлечение series
         name_for_parsing = re.sub(r'\s*\([СЛ]И\)\s*$', '', name_without_ext).strip()
         name_for_parsing = re.sub(r'\s*\([^)]*(?:издание|изд\.)[^)]*\)\s*$', '', name_for_parsing, flags=re.IGNORECASE).strip()
-        
+        # Убрать год-суффикс (1900–2099) в конце — год не является номером тома.
+        # "Тысяча и одна ночь. Том Ⅰ - 2022" → "Тысяча и одна ночь. Том Ⅰ"
+        # "Серия. Название - 2019" → "Серия. Название"
+        name_for_parsing = re.sub(r'(?:\s*[-–—])?\s*(?:19|20)\d{2}\s*$', '', name_for_parsing).strip()
+
 
         
         # 🔑 Флаг: найден паттерн БЕЗ Series информации
