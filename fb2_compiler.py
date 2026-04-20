@@ -1234,12 +1234,6 @@ class FB2CompilerService:
             # --- Папка назначения: явная или рядом с исходниками ---
             dest_dir = output_dir if output_dir is not None else group.books[0].abs_path.parent
 
-            # --- Папка назначения: явная или рядом с исходниками ---
-            if output_dir is None:
-                dest_dir = group.books[0].abs_path.parent
-            else:
-                dest_dir = output_dir
-
             # --- Собираем итоговый XML ---
             volume_range = group.volume_range or self._compute_volume_range(group.books)
             output_xml = self._build_fb2(
@@ -1309,7 +1303,7 @@ class FB2CompilerService:
         return raw.decode('utf-8', errors='replace')
 
     def _extract_body(self, book: CompilationBook) -> Tuple[str, Optional[str]]:
-        """Извлечь заголовок книги и все <body>...</body> блоки."""
+        """Извлечь заголовок книги и главный <body> блок (без notes/footnotes)."""
         title = (book.record.file_title or '').strip() or book.abs_path.stem
 
         if not book.abs_path.exists():
@@ -1322,15 +1316,20 @@ class FB2CompilerService:
             self._log(f"  ⚠ Ошибка чтения {book.abs_path.name}: {e}")
             return title, None
 
-        # Находим все <body> блоки (может быть несколько — notes и т.д.)
-        bodies = re.findall(
+        all_bodies = re.findall(
             r'<(?:fb:)?body(?:\s[^>]*)?>.*?</(?:fb:)?body>',
             text, re.DOTALL | re.IGNORECASE
         )
-        if not bodies:
+        if not all_bodies:
             return title, None
 
-        # Объединяем в один блок, первый получает наш заголовок книги
+        # Берём только главные тела (без name="notes"/"footnotes").
+        # <body name="notes"> — сноски; их включение создаёт вложенные <body> в итоговом файле.
+        _NOTES_RE = re.compile(r'<(?:fb:)?body[^>]+\bname\s*=\s*["\'](?:notes|footnotes)["\']',
+                               re.IGNORECASE)
+        main_bodies = [b for b in all_bodies if not _NOTES_RE.match(b[:200])]
+        bodies = main_bodies if main_bodies else all_bodies[:1]
+
         combined = '\n'.join(bodies)
         return title, combined
 
@@ -1438,12 +1437,19 @@ class FB2CompilerService:
         except Exception:
             return []
 
-        raw_bodies = re.findall(
+        all_raw_bodies = re.findall(
             r'<(?:fb:)?body(?:\s[^>]*)?>.*?</(?:fb:)?body>',
             text, re.DOTALL | re.IGNORECASE,
         )
-        if not raw_bodies:
+        if not all_raw_bodies:
             return []
+
+        # Отфильтровываем сноски — берём только главные тела.
+        _NOTES_RE2 = re.compile(r'<(?:fb:)?body[^>]+\bname\s*=\s*["\'](?:notes|footnotes)["\']',
+                                re.IGNORECASE)
+        raw_bodies = [b for b in all_raw_bodies if not _NOTES_RE2.match(b[:200])]
+        if not raw_bodies:
+            raw_bodies = all_raw_bodies[:1]
 
         _title_re = re.compile(
             r'<(?:fb:)?title[^>]*>\s*<(?:fb:)?p[^>]*>(.*?)</(?:fb:)?p>',
@@ -1580,21 +1586,10 @@ class FB2CompilerService:
         body_parts = []
         for idx, (title, body_xml) in enumerate(bodies, 1):
             safe_title = _html.escape(title)
-            # Убираем любой существующий <title> из первого body
-            body_content = re.sub(
-                r'<(?:fb:)?body(?:\s[^>]*)?>',
-                '',
-                body_xml,
-                count=1,
-                flags=re.IGNORECASE
-            )
-            body_content = re.sub(
-                r'</(?:fb:)?body>',
-                '',
-                body_content,
-                count=1,
-                flags=re.IGNORECASE
-            )
+            # Снимаем ВСЕ <body>/<body name="..."> и </body> теги.
+            # count=1 создавал вложенные <body> если исходник содержал несколько тел.
+            body_content = re.sub(r'<(?:fb:)?body(?:\s[^>]*)?>',  '', body_xml, flags=re.IGNORECASE)
+            body_content = re.sub(r'</(?:fb:)?body>',              '', body_content, flags=re.IGNORECASE)
             # Убираем <title>...</title> в первой секции (заменим своим)
             body_content = re.sub(
                 r'^\s*<title>.*?</title>',
