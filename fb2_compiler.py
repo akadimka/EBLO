@@ -1057,7 +1057,7 @@ class FB2CompilerService:
 
         for book in books[1:]:
             lo = book.sort_key[1]
-            if lo <= prev_hi + 1:  # смежный или перекрывающийся диапазон
+            if lo <= prev_hi + 1:  # следующий или перекрывающийся диапазон
                 current_run.append(book)
                 prev_hi = get_hi(book)
             else:
@@ -1167,15 +1167,48 @@ class FB2CompilerService:
             )
 
         try:
-            # --- Читаем содержимое каждого файла ---
+            # --- Читаем содержимое каждого файла с учётом перекрытий диапазонов ---
+            # Если два файла — предкомпиляции с перекрывающимися диапазонами
+            # (например [1-42] и [31-45]), берём из второго только те секции,
+            # которые не покрыты первым (тома 43-45).
             bodies: List[Tuple[str, str]] = []  # (book_title, body_xml)
+            covered_hi = 0  # максимальный номер тома, уже добавленного в bodies
+
             for book in group.books:
-                title, body_xml = self._extract_body(book)
-                if body_xml is None:
-                    raise RuntimeError(
-                        f"Не удалось извлечь <body> из: {book.abs_path.name}"
-                    )
-                bodies.append((title, body_xml))
+                rng_m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', book.volume_label or '')
+                if rng_m:
+                    # Предкомпиляция с известным диапазоном — разбиваем на секции
+                    b_lo, b_hi = int(rng_m.group(1)), int(rng_m.group(2))
+                    sections = self._extract_body_sections(book)
+                    if not sections:
+                        raise RuntimeError(
+                            f"Не удалось извлечь секции из: {book.abs_path.name}"
+                        )
+                    # Сколько начальных секций уже покрыто предыдущим файлом?
+                    skip = max(0, covered_hi - b_lo + 1) if covered_hi >= b_lo else 0
+                    if skip >= len(sections):
+                        self._log(f"  ℹ Пропуск {book.abs_path.name} — полностью покрыт предыдущим файлом")
+                        continue
+                    if skip:
+                        self._log(
+                            f"  ✂ {book.abs_path.name}: пропускаем {skip} томов "
+                            f"(уже покрыты [{b_lo}–{b_lo+skip-1}]), "
+                            f"берём {len(sections)-skip} томов [{b_lo+skip}–{b_hi}]"
+                        )
+                    for sec_title, sec_body in sections[skip:]:
+                        bodies.append((sec_title, sec_body))
+                    covered_hi = max(covered_hi, b_hi)
+                else:
+                    # Обычная книга — берём целиком
+                    title, body_xml = self._extract_body(book)
+                    if body_xml is None:
+                        raise RuntimeError(
+                            f"Не удалось извлечь <body> из: {book.abs_path.name}"
+                        )
+                    bodies.append((title, body_xml))
+                    sn = book.sort_key[1] if book.sort_key[0] == 0 else 0
+                    if sn:
+                        covered_hi = max(covered_hi, sn)
 
             # --- Извлекаем метаданные из первой (или лучшей) книги ---
             meta = self._extract_metadata(group.books[0])
@@ -1286,6 +1319,45 @@ class FB2CompilerService:
         # Объединяем в один блок, первый получает наш заголовок книги
         combined = '\n'.join(bodies)
         return title, combined
+
+    def _extract_body_sections(self, book: CompilationBook) -> List[Tuple[str, str]]:
+        """Разбить предкомпиляцию на отдельные секции [(title, body_xml), ...].
+
+        Каждый <body> блок нашей компиляции соответствует одному тому.
+        Возвращает список секций в порядке их следования в файле.
+        Заголовок извлекается из <title><p>...</p></title> внутри <body>;
+        если не найден — используется стем файла с номером секции.
+        """
+        stem = book.abs_path.stem
+
+        if not book.abs_path.exists():
+            return []
+
+        try:
+            text = self._read_file_text(book.abs_path)
+        except Exception:
+            return []
+
+        raw_bodies = re.findall(
+            r'<(?:fb:)?body(?:\s[^>]*)?>.*?</(?:fb:)?body>',
+            text, re.DOTALL | re.IGNORECASE
+        )
+        if not raw_bodies:
+            return []
+
+        _title_re = re.compile(
+            r'<(?:fb:)?title[^>]*>\s*<(?:fb:)?p[^>]*>(.*?)</(?:fb:)?p>',
+            re.IGNORECASE | re.DOTALL,
+        )
+        result = []
+        for i, body_xml in enumerate(raw_bodies, 1):
+            m = _title_re.search(body_xml)
+            if m:
+                sec_title = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+            else:
+                sec_title = f'{stem} ({i})'
+            result.append((sec_title, body_xml))
+        return result
 
     def _extract_metadata(self, book: CompilationBook) -> dict:
         """Извлечь жанр из записи."""
