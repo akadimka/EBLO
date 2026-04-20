@@ -1179,23 +1179,25 @@ class FB2CompilerService:
                 if rng_m:
                     # Предкомпиляция с известным диапазоном — разбиваем на секции
                     b_lo, b_hi = int(rng_m.group(1)), int(rng_m.group(2))
-                    sections = self._extract_body_sections(book)
+                    sections = self._extract_body_sections(book, b_lo, b_hi)
                     if not sections:
                         raise RuntimeError(
                             f"Не удалось извлечь секции из: {book.abs_path.name}"
                         )
-                    # Сколько начальных секций уже покрыто предыдущим файлом?
-                    skip = max(0, covered_hi - b_lo + 1) if covered_hi >= b_lo else 0
-                    if skip >= len(sections):
+                    # Берём только секции, ещё не покрытые предыдущими файлами
+                    to_add = [(v, t, bx) for v, t, bx in sections if v > covered_hi]
+                    if not to_add:
                         self._log(f"  ℹ Пропуск {book.abs_path.name} — полностью покрыт предыдущим файлом")
                         continue
-                    if skip:
+                    skipped = len(sections) - len(to_add)
+                    if skipped:
+                        first_new = min(v for v, _, _ in to_add)
                         self._log(
-                            f"  ✂ {book.abs_path.name}: пропускаем {skip} томов "
-                            f"(уже покрыты [{b_lo}–{b_lo+skip-1}]), "
-                            f"берём {len(sections)-skip} томов [{b_lo+skip}–{b_hi}]"
+                            f"  ✂ {book.abs_path.name}: пропускаем {skipped} томов "
+                            f"(уже покрыты до тома {covered_hi}), "
+                            f"берём {len(to_add)} томов начиная с {first_new}"
                         )
-                    for sec_title, sec_body in sections[skip:]:
+                    for _vol, sec_title, sec_body in to_add:
                         bodies.append((sec_title, sec_body))
                     covered_hi = max(covered_hi, b_hi)
                 else:
@@ -1320,19 +1322,103 @@ class FB2CompilerService:
         combined = '\n'.join(bodies)
         return title, combined
 
-    def _extract_body_sections(self, book: CompilationBook) -> List[Tuple[str, str]]:
-        """Разбить предкомпиляцию на отдельные секции [(title, body_xml), ...].
+    # ---- вспомогательные методы для разбора секций предкомпиляций ----
 
-        Каждый <body> блок нашей компиляции соответствует одному тому.
-        Возвращает список секций в порядке их следования в файле.
-        Заголовок извлекается из <title><p>...</p></title> внутри <body>;
-        если не найден — используется стем файла с номером секции.
+    @staticmethod
+    def _split_top_level_sections(body_xml: str) -> List[str]:
+        """Извлечь секции первого уровня из тела FB2.
+
+        Использует счётчик глубины вложенности, чтобы корректно обрабатывать
+        вложенные <section>.  Возвращает список XML-фрагментов каждой секции.
+        """
+        sections: List[str] = []
+        depth = 0
+        start = 0
+        tag_re = re.compile(
+            r'<(/?)(?:fb:)?section(?:\s[^>]*)?>',
+            re.IGNORECASE,
+        )
+        for m in tag_re.finditer(body_xml):
+            is_close = bool(m.group(1))
+            if not is_close:
+                if depth == 0:
+                    start = m.start()
+                depth += 1
+            else:
+                if depth > 0:
+                    depth -= 1
+                if depth == 0 and start is not None:
+                    sections.append(body_xml[start:m.end()])
+                    start = None
+        return sections
+
+    @staticmethod
+    def _detect_section_volume(section_xml: str) -> Optional[int]:
+        """Попытаться определить номер тома внутри секции.
+
+        Порядок проверки:
+        1. <sequence number="N"> — прописывается нашим компилятором.
+        2. Заголовок <title> содержит «Книга N» / «Том N» / «Часть N» /
+           «Book N» / «Vol N» / «Part N» / «Tom N» (1–2 варианта).
+        3. Римские цифры в заголовке: «Книга II» → 2.
+        Возвращает int или None.
+        """
+        # Способ 1: <sequence number="N">
+        m = re.search(
+            r'<(?:fb:)?sequence[^>]+number=["\'](\d+)["\']',
+            section_xml, re.IGNORECASE,
+        )
+        if m:
+            return int(m.group(1))
+
+        # Способ 2: заголовок секции
+        title_m = re.search(
+            r'<(?:fb:)?title[^>]*>(.*?)</(?:fb:)?title>',
+            section_xml, re.IGNORECASE | re.DOTALL,
+        )
+        if title_m:
+            title_text = re.sub(r'<[^>]+>', '', title_m.group(1))
+            # Арабские цифры после ключевых слов
+            kw_m = re.search(
+                r'(?:книга|том|часть|book|vol(?:ume)?|part|том)\s*[.:\-]?\s*(\d+)',
+                title_text, re.IGNORECASE,
+            )
+            if kw_m:
+                return int(kw_m.group(1))
+            # Римские цифры после ключевых слов
+            roman_m = re.search(
+                r'(?:книга|том|часть|book|vol(?:ume)?|part)\s*[.:\-]?\s*'
+                r'(M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{1,3}))',
+                title_text, re.IGNORECASE,
+            )
+            if roman_m and roman_m.group(1):
+                n = FB2CompilerService._roman_to_int(roman_m.group(1))
+                if n:
+                    return n
+        return None
+
+    def _extract_body_sections(
+        self,
+        book: CompilationBook,
+        b_lo: int = 1,
+        b_hi: int = 0,
+    ) -> List[Tuple[int, str, str]]:
+        """Разбить предкомпиляцию на секции: [(vol_num, title, body_xml), ...].
+
+        vol_num — реальный номер тома в серии (b_lo … b_hi).
+
+        Алгоритм:
+        1. Если <body> блоков столько же, сколько томов (наш формат) —
+           каждый <body> = один том, нумеруем с b_lo.
+        2. Если один <body> (внешний формат) — пробуем разбить на top-level
+           <section> и определить номер тома по <sequence> или заголовку.
+           Если номера найдены и покрывают ≥70% секций — используем их.
+           Иначе нумеруем секции последовательно с b_lo.
+        3. Если секций нет — возвращаем один элемент (весь body).
         """
         stem = book.abs_path.stem
-
         if not book.abs_path.exists():
             return []
-
         try:
             text = self._read_file_text(book.abs_path)
         except Exception:
@@ -1340,7 +1426,7 @@ class FB2CompilerService:
 
         raw_bodies = re.findall(
             r'<(?:fb:)?body(?:\s[^>]*)?>.*?</(?:fb:)?body>',
-            text, re.DOTALL | re.IGNORECASE
+            text, re.DOTALL | re.IGNORECASE,
         )
         if not raw_bodies:
             return []
@@ -1349,15 +1435,58 @@ class FB2CompilerService:
             r'<(?:fb:)?title[^>]*>\s*<(?:fb:)?p[^>]*>(.*?)</(?:fb:)?p>',
             re.IGNORECASE | re.DOTALL,
         )
-        result = []
-        for i, body_xml in enumerate(raw_bodies, 1):
-            m = _title_re.search(body_xml)
-            if m:
-                sec_title = re.sub(r'<[^>]+>', '', m.group(1)).strip()
-            else:
-                sec_title = f'{stem} ({i})'
-            result.append((sec_title, body_xml))
-        return result
+
+        def _body_title(xml: str, idx: int) -> str:
+            m = _title_re.search(xml)
+            return re.sub(r'<[^>]+>', '', m.group(1)).strip() if m else f'{stem} ({idx})'
+
+        expected = b_hi - b_lo + 1 if b_hi >= b_lo else 0
+
+        # --- Случай 1: наш формат (один <body> на том) ---
+        if expected > 0 and len(raw_bodies) == expected:
+            return [
+                (b_lo + i, _body_title(bx, i + 1), bx)
+                for i, bx in enumerate(raw_bodies)
+            ]
+
+        # --- Случай 2: один (или нестандартное количество) <body> ---
+        # Объединяем все body, ищем top-level <section>
+        all_content = '\n'.join(raw_bodies)
+        top_sections = self._split_top_level_sections(all_content)
+
+        if not top_sections:
+            # Нет секций — возвращаем весь контент как один том
+            title = (book.record.file_title or '').strip() or stem
+            return [(b_lo, title, all_content)]
+
+        # Пробуем определить номера томов из содержимого секций
+        detected: List[Tuple[Optional[int], str, str]] = []
+        for i, sec_xml in enumerate(top_sections, 1):
+            vol = self._detect_section_volume(sec_xml)
+            title = _body_title(sec_xml, i)
+            detected.append((vol, title, f'<body>\n{sec_xml}\n</body>'))
+
+        found_vols = [v for v, _, _ in detected if v is not None]
+        use_detected = False
+        if found_vols and expected > 0:
+            in_range = sum(1 for v in found_vols if b_lo <= v <= b_hi)
+            use_detected = in_range >= len(found_vols) * 0.7
+
+        if use_detected:
+            # Используем найденные номера; секции без номера пропускаем
+            result = [
+                (v, t, bx)
+                for v, t, bx in detected
+                if v is not None
+            ]
+            result.sort(key=lambda x: x[0])
+            return result
+
+        # Fallback: нумеруем секции последовательно с b_lo
+        return [
+            (b_lo + i, t, bx)
+            for i, (_, t, bx) in enumerate(detected)
+        ]
 
     def _extract_metadata(self, book: CompilationBook) -> dict:
         """Извлечь жанр из записи."""
