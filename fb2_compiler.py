@@ -627,10 +627,12 @@ class FB2CompilerService:
         for text in (title, stem):
             if not text:
                 continue
-            m = cls._VOLUME_KEYWORDS_RE.search(text)
+            # Нормализовать Unicode-символы римских цифр в ASCII: Ⅻ → XII, Ⅰ → I и т.п.
+            text_norm = unicodedata.normalize('NFKC', text)
+            m = cls._VOLUME_KEYWORDS_RE.search(text_norm)
             if m:
                 return int(m.group(1))
-            m = cls._VOLUME_ROMAN_RE.search(text)
+            m = cls._VOLUME_ROMAN_RE.search(text_norm)
             if m:
                 n = cls._roman_to_int(m.group(1))
                 if n:
@@ -1402,6 +1404,8 @@ class FB2CompilerService:
         )
         if title_m:
             title_text = re.sub(r'<[^>]+>', '', title_m.group(1))
+            # Нормализовать Unicode-символы римских цифр в ASCII: Ⅻ → XII, Ⅰ → I и т.п.
+            title_text = unicodedata.normalize('NFKC', title_text)
             # Арабские цифры после ключевых слов
             kw_m = re.search(
                 r'(?:книга|том|часть|book|vol(?:ume)?|part|том)\s*[.:\-]?\s*(\d+)',
