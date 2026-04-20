@@ -922,6 +922,12 @@ class FB2CompilerService:
                         if fn_num != meta_num:
                             # Расхождение: имя файла важнее ошибочных метаданных
                             return (0, fn_num, 0), 'filename', False, str(fn_num)
+                    # Дополнительная проверка: Roman numeral inline («Том Ⅱ», «Том III» …).
+                    # FB2-метаданные нередко хранят series_number="1" для всех томов серии,
+                    # тогда как имя файла содержит точный номер в виде римской цифры.
+                    roman_inline = self._extract_inline_volume_number(rec.file_title or stem, stem)
+                    if roman_inline is not None and roman_inline != meta_num:
+                        return (0, roman_inline, 0), 'inline_title', False, str(roman_inline)
                     return (0, meta_num, 0), 'series_number', False, sn
 
         # Для подсерий: «Том N» в названии файла/title важнее общего числа в stem.
