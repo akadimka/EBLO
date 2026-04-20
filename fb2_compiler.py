@@ -1479,12 +1479,26 @@ class FB2CompilerService:
             title = (book.record.file_title or '').strip() or stem
             return [(b_lo, title, all_content)]
 
+        # Regex для вырезания <title> из первой позиции внутри <section>.
+        # Пример: <section>\n  <title><p>1. Книга I</p></title>\n  <p>текст...
+        # После удаления: <section>\n  <p>текст...
+        # Это предотвращает дублирование заголовка: наш <body><title> + оригинальный <section><title>.
+        _SEC_TITLE_RE = re.compile(
+            r'(<(?:fb:)?section(?:\s[^>]*)?>\s*)<(?:fb:)?title[^>]*>.*?</(?:fb:)?title>',
+            re.IGNORECASE | re.DOTALL,
+        )
+
         # Пробуем определить номера томов из содержимого секций
         detected: List[Tuple[Optional[int], str, str]] = []
         for i, sec_xml in enumerate(top_sections, 1):
             vol = self._detect_section_volume(sec_xml)
-            title = _body_title(sec_xml, i)
-            detected.append((vol, title, f'<body>\n{sec_xml}\n</body>'))
+            raw_title = _body_title(sec_xml, i)
+            # Убираем ведущий «N. » из заголовка секции — в _build_fb2 добавим свой индекс.
+            # Без этого: "1. 1. Неудержимый. Книга I" вместо "1. Неудержимый. Книга I".
+            title = re.sub(r'^\d+\.\s*', '', raw_title).strip() or raw_title
+            # Вырезаем <title> из секции — он дублируется как <body><title> в итоговом файле.
+            sec_clean = _SEC_TITLE_RE.sub(r'\1', sec_xml, count=1)
+            detected.append((vol, title, f'<body>\n{sec_clean}\n</body>'))
 
         found_vols = [v for v, _, _ in detected if v is not None]
         use_detected = False
