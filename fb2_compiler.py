@@ -192,7 +192,11 @@ class FB2CompilerService:
             if book_count != n:
                 return f'{word} в {book_count} книгах'
             return word
-        return f'т. {volume_range}'
+        # Для диапазона томов: добавляем «в N книгах» если файлов больше чем томов
+        suffix = f'т. {volume_range}'
+        if n > 0 and book_count > n:
+            suffix += f' в {book_count} книгах'
+        return suffix
 
     def __init__(self, logger=None):
         self.logger = logger
@@ -315,7 +319,7 @@ class FB2CompilerService:
                     # Без этого "1-2. Название.fb2" получает sk=(0,2,0) vl='2' вместо
                     # sk=(0,1,0) vl='1-2', и _split_into_consecutive_runs считает
                     # что "1-2" и "3-4" не идут подряд (lo=4 ≠ hi=2+1).
-                    book.sort_key = (0, lo, 0)
+                    book.sort_key = (0, lo, 0, 0)
                     book.volume_label = f'{lo}-{hi}'
                     book.sort_source = 'filename_range'
                     book.order_ambiguous = False
@@ -470,9 +474,15 @@ class FB2CompilerService:
                 books = regular_books
 
             # --- Фильтр 2: дедупликация по title (нормализованному) ----------
-            # Из дублей оставляем первый по алфавиту путь (детерминированный выбор)
+            # Из дублей оставляем более позднюю редакцию (по году в имени файла),
+            # при равенстве — первый по алфавиту путь (детерминированный выбор).
+            def _title_dedup_order(b: CompilationBook):
+                year_m = re.search(r'[-–\s](\d{4})\b', b.abs_path.stem)
+                year = int(year_m.group(1)) if year_m else 0
+                return (-year, str(b.abs_path))
+
             seen_titles: Dict[str, CompilationBook] = {}
-            for book in sorted(books, key=lambda b: str(b.abs_path)):
+            for book in sorted(books, key=_title_dedup_order):
                 # Если file_title совпадает с именем серии — он не несёт информации
                 # о конкретном томе, используем stem файла как более информативный.
                 raw_title = book.record.file_title or book.abs_path.stem
@@ -554,7 +564,7 @@ class FB2CompilerService:
                         and numeric
                         and min(b.sort_key[1] for b in numeric if b.sort_key[0] == 0) >= 2):
                     lone = others[0]
-                    lone.sort_key = (0, 1, 0)
+                    lone.sort_key = (0, 1, 0, 0)
                     lone.sort_source = 'assumed_first'
                     lone.order_ambiguous = False
                     lone.volume_label = '1'
@@ -1003,7 +1013,11 @@ class FB2CompilerService:
             text = f"{book.abs_path.stem} {book.record.file_title or ''}"
             kw_key = 0 if _FRESH_KEYWORDS.search(text) else 1
 
-            return (date_key, kw_key, str(book.abs_path))
+            # 3. Год из имени файла (например "- 2022" → свежее 2018)
+            year_m = re.search(r'[-–\s](\d{4})\b', book.abs_path.stem)
+            year_key = -int(year_m.group(1)) if year_m else 0
+
+            return (date_key, kw_key, year_key, str(book.abs_path))
 
         sorted_books = sorted(books, key=_book_freshness)
         seen_positions: Dict[Tuple, CompilationBook] = {}
@@ -1071,13 +1085,13 @@ class FB2CompilerService:
 
                 if meta_num is not None:
                     # Паттерн N.M (dot_part) имеет приоритет над series_number:
-                    # файлы вида «Расходники 2.3» должны получить sort_key (0,2,3)
-                    # а не (0,5,0) из метаданных, иначе они не попадут в один run
+                    # файлы вида «Расходники 2.3» должны получить sort_key (0,2,3,0)
+                    # а не (0,5,0,0) из метаданных, иначе они не попадут в один run
                     # с файлами 1.1, 1.2, 2.1, у которых sn отсутствует.
                     _dp = self._extract_dot_part(stem, rec.file_title or '')
                     if _dp is not None:
                         _dv, _dpt = _dp
-                        return (0, _dv, _dpt), 'dot_part', False, f'{_dv}.{_dpt}'
+                        return (0, _dv, _dpt, 0), 'dot_part', False, f'{_dv}.{_dpt}'
 
                     # Перекрёстная проверка с именем файла.
                     # Если в stem явно написан другой номер — доверяем файлу,
@@ -1089,7 +1103,7 @@ class FB2CompilerService:
                         # Числа >= 1900 — год в имени файла, не номер тома; игнорируем
                         if fn_num < 1900 and fn_num != meta_num:
                             # Расхождение: имя файла важнее ошибочных метаданных
-                            return (0, fn_num, 0), 'filename', False, str(fn_num)
+                            return (0, fn_num, 0, 0), 'filename', False, str(fn_num)
                     # Дополнительная проверка: Roman numeral inline («Том Ⅱ», «Том III» …).
                     # FB2-метаданные нередко хранят series_number="1" для всех томов серии,
                     # тогда как имя файла содержит точный номер в виде римской цифры.
@@ -1097,46 +1111,37 @@ class FB2CompilerService:
                     _ft2_is_series = bool(_ft2) and _norm_key(_ft2) == _norm_key(rec.proposed_series or '')
                     # Проверяем паттерн «Том N. Часть M» ДО roman_inline —
                     # иначе «Том XII. Часть вторая» даёт roman_inline=12 != meta_num=13
-                    # и возвращает (0, 12, 0) без учёта части.
+                    # и возвращает (0, 12, 0, 0) без учёта части.
                     _ft_for_part = rec.file_title or ''
                     vp = self._extract_volume_part(_ft_for_part, stem)
                     if vp is not None:
                         vol, part = vp
-                        return (0, vol, part), 'volume_part', False, str(vol)
+                        return (0, vol, part, 0), 'volume_part', False, str(vol)
                     roman_inline = self._extract_inline_volume_number(
                         stem if _ft2_is_series else (_ft2 or stem), stem
                     )
                     if roman_inline is not None and roman_inline != meta_num:
-                        return (0, roman_inline, 0), 'inline_title', False, str(roman_inline)
-                    return (0, meta_num, 0), 'series_number', False, sn
+                        return (0, roman_inline, 0, 0), 'inline_title', False, str(roman_inline)
+                    return (0, meta_num, 0, 0), 'series_number', False, sn
 
-        # Для подсерий: «Том N» в названии файла/title важнее общего числа в stem.
-        # Пример: "Хроника 2. День второй. Том 1" — «2» это арк родительской серии,
-        # «Том 1» — реальный номер тома внутри подсерии.
+        # Для подсерий: позиция (primary=родитель, secondary=подсерия, tertiary=том).
+        # Порядок: сначала sub_ordinal (номер подсерии в группе родителя), потом том.
+        # Пример: "Остен Ард 3. Последний 1. Корона. Том 1" → (0, 3, 1, 1).
         if is_subseries:
-            # Порядковый номер родительской серии.
-            # Сначала — из proposed_series: "Азиатская сага 04\Роман" → parent_num=4.
-            # Если там нет числа — ищем в стеме файла: "Хроника Убийцы Короля 2. День второй" → 2.
+            # primary: номер родительской серии из proposed_series или из стема
             _root_part = (rec.proposed_series or '').split('\\')[0].strip()
             _parent_num_m = re.search(r'\s(\d{1,4})\s*$', _root_part)
             if _parent_num_m:
                 parent_num = int(_parent_num_m.group(1))
             else:
-                # Ищем корневое название серии + число в стеме
                 _root_re = re.compile(re.escape(_root_part) + r'\s+(\d{1,4})', re.IGNORECASE | re.UNICODE)
                 _root_m = _root_re.search(stem)
-                _candidate = int(_root_m.group(1)) if _root_m else 0
-                parent_num = _candidate if _candidate and _candidate < 1900 else 0
+                _c = int(_root_m.group(1)) if _root_m else 0
+                parent_num = _c if _c and _c < 1900 else 0
 
-            inline = self._extract_inline_volume_number(rec.file_title or stem, stem)
-            if inline is not None:
-                if parent_num:
-                    return (0, parent_num, inline), 'inline_title', False, f'{parent_num}.{inline}'
-                return (0, inline, 0), 'inline_title', False, str(inline)
-
-            # Извлечь номер подсерии по её имени в stem.
-            # Пример: proposed_series="Земной круг 1\Первый закон", stem содержит
-            # "Первый закон 2. Прежде чем их повесят" → номер подсерии = 2.
+            # secondary: номер подсерии внутри позиции родителя
+            # Пример: "Последний король Светлого Арда **1**. Корона" → sub_ordinal=1
+            sub_ordinal = 0
             subseries_name = (rec.proposed_series or '').split('\\')[-1].strip()
             if subseries_name:
                 _sub_re = re.compile(
@@ -1145,43 +1150,57 @@ class FB2CompilerService:
                 )
                 _sm = _sub_re.search(stem) or _sub_re.search(rec.file_title or '')
                 if _sm:
-                    sub_num = int(_sm.group(1))
-                    if sub_num < 1900:
-                        if parent_num:
-                            return (0, parent_num, sub_num), 'subseries_number', False, f'{parent_num}.{sub_num}'
-                        return (0, sub_num, 0), 'subseries_number', False, str(sub_num)
+                    _sc = int(_sm.group(1))
+                    if _sc < 1900:
+                        sub_ordinal = _sc
 
-            # Если series_number из метаданных относится к подсерии (metadata_series
-            # совпадает с именем подсерии) — использовать его.
-            if sn:
-                sub_name = (rec.proposed_series or '').split('\\')[-1].strip()
+            # tertiary: номер тома внутри подсерии («Том N», «Книга N»)
+            inline = self._extract_inline_volume_number(rec.file_title or stem, stem) or 0
+
+            # Метаданные как fallback для sub_ordinal
+            if not sub_ordinal and not inline and sn:
                 meta_s_low = (rec.metadata_series or '').strip().lower().replace('ё', 'е')
-                sub_name_low = sub_name.lower().replace('ё', 'е')
+                sub_name_low = subseries_name.lower().replace('ё', 'е')
                 if meta_s_low and sub_name_low and (
                     meta_s_low == sub_name_low
                     or meta_s_low in sub_name_low
                     or sub_name_low in meta_s_low
                 ):
                     if re.match(r'^\d+$', sn):
-                        sn_int = int(sn)
-                        if parent_num:
-                            return (0, parent_num, sn_int), 'series_number', False, f'{parent_num}.{sn}'
-                        return (0, sn_int, 0), 'series_number', False, sn
+                        sub_ordinal = int(sn)
 
-            # parent_num найден, но внутренний номер не определён
-            if parent_num:
-                return (0, parent_num, 0), 'parent_num', False, str(parent_num)
+            if parent_num or sub_ordinal or inline:
+                _lbl = str(parent_num)
+                if sub_ordinal:
+                    _lbl += f'.{sub_ordinal}'
+                if inline:
+                    _lbl += f'.{inline}'
+                _src = 'subseries_number' if sub_ordinal else ('inline_title' if inline else 'parent_num')
+                return (0, parent_num, sub_ordinal, inline), _src, False, _lbl
 
-        # Источник Б: число в начале/конце имени файла
+        # Источник Б: число в начале/конце имени файла.
+        # При многоуровневой нумерации ("Серия N. Подсерия M. ... Том K") извлекаем
+        # secondary и tertiary, чтобы избежать коллизий sort_key между подсериями.
         num_m = self._STEM_NUM_RE.match(stem) or self._STEM_NUM_RE.search(stem) or re.search(
             r'(?:^|[-–\s])(\d{1,4})\.\s+[А-ЯЁA-Z]', stem
         )
         if num_m:
             num = int(next(g for g in num_m.groups() if g is not None))
             # Числа >= 1900 — скорее всего год в имени файла, не номер тома.
-            # Пример: «Тысяча и одна ночь. Том Ⅰ - 2022» → 2022 не номер тома.
             if num < 1900:
-                return (0, num, 0), 'filename', False, str(num)
+                # Пробуем извлечь secondary (следующий N.) и tertiary (Том N) из остатка stem
+                _rest = stem[num_m.end():]
+                _sec_m = re.search(r'(?<!\d)(\d{1,4})\s*\.', _rest)
+                secondary = 0
+                if _sec_m:
+                    _sc2 = int(_sec_m.group(1))
+                    if _sc2 < 1900:
+                        secondary = _sc2
+                        _rest = _rest[_sec_m.end():]
+                tertiary = self._extract_inline_volume_number(_rest, stem) or 0
+                if secondary or tertiary:
+                    return (0, num, secondary, tertiary), 'filename', False, str(num)
+                return (0, num, 0, 0), 'filename', False, str(num)
 
         # Источник В: диапазон томов в скобках внутри stem — «(Серия 1-3)», «(4-6)»
         # Используем MIN как позицию сортировки: файл (1-3) → 1, файл (4-6) → 4
@@ -1190,7 +1209,7 @@ class FB2CompilerService:
         )
         if range_m:
             lo, hi = range_m.group(1), range_m.group(2)
-            return (0, int(lo), 0), 'filename_range', False, f'{lo}-{hi}'
+            return (0, int(lo), 0, 0), 'filename_range', False, f'{lo}-{hi}'
 
         # Источник Г: ключевое слово внутри title/stem («Свиток 1», «Том 3» …)
         # Если file_title совпадает с именем серии — он не несёт информации о конкретном
@@ -1205,33 +1224,33 @@ class FB2CompilerService:
         dp = self._extract_dot_part(stem, _ft or '')
         if dp is not None:
             vol, part = dp
-            return (0, vol, part), 'dot_part', False, f'{vol}.{part}'
+            return (0, vol, part, 0), 'dot_part', False, f'{vol}.{part}'
 
         # Проверяем паттерн «Том N. Часть M» до общего inline-поиска,
         # чтобы «Часть» не интерпретировалась как ключевое слово тома.
         vp = self._extract_volume_part(_ft or stem, stem)
         if vp is not None:
             vol, part = vp
-            return (0, vol, part), 'volume_part', False, str(vol)
+            return (0, vol, part, 0), 'volume_part', False, str(vol)
 
         inline = self._extract_inline_volume_number(
             stem if _ft_is_series else (_ft or stem), stem
         )
         if inline is not None:
-            return (0, inline, 0), 'inline_title', False, str(inline)
+            return (0, inline, 0, 0), 'inline_title', False, str(inline)
 
         # Уровень 3: дата из FB2 title-info
         year = self._extract_year_from_fb2(abs_path, section='title-info')
         if year:
-            return (2, year, 0), 'title_date', False, str(year)
+            return (2, year, 0, 0), 'title_date', False, str(year)
 
         # Уровень 4: дата из publish-info
         year = self._extract_year_from_fb2(abs_path, section='publish-info')
         if year:
-            return (3, year, 0), 'publish_date', False, str(year)
+            return (3, year, 0, 0), 'publish_date', False, str(year)
 
         # Порядок не определён
-        return (9, 0, 0), 'unknown', True, ''
+        return (9, 0, 0, 0), 'unknown', True, ''
 
     def _extract_date_from_fb2(self, path: Path, section: str = 'title-info') -> Optional[str]:
         """Извлечь дату из <date> внутри указанной секции FB2.
