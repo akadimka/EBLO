@@ -1001,19 +1001,19 @@ class FB2CompilerService:
                     # тогда как имя файла содержит точный номер в виде римской цифры.
                     _ft2 = rec.file_title or ''
                     _ft2_is_series = bool(_ft2) and _norm_key(_ft2) == _norm_key(rec.proposed_series or '')
-                    roman_inline = self._extract_inline_volume_number(
-                        stem if _ft2_is_series else (_ft2 or stem), stem
-                    )
-                    if roman_inline is not None and roman_inline != meta_num:
-                        return (0, roman_inline, 0), 'inline_title', False, str(roman_inline)
-                    # Проверяем паттерн «Том N. Часть M» — два файла одного тома.
-                    # Если найден, используем sort_key=(0, vol, part) чтобы оба файла
-                    # части попали в один run и не конфликтовали при дедупликации.
+                    # Проверяем паттерн «Том N. Часть M» ДО roman_inline —
+                    # иначе «Том XII. Часть вторая» даёт roman_inline=12 != meta_num=13
+                    # и возвращает (0, 12, 0) без учёта части.
                     _ft_for_part = rec.file_title or ''
                     vp = self._extract_volume_part(_ft_for_part, stem)
                     if vp is not None:
                         vol, part = vp
                         return (0, vol, part), 'volume_part', False, str(vol)
+                    roman_inline = self._extract_inline_volume_number(
+                        stem if _ft2_is_series else (_ft2 or stem), stem
+                    )
+                    if roman_inline is not None and roman_inline != meta_num:
+                        return (0, roman_inline, 0), 'inline_title', False, str(roman_inline)
                     return (0, meta_num, 0), 'series_number', False, sn
 
         # Для подсерий: «Том N» в названии файла/title важнее общего числа в stem.
