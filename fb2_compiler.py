@@ -233,22 +233,40 @@ class FB2CompilerService:
 
         # Группировка по (author_lower, series_lower)
         # Нормализуем ё→е в ключах, чтобы "Тёмные звёзды" и "Темные звезды" попали в одну группу.
+        # Для подсерий ("Серия N\Подсерия") ключ группировки — корневое название без номера,
+        # чтобы файлы "Серия 04\Роман" и "Серия" попали в одну компиляцию.
+        def _series_group_key(series: str) -> str:
+            if '\\' not in series:
+                return _norm_key(series)
+            root = series.split('\\')[0].strip()
+            root_no_num = re.sub(r'\s+\d{1,4}\s*$', '', root).strip()
+            return _norm_key(root_no_num) if root_no_num else _norm_key(series)
+
         buckets: Dict[Tuple[str, str], List] = {}
         for rec in records:
             author = (rec.proposed_author or '').strip()
             series = (rec.proposed_series or '').strip()
             if not author or not series:
                 continue
-            key = (_norm_key(author), _norm_key(series))
+            key = (_norm_key(author), _series_group_key(series))
             buckets.setdefault(key, []).append(rec)
 
         groups: List[CompilationGroup] = []
         for (_, _), recs in buckets.items():
             if len(recs) < 2:
                 continue
-            # Используем реальное написание из первой записи
+            # Используем реальное написание из первой записи без подсерии и номера
             author = recs[0].proposed_author.strip()
-            series = recs[0].proposed_series.strip()
+            _s0 = recs[0].proposed_series.strip()
+            if '\\' in _s0:
+                _root = _s0.split('\\')[0].strip()
+                series = re.sub(r'\s+\d{1,4}\s*$', '', _root).strip() or _root
+            else:
+                series = _s0
+            # Если в группе есть файлы без подсерии — их название точнее
+            _plain = next((r.proposed_series.strip() for r in recs if '\\' not in r.proposed_series), None)
+            if _plain:
+                series = _plain
 
             books = [self._make_book(rec, work_dir) for rec in recs]
 
@@ -1093,8 +1111,15 @@ class FB2CompilerService:
         # Пример: "Хроника 2. День второй. Том 1" — «2» это арк родительской серии,
         # «Том 1» — реальный номер тома внутри подсерии.
         if is_subseries:
+            # Порядковый номер родительской серии: "Азиатская сага 04\Роман" → parent_num=4
+            _root_part = (rec.proposed_series or '').split('\\')[0].strip()
+            _parent_num_m = re.search(r'\s(\d{1,4})\s*$', _root_part)
+            parent_num = int(_parent_num_m.group(1)) if _parent_num_m else 0
+
             inline = self._extract_inline_volume_number(rec.file_title or stem, stem)
             if inline is not None:
+                if parent_num:
+                    return (0, parent_num, inline), 'inline_title', False, f'{parent_num}.{inline}'
                 return (0, inline, 0), 'inline_title', False, str(inline)
 
             # Извлечь номер подсерии по её имени в stem.
@@ -1110,6 +1135,8 @@ class FB2CompilerService:
                 if _sm:
                     sub_num = int(_sm.group(1))
                     if sub_num < 1900:
+                        if parent_num:
+                            return (0, parent_num, sub_num), 'subseries_number', False, f'{parent_num}.{sub_num}'
                         return (0, sub_num, 0), 'subseries_number', False, str(sub_num)
 
             # Если series_number из метаданных относится к подсерии (metadata_series
@@ -1124,7 +1151,14 @@ class FB2CompilerService:
                     or sub_name_low in meta_s_low
                 ):
                     if re.match(r'^\d+$', sn):
-                        return (0, int(sn), 0), 'series_number', False, sn
+                        sn_int = int(sn)
+                        if parent_num:
+                            return (0, parent_num, sn_int), 'series_number', False, f'{parent_num}.{sn}'
+                        return (0, sn_int, 0), 'series_number', False, sn
+
+            # parent_num найден, но внутренний номер не определён
+            if parent_num:
+                return (0, parent_num, 0), 'parent_num', False, str(parent_num)
 
         # Источник Б: число в начале/конце имени файла
         num_m = self._STEM_NUM_RE.match(stem) or self._STEM_NUM_RE.search(stem) or re.search(
