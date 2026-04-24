@@ -155,48 +155,71 @@ class FB2CompilerService:
         return cleaned or series
 
     @classmethod
-    def _series_suffix(cls, book_count: int, volume_range: str, part_count: int = 0) -> str:
+    def _run_stats(cls, books: list) -> tuple:
+        """Вычислить статистику run'а для именования компиляции.
+
+        Returns (top_lo, top_hi, n_volumes, has_subseries):
+            top_lo      — минимальная верхнеуровневая позиция (sort_key[1])
+            top_hi      — максимальная эффективная верхнеуровневая позиция
+                          (раскрывает volume_label "N-M" для level-0 книг без secondary)
+            n_volumes   — суммарное число логических томов
+                          (раскрывает ВСЕ volume_label, включая sub-level)
+            has_subseries — есть ли книги с sort_key[2] != 0
+        """
+        level0 = [b for b in books if b.sort_key[0] == 0]
+        if not level0:
+            return 1, 1, len(books), False
+
+        _RNG = re.compile(r'^(\d+)\s*[-–—]\s*(\d+)$')
+
+        top_lo = min(b.sort_key[1] for b in level0)
+
+        top_hi_vals = []
+        for b in level0:
+            vl = (b.volume_label or '').strip()
+            if b.sort_key[2] != 0:
+                # sub-level: верхнеуровневая позиция = sort_key[1]
+                top_hi_vals.append(b.sort_key[1])
+            else:
+                m = _RNG.match(vl)
+                top_hi_vals.append(int(m.group(2)) if m else b.sort_key[1])
+        top_hi = max(top_hi_vals)
+
+        has_subseries = any(b.sort_key[2] != 0 for b in level0)
+
+        # dot_part: «Том N Книга M» — secondary = номер книги внутри тома.
+        # n_volumes = число различных томов (sort_key[1]), не число файлов.
+        all_dot_part = all(getattr(b, 'sort_source', '') == 'dot_part' for b in level0)
+        if all_dot_part:
+            n_volumes = len({b.sort_key[1] for b in level0})
+        else:
+            n_volumes = 0
+            for b in level0:
+                vl = (b.volume_label or '').strip()
+                m = _RNG.match(vl)
+                n_volumes += int(m.group(2)) - int(m.group(1)) + 1 if m else 1
+
+        return top_lo, top_hi, n_volumes, has_subseries
+
+    @classmethod
+    def _series_suffix(cls, n_volumes: int, lo: int, part_count: int = 0) -> str:
         """Вернуть суффикс для имени файла компиляции.
 
-        Служебное слово (Дилогия, Трилогия…) присваивается ТОЛЬКО если:
-          1. Диапазон начинается с тома 1 (нумерация с начала серии).
-          2. Количество томов ≤ 10 (есть подходящее слово).
-        Во всех остальных случаях: «т. X-Y».
-        Пустой volume_range → «компиляция романов».
+        n_volumes   — число логических томов в run'е
+        lo          — первая верхнеуровневая позиция (1 = с начала серии)
+        part_count  — для dot_part: число физических частей (книг); если > n_volumes,
+                      добавляем «в N книгах» к служебному слову
 
-        part_count > 0 → добавляем «из N частей» к служебному слову.
-        Пример: Дилогия из 6 частей.
-
-        n вычисляется из диапазона (volume_range), а не из числа файлов, чтобы
-        предкомпиляция-диапазон (файл «1-4» + том 5 = 5 томов) считалась верно.
+        Служебное слово (Дилогия…) — только если lo == 1 и n_volumes ≤ 10.
+        Иначе: «в N книгах» (N = part_count или n_volumes).
         """
-        if not volume_range:
-            return 'компиляция романов'
-        rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', volume_range.strip())
-        if rng:
-            lo = int(rng.group(1))
-            n  = int(rng.group(2)) - lo + 1
-        else:
-            lo = 1   # одиночный том вида "5" — не начинается с 1
-            try:
-                lo = int(volume_range.strip())
-            except ValueError:
-                pass
-            n = book_count
-        # Служебное слово только если нумерация с тома 1
-        if lo == 1 and 2 <= n < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n]:
-            word = cls._SERIES_WORDS[n]
-            if part_count > 0:
-                return f'{word} из {part_count} частей'
-            # Если реальных файлов больше чем томов в диапазоне — уточняем
-            if book_count != n:
-                return f'{word} в {book_count} книгах'
+        n_books = part_count if part_count > 0 else n_volumes
+        if lo == 1 and 2 <= n_volumes < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n_volumes]:
+            word = cls._SERIES_WORDS[n_volumes]
+            if n_books > n_volumes:
+                return f'{word} в {n_books} книгах'
             return word
-        # Для диапазона томов: добавляем «в N книгах» если файлов больше чем томов
-        suffix = f'т. {volume_range}'
-        if n > 0 and book_count > n:
-            suffix += f' в {book_count} книгах'
-        return suffix
+        return f'в {n_books} книгах'
 
     def __init__(self, logger=None):
         self.logger = logger
@@ -833,7 +856,22 @@ class FB2CompilerService:
                 stem_leading = (candidate == _stem_val) and bool(_LEADING_RANGE_RE.match(candidate))
                 if not stem_leading and not _has_series_link(candidate):
                     continue
-                m = _RANGE_RE.search(candidate)
+                # Ищем диапазон только в зоне ДО первой точки после вхождения названия серии.
+                # Это исключает ложные срабатывания вида «Серия N. Подсерия M-K. Название»,
+                # где M-K относится к подсерии, а не к основной серии.
+                if not stem_leading:
+                    _cand_low = candidate.lower()
+                    _slink_pos = next((p for w in series_words
+                                       for p in [_cand_low.find(w)] if p >= 0), -1)
+                    if _slink_pos >= 0:
+                        _after = candidate[_slink_pos:]
+                        _dot = _after.find('.')
+                        _zone = _after[:_dot] if _dot >= 0 else _after
+                        m = _RANGE_RE.search(_zone)
+                    else:
+                        m = _RANGE_RE.search(candidate)
+                else:
+                    m = _RANGE_RE.search(candidate)
             if m:
                 lo, hi = int(m.group(1)), int(m.group(2))
                 if hi > lo:
@@ -1188,18 +1226,33 @@ class FB2CompilerService:
             num = int(next(g for g in num_m.groups() if g is not None))
             # Числа >= 1900 — скорее всего год в имени файла, не номер тома.
             if num < 1900:
-                # Пробуем извлечь secondary (следующий N.) и tertiary (Том N) из остатка stem
+                # Пробуем извлечь secondary и tertiary из остатка stem.
+                # Сначала проверяем диапазон "N-M" (подсерия покрывает несколько томов).
+                # Пример: «Брия 1. Книга Длинного Солнца 1-2. Литания» → num=1, _rest содержит "1-2."
+                # secondary=1 (lo диапазона), volume_label="1-2" (для get_hi = 2).
                 _rest = stem[num_m.end():]
-                _sec_m = re.search(r'(?<!\d)(\d{1,4})\s*\.', _rest)
                 secondary = 0
-                if _sec_m:
-                    _sc2 = int(_sec_m.group(1))
-                    if _sc2 < 1900:
-                        secondary = _sc2
-                        _rest = _rest[_sec_m.end():]
+                volume_label = str(num)
+                _range_sec_m = re.search(
+                    r'(?<!\d)(\d{1,4})\s*[-–—]\s*(\d{1,4})\s*[.\s]', _rest
+                )
+                if _range_sec_m:
+                    _rlo = int(_range_sec_m.group(1))
+                    _rhi = int(_range_sec_m.group(2))
+                    if _rlo < 1900 and _rhi < 1900 and _rhi > _rlo:
+                        secondary = _rlo
+                        volume_label = f'{_rlo}-{_rhi}'
+                        _rest = _rest[_range_sec_m.end():]
+                if not secondary:
+                    _sec_m = re.search(r'(?<![\d\-–—])(\d{1,4})\s*\.', _rest)
+                    if _sec_m:
+                        _sc2 = int(_sec_m.group(1))
+                        if _sc2 < 1900:
+                            secondary = _sc2
+                            _rest = _rest[_sec_m.end():]
                 tertiary = self._extract_inline_volume_number(_rest, stem) or 0
                 if secondary or tertiary:
-                    return (0, num, secondary, tertiary), 'filename', False, str(num)
+                    return (0, num, secondary, tertiary), 'filename', False, volume_label
                 return (0, num, 0, 0), 'filename', False, str(num)
 
         # Источник В: диапазон томов в скобках внутри stem — «(Серия 1-3)», «(4-6)»
@@ -1346,6 +1399,11 @@ class FB2CompilerService:
             return []
 
         def get_hi(book: CompilationBook) -> int:
+            # Если volume_label — диапазон внутри подсерии (sort_key[2] != 0),
+            # раскрывать его как верхнеуровневый диапазон нельзя:
+            # используем только sort_key[1] (позицию в родительской серии).
+            if len(book.sort_key) > 2 and book.sort_key[2] != 0:
+                return book.sort_key[1]
             rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', book.volume_label or '')
             return int(rng.group(2)) if rng else book.sort_key[1]
 
@@ -1399,8 +1457,13 @@ class FB2CompilerService:
             if level == 0 and isinstance(val, int):
                 nums.append(val)
 
-        # Также из volume_label (для прекомпилированных диапазонов типа "3-5")
+        # Также из volume_label (для прекомпилированных диапазонов типа "3-5").
+        # Раскрываем только когда sort_key[2] == 0: volume_label — верхнеуровневый диапазон.
+        # Если sort_key[2] != 0, volume_label — диапазон внутри подсерии (вторичный индекс),
+        # его нельзя добавлять как позиции верхнего уровня серии.
         for b in books:
+            if len(b.sort_key) > 2 and b.sort_key[2] != 0:
+                continue
             vl = (b.volume_label or '').strip()
             rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', vl)
             if rng:
@@ -1524,28 +1587,41 @@ class FB2CompilerService:
             # --- Извлекаем метаданные из первой (или лучшей) книги ---
             meta = self._extract_metadata(group.books[0])
 
-            # --- Имя выходного файла и clean_series ---
+            # --- Статистика run'а и именование ---
             clean_series = self._clean_series_name(group.series)
             safe_author = re.sub(r'[\\/:*?"<>|]', '_', group.author)
-            safe_series = re.sub(r'[/:*?"<>|]', '_', clean_series.replace('\\', '. '))
+
+            part_count = getattr(group, 'part_count', 0)
+            top_lo, top_hi, n_volumes, has_subseries = self._run_stats(group.books)
+
+            # Квалификатор позиции добавляется в имя серии когда:
+            #   — run не начинается с позиции 1, или
+            #   — run охватывает ровно одну позицию, которая является частью нумерованной серии.
+            # Примеры: «Брия 1», «Брия 3-4», «Дюна 3-5».
+            needs_qualifier = top_lo > 1 or (top_lo == top_hi and top_lo != 0 and has_subseries)
+            if needs_qualifier:
+                _q = str(top_lo) if top_lo == top_hi else f'{top_lo}-{top_hi}'
+                qualified_series = f'{clean_series} {_q}'
+            else:
+                qualified_series = clean_series
+
+            safe_series = re.sub(r'[/:*?"<>|]', '_', qualified_series.replace('\\', '. '))
 
             # --- Папка назначения: явная или рядом с исходниками ---
             dest_dir = output_dir if output_dir is not None else group.books[0].abs_path.parent
 
-            # --- Собираем итоговый XML ---
-            volume_range = group.volume_range or self._compute_volume_range(group.books)
+            # --- Суффикс и XML ---
+            suffix = self._series_suffix(n_volumes, top_lo, part_count)
             output_xml = self._build_fb2(
                 author=group.author,
-                series=clean_series,
-                volume_range=volume_range,
+                series=qualified_series,
+                suffix=suffix,
                 genre=meta.get('genre', ''),
                 bodies=bodies,
                 binaries=collected_binaries,
-                part_count=getattr(group, 'part_count', 0),
             )
 
             # --- Имя выходного файла ---
-            suffix = self._series_suffix(len(group.books), volume_range, getattr(group, 'part_count', 0))
             fname = f"{safe_author} - {safe_series} ({suffix}).fb2"
 
             output_path = dest_dir / fname
@@ -1849,11 +1925,10 @@ class FB2CompilerService:
         self,
         author: str,
         series: str,
-        volume_range: str,
+        suffix: str,
         genre: str,
         bodies: List[Tuple[str, str]],
         binaries: Optional[List[str]] = None,
-        part_count: int = 0,
     ) -> str:
         """Собрать итоговый FB2 XML из компонентов."""
         # Разбиваем автора на фамилию и имя
@@ -1863,7 +1938,6 @@ class FB2CompilerService:
 
         safe_series = _html.escape(series)
         n_books = len(bodies)
-        suffix = self._series_suffix(n_books, volume_range, part_count)
         book_title = f"{safe_series} ({suffix})"
 
         # Жанр — берём первый, если несколько через запятую

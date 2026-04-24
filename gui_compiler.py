@@ -559,10 +559,17 @@ class CompilerDialog:
             import re as _re
             clean_series = self._service._clean_series_name(group.series)
             safe_author  = _re.sub(r'[\\/:*?"<>|]', '_', group.author)
-            safe_series  = _re.sub(r'[/:*?"<>|]', '_', clean_series.replace('\\', '. '))
-            volume_range = group.volume_range or self._service._compute_volume_range(group.books)
-            suffix       = self._service._series_suffix(len(group.books), volume_range, getattr(group, 'part_count', 0))
-            fname        = f'{safe_author} - {safe_series} ({suffix}).fb2'
+            part_count   = getattr(group, 'part_count', 0)
+            top_lo, top_hi, n_volumes, has_subseries = self._service._run_stats(group.books)
+            needs_q = top_lo > 1 or (top_lo == top_hi and top_lo != 0 and has_subseries)
+            if needs_q:
+                _q = str(top_lo) if top_lo == top_hi else f'{top_lo}-{top_hi}'
+                qualified_series = f'{clean_series} {_q}'
+            else:
+                qualified_series = clean_series
+            safe_series = _re.sub(r'[/:*?"<>|]', '_', qualified_series.replace('\\', '. '))
+            suffix      = self._service._series_suffix(n_volumes, top_lo, part_count)
+            fname       = f'{safe_author} - {safe_series} ({suffix}).fb2'
             self._fname_var.set(fname)
         except Exception:
             self._fname_var.set('—')
