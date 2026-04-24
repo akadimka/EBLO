@@ -748,7 +748,15 @@ class Pass2Filename:
                             use_hybrid_source = True
 
                     # STEP 2: Traditional incomplete name expansion (single word, pure initial, etc.)
-                    if not use_hybrid_source and self._is_incomplete_name(expanded_author):
+                    # Также обрабатываем формат «Фамилия И. Фамилия2» / «Фамилия Р. Отчество» —
+                    # _is_incomplete_name считает их полными (2 полных слова), но инициал
+                    # посередине означает что имя требует расширения через метаданные.
+                    import re as _re_mi
+                    _has_mid_initial = bool(
+                        record.metadata_authors and
+                        _re_mi.search(r'\s[А-ЯЁA-Z]\.\s', expanded_author)
+                    )
+                    if not use_hybrid_source and (self._is_incomplete_name(expanded_author) or _has_mid_initial):
                         if record.metadata_authors:
                             expanded = self._try_expand_from_metadata(expanded_author, record.metadata_authors)
                             if expanded and expanded != expanded_author:

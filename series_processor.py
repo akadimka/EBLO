@@ -346,17 +346,22 @@ class SeriesProcessor:
         consensus_count = 0
 
         for folder, group_records in groups.items():
-            # Разделить на определенные и неопределенные
-            determined = [r for r in group_records
-                         if r.author_source in ['folder_dataset', 'metadata', 'metadata_folder_confirmed', 'consensus', 'filename', 'filename_meta_confirmed']]
-            undetermined = [r for r in group_records if r.author_source == '']
+            # Источники с высоким приоритетом (filename важнее metadata)
+            _HIGH_PRIORITY = {'folder_dataset', 'folder_hierarchy', 'filename', 'filename_meta_confirmed'}
+            _LOW_PRIORITY  = {'metadata', 'consensus', ''}
 
-            if not determined or not undetermined:
+            high_priority = [r for r in group_records if r.author_source in _HIGH_PRIORITY]
+            all_sourced   = [r for r in group_records if r.author_source]
+
+            if not all_sourced:
                 continue
 
-            # Найти консенсус автора
+            # Если есть хотя бы один файл с filename-источником — он авторитетен для всей папки.
+            # Используем только высокоприоритетные файлы для формирования консенсуса.
+            consensus_pool = high_priority if high_priority else all_sourced
+
             author_counts = {}
-            for record in determined:
+            for record in consensus_pool:
                 if record.proposed_author and record.proposed_author != 'Сборник':
                     author_counts[record.proposed_author] = author_counts.get(record.proposed_author, 0) + 1
 
@@ -365,17 +370,17 @@ class SeriesProcessor:
 
             consensus_author = max(author_counts, key=author_counts.get)
 
-            # Применить к неопределенным
-            for record in undetermined:
-                if record.proposed_author and record.proposed_author != 'Сборник':
-                    if record.proposed_author != consensus_author:
-                        record.proposed_author = consensus_author
-                        record.author_source = 'consensus'
-                        consensus_count += 1
-                elif not record.proposed_author:
-                    record.proposed_author = consensus_author
-                    record.author_source = 'consensus'
-                    consensus_count += 1
+            # Применить ко всем файлам с низкоприоритетным или пустым источником
+            for record in group_records:
+                if record.author_source in _HIGH_PRIORITY:
+                    continue  # не трогаем авторитетные источники
+                if record.proposed_author == consensus_author:
+                    continue  # уже правильно
+                if record.proposed_author and record.proposed_author != 'Сборник' and not high_priority:
+                    continue  # без filename-донора не перезаписываем metadata
+                record.proposed_author = consensus_author
+                record.author_source = 'consensus'
+                consensus_count += 1
 
         return consensus_count
 
