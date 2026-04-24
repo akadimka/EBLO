@@ -188,6 +188,9 @@ class FB2CompilerService:
             word = cls._SERIES_WORDS[n]
             if part_count > 0:
                 return f'{word} из {part_count} частей'
+            # Если реальных файлов больше чем томов в диапазоне — уточняем
+            if book_count != n:
+                return f'{word} в {book_count} книгах'
             return word
         return f'т. {volume_range}'
 
@@ -1111,10 +1114,19 @@ class FB2CompilerService:
         # Пример: "Хроника 2. День второй. Том 1" — «2» это арк родительской серии,
         # «Том 1» — реальный номер тома внутри подсерии.
         if is_subseries:
-            # Порядковый номер родительской серии: "Азиатская сага 04\Роман" → parent_num=4
+            # Порядковый номер родительской серии.
+            # Сначала — из proposed_series: "Азиатская сага 04\Роман" → parent_num=4.
+            # Если там нет числа — ищем в стеме файла: "Хроника Убийцы Короля 2. День второй" → 2.
             _root_part = (rec.proposed_series or '').split('\\')[0].strip()
             _parent_num_m = re.search(r'\s(\d{1,4})\s*$', _root_part)
-            parent_num = int(_parent_num_m.group(1)) if _parent_num_m else 0
+            if _parent_num_m:
+                parent_num = int(_parent_num_m.group(1))
+            else:
+                # Ищем корневое название серии + число в стеме
+                _root_re = re.compile(re.escape(_root_part) + r'\s+(\d{1,4})', re.IGNORECASE | re.UNICODE)
+                _root_m = _root_re.search(stem)
+                _candidate = int(_root_m.group(1)) if _root_m else 0
+                parent_num = _candidate if _candidate and _candidate < 1900 else 0
 
             inline = self._extract_inline_volume_number(rec.file_title or stem, stem)
             if inline is not None:
