@@ -944,6 +944,25 @@ class Pass4Consensus:
 
         self.logger.log(f"[PASS 4] Folder metadata consensus corrections: {folder_meta_correction_count}")
 
+        # FOLDER SERIES PROPAGATION
+        # Если хоть один файл в папке получил серию из папки (любой папочный источник),
+        # все остальные файлы в той же папке без серии получают ту же серию автоматически.
+        _FOLDER_SOURCES = {"folder_hierarchy", "folder_dataset", "folder_meta_consensus"}
+        _folder_prop_count = 0
+        for folder, grp in _folder_groups_meta.items():
+            donor = next((r for r in grp if r.series_source in _FOLDER_SOURCES and r.proposed_series), None)
+            if donor is None:
+                continue
+            for rec in grp:
+                if rec is donor:
+                    continue
+                if rec.proposed_series:
+                    continue  # уже есть серия
+                rec.proposed_series = donor.proposed_series
+                rec.series_source = donor.series_source
+                _folder_prop_count += 1
+        self.logger.log(f"[PASS 4] Folder series propagation: {_folder_prop_count} records updated")
+
         # FILENAME PHRASE + METADATA CONFIRMATION
         #
         # Для каждого автора: ищем словосочетания из имён файлов,
