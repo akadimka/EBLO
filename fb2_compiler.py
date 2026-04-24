@@ -209,6 +209,21 @@ class FB2CompilerService:
         Returns:
             Список CompilationGroup, отсортированный по (author, series).
         """
+        # Пересоздаём debug-файлы при каждом запуске (не дозаписываем)
+        import tempfile, os as _os
+        _base = Path(__file__).parent
+        for _dbg_name in ('fb2_sort_debug.txt', 'fb2_inline_debug.txt'):
+            _dbg_path = _base / _dbg_name
+            try:
+                _tmp_fd, _tmp_path = tempfile.mkstemp(dir=_base, prefix=_dbg_name + '.tmp')
+                _os.close(_tmp_fd)
+                _os.replace(_tmp_path, _dbg_path)
+            except Exception:
+                try:
+                    _dbg_path.write_text('', encoding='utf-8')
+                except Exception:
+                    pass
+
         # Группировка по (author_lower, series_lower)
         # Нормализуем ё→е в ключах, чтобы "Тёмные звёзды" и "Темные звезды" попали в одну группу.
         buckets: Dict[Tuple[str, str], List] = {}
@@ -728,7 +743,11 @@ class FB2CompilerService:
         # Критерий 1: диапазон "N-M" в имени файла (stem) или title — приоритет выше метаданных
         # Имя файла отражает реальную организацию библиотеки, метаданные могут быть неточными.
         _RANGE_RE = re.compile(r'(\d+)\s*[-–—]\s*(\d+)', re.UNICODE)
-        for candidate in (book.abs_path.stem, book.record.file_title or ''):
+        # Диапазон в самом начале stem: «01-2_...», «1-3 Название» — явная нумерация файла,
+        # не требует проверки series_link (серия может не упоминаться в имени файла).
+        _LEADING_RANGE_RE = re.compile(r'^\d+\s*[-–—]\s*\d+', re.UNICODE)
+        _stem_val = book.abs_path.stem
+        for candidate in (_stem_val, book.record.file_title or ''):
             if is_subseries:
                 # Для подсерий: убираем пометки тома родительской серии вида «(т. 7-8)»,
                 # затем ищем диапазон без проверки series_link (имя подсерии редко
@@ -736,7 +755,10 @@ class FB2CompilerService:
                 bare = _VOL_ANNOT_STRIP.sub('', candidate).strip()
                 m = _RANGE_RE.search(bare)
             else:
-                if not _has_series_link(candidate):
+                # Если диапазон стоит в начале имени файла — принимаем без series_link.
+                # Пример: «01-2_Свободу демонам! Том 1 и 2» → диапазон 1-2 очевиден.
+                stem_leading = (candidate == _stem_val) and bool(_LEADING_RANGE_RE.match(candidate))
+                if not stem_leading and not _has_series_link(candidate):
                     continue
                 m = _RANGE_RE.search(candidate)
             if m:
