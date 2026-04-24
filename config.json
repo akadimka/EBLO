@@ -1,69 +1,21 @@
 {
   "library_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/EBook Library",
   "last_scan_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
+  "normalizer_folder": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
   "genre_association_method": "context_menu",
   "window_sizes": {
-    "settings": "708x466+250+200",
     "main": {
       "geometry": "1000x700+100+50",
-      "state": "normal"
-    },
-    "genres_manager": "700x456+690+361",
-    "log": {
-      "geometry": "1150x711+100+100",
-      "state": "normal"
-    },
-    "duplicates_window": {
-      "geometry": "1000x652+64+38",
-      "state": "normal"
-    },
-    "test_window": {
-      "geometry": "2279x889+-2949+-104",
-      "state": "normal"
-    },
-    "test_main": {
-      "geometry": "797x598+0+48",
-      "state": "normal"
-    },
-    "test_main_root": {
-      "geometry": "600x400-2288+169",
-      "state": "normal"
-    },
-    "normalizer": {
-      "geometry": "1400x700+33+131",
-      "state": "normal"
-    },
-    "genre_select": {
-      "geometry": "400x300+894+405",
-      "state": "normal"
-    },
-    "assign_genre_progress": {
-      "geometry": "450x120+630+389",
-      "state": "normal"
-    },
-    "database_viewer": {
-      "geometry": "1000x500+200+150",
-      "state": "normal"
-    },
-    "duplicate_finder": {
-      "geometry": "1324x804+93+49",
-      "state": "normal"
-    },
-    "broken_files": {
-      "geometry": "1000x600+300+250",
-      "state": "normal"
-    },
-    "help": {
-      "geometry": "1100x680+100+80",
-      "state": "normal"
-    },
-    "dashboard": {
-      "geometry": "800x600+150+100",
       "state": "normal"
     }
   },
   "generate_csv": true,
+  "performance": {
+    "enable_caching": true,
+    "max_cache_age_days": 30,
+    "use_sax_parser": true
+  },
   "test_window_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
   "folder_parse_limit": 3,
   "genre_tree_state": {
@@ -1309,5 +1261,6 @@
     "мак",
     "о"
   ],
-  "duplicate_finder_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1"
+  "duplicate_finder_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test3",
+  "compiler_scan_dir": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1"
 }

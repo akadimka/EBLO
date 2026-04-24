@@ -18,6 +18,7 @@ def _nfc_lower_yo(s: str) -> str:
 
 from author_normalizer_extended import AuthorNormalizer
 from settings_manager import SettingsManager
+from series_processor import SeriesProcessor
 
 
 class Pass4Consensus:
@@ -49,6 +50,7 @@ class Pass4Consensus:
         except:
             self.settings = None
         self.normalizer = AuthorNormalizer(self.settings)
+        self.series_processor = SeriesProcessor(self.settings.config_path if self.settings else 'config.json')
         # Cache for _normalize_series_for_consensus results
         self._series_norm_cache: dict = {}
     
@@ -266,47 +268,8 @@ class Pass4Consensus:
                 groups[folder] = []
             groups[folder].append(record)
         
-        consensus_count = 0
-        
-        # Process each group
-        for folder, group_records in groups.items():
-            # Separate determined and undetermined files
-            # DETERMINED: files with ANY successful source (folder_dataset, metadata, consensus, filename)
-            # UNDETERMINED: files with empty source only
-            determined = [r for r in group_records 
-                         if r.author_source in ["folder_dataset", "metadata", "metadata_folder_confirmed", "consensus", "filename", "filename_meta_confirmed"]]
-            undetermined = [r for r in group_records 
-                           if r.author_source == ""]
-            
-            if not determined or not undetermined:
-                continue
-
-            # Find consensus author from determined files  
-            author_counts = {}
-            for record in determined:
-                if record.proposed_author and record.proposed_author != "Сборник":
-                    author_counts[record.proposed_author] = \
-                        author_counts.get(record.proposed_author, 0) + 1
-            
-            if not author_counts:
-                continue
-            
-            consensus_author = max(author_counts, key=author_counts.get)
-
-            # Apply to all undetermined files (only empty ones)
-            for record in undetermined:
-                if record.proposed_author and record.proposed_author != "Сборник":
-                    # Update with consensus
-                    if record.proposed_author != consensus_author:
-                        record.proposed_author = consensus_author
-                        record.author_source = "consensus"
-                        consensus_count += 1
-                elif not record.proposed_author:
-                    # Apply consensus to empty records
-                    record.proposed_author = consensus_author
-                    record.author_source = "consensus"
-                    consensus_count += 1
-        
+        # Apply author consensus using SeriesProcessor
+        consensus_count = self.series_processor.apply_author_consensus(records)
         self.logger.log(f"[PASS 4] Applied consensus to {consensus_count} records")
         
         # SERIES CONSENSUS: Apply consensus series to files in same folder
@@ -322,91 +285,8 @@ class Pass4Consensus:
                 author_groups[author] = []
             author_groups[author].append(record)
         
-        # AUTHOR-BASED SERIES CONSENSUS: Match files by sequence in filename
-        # For each author group, find files with same series_base that have proposed_series
-        # and apply to files without series_candidate
-        series_consensus_count = 0
-        
-        for author, author_records in author_groups.items():
-            # Build map: series_base → [records with proposed_series from extracted_series_candidate]
-            series_base_map = {}
-            
-            for record in author_records:
-                if record.extracted_series_candidate:
-                    # Extract series_base from proposed_series (remove volume numbers)
-                    normalized = self._normalize_series_for_consensus(record.extracted_series_candidate)
-                    if normalized not in series_base_map:
-                        series_base_map[normalized] = []
-                    series_base_map[normalized].append(record)
-            
-            # For each series_base, check if we have files without series_candidate
-            # that match the series_base in their filename
-            for series_base, source_records in series_base_map.items():
-                # For each record without extracted_series_candidate
-                for target_record in author_records:
-                    if target_record.proposed_series and target_record.series_source not in ("metadata", "metadata_folder_confirmed"):
-                        # Already has series from a folder/filename/confirmed source — skip.
-                        # folder_metadata_confirmed = папка и мета согласны → авторитетный источник,
-                        # не перезаписываем author-consensus.
-                        continue
-                    
-                    if target_record.extracted_series_candidate:
-                        # Already has extracted_series_candidate, would be caught earlier
-                        continue
-                    
-                    # Check if target filename contains the same series_base as source
-                    # Extract filename and check if it contains series_base
-                    filename = Path(target_record.file_path).stem
-                    
-                    # Simple heuristic: series_base appears in the filename
-                    # and it's likely the same series (case-insensitive, normalize spaces)
-                    # Format: "Author - SeriesBase" or "Author - SeriesBase N" or "SeriesBase N" or "Author. Series"
-                    series_base_normalized = series_base.lower().strip()
-                    filename_normalized = filename.lower()
-                    
-                    # PROTECTION: Skip if series_base is too short (would match any single char)
-                    # Example: "П" matches any word starting with "п" like "первый", "пятьдесят"
-                    # Require at least 2 characters for a valid series name
-                    if len(series_base_normalized) < 2:
-                        continue
-                    
-                    # Check if filename contains series_base in the expected position
-                    # Must be after author name (after " - " or after ". ") or at start
-                    if series_base_normalized in filename_normalized:
-                        # Verify it's at the right position: after author name or at position
-                        # where series should be
-                        dash_pos = filename_normalized.find(" - ")
-                        dot_pos = filename_normalized.find(". ")
-                        base_pos = filename_normalized.find(series_base_normalized)
-                        
-                        # Three patterns: "Author - Series", "Author. Series", or "Series ..." at start
-                        applies = False
-                        
-                        if dash_pos >= 0 and base_pos > dash_pos:
-                            # "Author - Series" pattern
-                            applies = True
-                        elif dot_pos >= 0 and base_pos > dot_pos:
-                            # "Author. Series" pattern
-                            applies = True
-                        elif base_pos == 0:
-                            # Series at start of filename
-                            applies = True
-                        
-                        if applies:
-                            # Не перезаписываем «Без серии»
-                            if target_record.series_source == "no_series_folder":
-                                continue
-                            # Apply consensus
-                            target_record.proposed_series = series_base
-                            target_record.series_source = "author-consensus"
-                            
-                            # Check for metadata confirmation
-                            if (target_record.metadata_series and 
-                                self._normalize_series_for_consensus(target_record.metadata_series) == series_base):
-                                target_record.series_source = "author-consensus (metadata-confirmed)"
-                            
-                            series_consensus_count += 1
-        
+        # Apply series consensus using SeriesProcessor
+        series_consensus_count = self.series_processor.apply_series_consensus(records)
         self.logger.log(f"[PASS 4] Applied author-based series consensus to {series_consensus_count} records")
         
         # METADATA SERIES CONSENSUS: For depth 2 files (Author/File)
@@ -1051,6 +931,11 @@ class Pass4Consensus:
 
                 if any(_bl_hit(bl, _best_lower_bl) for bl in _bl_cands):
                     continue  # издательская серия — не применяем
+
+                # Не перезаписываем если серия уже получена из имени файла —
+                # filename имеет приоритет над metadata согласно настройкам.
+                if rec.series_source in ('filename', 'filename+meta_confirmed'):
+                    continue
 
                 # Исправляем
                 rec.proposed_series = best_clean

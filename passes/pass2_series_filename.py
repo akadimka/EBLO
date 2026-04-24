@@ -528,9 +528,13 @@ class Pass2SeriesFilename:
                         # Check if ANY word in the folder (>2 chars) matches an author word.
                         # This covers "Таннер А" where the FIRST word "Таннер" is the surname,
                         # not just the last word (the old check only caught endings like "Куанг").
+                        # Also handles inflected forms: "Киза" matches author word "Киз" via startswith.
                         _folder_contains_author = any(
-                            w.lower().replace('ё', 'е') in _author_words
-                            for w in _part_words if len(w) > 2
+                            any(
+                                fw == aw or fw.startswith(aw) or aw.startswith(fw)
+                                for aw in _author_words
+                            )
+                            for fw in (w.lower().replace('ё', 'е') for w in _part_words if len(w) > 2)
                         )
                         if _folder_contains_author:
                             pass  # Не устанавливаем серию из папки → идём дальше к filename extraction
@@ -806,7 +810,16 @@ class Pass2SeriesFilename:
                         if looks_like_author:
                             _ftitle = (record.file_title or '').lower()
                             _in_title = bool(_ftitle and series_part.lower() in _ftitle)
-                            if not _in_title and self._is_valid_series(series_part, extracted_author=record.proposed_author):
+                            # ИСКЛЮЧЕНИЕ: если кандидат стоит перед номером тома в имени файла
+                            # ("Королевство Костей и Терний 1. Терновый Король") →
+                            # это явная серия, даже если _in_title=False по другим причинам.
+                            _fn_stem_fb = Path(record.file_path).stem.lower().replace('ё', 'е')
+                            _sp_norm = series_part.lower().replace('ё', 'е')
+                            _is_numbered_in_fn = bool(re.search(
+                                re.escape(_sp_norm) + r'[\s.]+\d+[\s.]',
+                                _fn_stem_fb
+                            ))
+                            if (_is_numbered_in_fn or not _in_title) and self._is_valid_series(series_part, extracted_author=record.proposed_author):
                                 series_candidate = series_part
             
             if series_candidate:
@@ -1981,7 +1994,6 @@ class Pass2SeriesFilename:
                 best_score, best_pattern, _, series_from_block = self.block_matcher.find_best_pattern_match(
                     name_for_parsing, file_patterns
                 )
-                
                 # 🔑 КРИТИЧНО: Проверить что паттерн содержит информацию о серии!
                 # Если паттерн не содержит слова "Series", то это не формат с серией
                 # Примеры БЕЗ серии: "Title (Author)", "Author - Title", "Author. Title"

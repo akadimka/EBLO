@@ -42,6 +42,7 @@ venv.bak/
 proposed_series_report.csv
 summary_csv.csv
 *.csv
+!regen.csv
 
 # Test & Debug files (temporary, for development only)
 test_*.py

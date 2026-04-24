@@ -69,6 +69,7 @@ class CompilationGroup:
     kept_paths: List[Path] = None       # Файлы, которые остаются (для cleanup_only групп)
     alphabetical_order: bool = False    # True — порядок не определён, отсортировано по названию
     cleanup_only: bool = False          # True — новая компиляция не нужна, только удалить дубликаты
+    part_count: int = 0                 # > 0 если книги имеют паттерн N.M (том.часть): общее число частей
 
     def __post_init__(self):
         if self.duplicate_paths is None:
@@ -154,7 +155,7 @@ class FB2CompilerService:
         return cleaned or series
 
     @classmethod
-    def _series_suffix(cls, book_count: int, volume_range: str) -> str:
+    def _series_suffix(cls, book_count: int, volume_range: str, part_count: int = 0) -> str:
         """Вернуть суффикс для имени файла компиляции.
 
         Служебное слово (Дилогия, Трилогия…) присваивается ТОЛЬКО если:
@@ -162,6 +163,9 @@ class FB2CompilerService:
           2. Количество томов ≤ 10 (есть подходящее слово).
         Во всех остальных случаях: «т. X-Y».
         Пустой volume_range → «компиляция романов».
+
+        part_count > 0 → добавляем «из N частей» к служебному слову.
+        Пример: Дилогия из 6 частей.
 
         n вычисляется из диапазона (volume_range), а не из числа файлов, чтобы
         предкомпиляция-диапазон (файл «1-4» + том 5 = 5 томов) считалась верно.
@@ -181,7 +185,10 @@ class FB2CompilerService:
             n = book_count
         # Служебное слово только если нумерация с тома 1
         if lo == 1 and 2 <= n < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n]:
-            return cls._SERIES_WORDS[n]
+            word = cls._SERIES_WORDS[n]
+            if part_count > 0:
+                return f'{word} из {part_count} частей'
+            return word
         return f'т. {volume_range}'
 
     def __init__(self, logger=None):
@@ -540,7 +547,17 @@ class FB2CompilerService:
                 lone_numeric = [b for r in self._split_into_consecutive_runs(numeric) if len(r) < 2 for b in r]
 
                 for run in valid_runs:
-                    run_range = self._compute_volume_range(run)
+                    # Детектируем паттерн N.M (том.часть): если ВСЕ книги в run
+                    # получили sort_source='dot_part', то volume_range = диапазон томов,
+                    # а part_count = общее число частей (файлов).
+                    all_dot_part = run and all(b.sort_source == 'dot_part' for b in run)
+                    if all_dot_part:
+                        toms = sorted({b.sort_key[1] for b in run})
+                        run_range = f'{toms[0]}-{toms[-1]}' if len(toms) > 1 else str(toms[0])
+                        run_part_count = len(run)
+                    else:
+                        run_range = self._compute_volume_range(run)
+                        run_part_count = 0
                     groups.append(CompilationGroup(
                         author=author,
                         series=series,
@@ -549,6 +566,7 @@ class FB2CompilerService:
                         volume_range=run_range,
                         duplicate_paths=duplicate_paths if first_group else [],
                         alphabetical_order=False,
+                        part_count=run_part_count,
                     ))
                     first_group = False
 
@@ -629,6 +647,12 @@ class FB2CompilerService:
         re.IGNORECASE | re.UNICODE,
     )
 
+    # Паттерн N.M в начале stem или после разделителя — том.часть (например «1.2_Название»)
+    _DOT_PART_RE = re.compile(
+        r'(?:^|[\s_\-])([1-9]\d{0,1})\.([1-9]\d{0,1})(?:[\s_\-.]|$)',
+        re.UNICODE,
+    )
+
     # Паттерн «Том N. Часть M» / «Vol N. Part M» — два файла одного тома.
     # Группы: (1) номер тома (арабский или римский), (2) номер части (арабский).
     _VOLUME_PART_RE = re.compile(
@@ -679,6 +703,24 @@ class FB2CompilerService:
                     part = int(part_str)
                     if 1 <= part <= 20:
                         return vol, part
+        return None
+
+    @classmethod
+    def _extract_dot_part(cls, stem: str, title: str) -> Optional[Tuple[int, int]]:
+        """Извлечь (том, часть) из паттерна N.M в stem или title.
+
+        Распознаёт: «1.2_Название», «Расходники 2.3», «2.1 Название» и т.п.
+        Возвращает (том, часть) или None.
+        Ограничения: N и M от 1 до 19 (исключаем годы и ISBN).
+        """
+        for text in (stem, title):
+            if not text:
+                continue
+            m = cls._DOT_PART_RE.search(text)
+            if m:
+                vol, part = int(m.group(1)), int(m.group(2))
+                if 1 <= vol <= 19 and 1 <= part <= 19:
+                    return vol, part
         return None
 
     @classmethod
@@ -1007,6 +1049,15 @@ class FB2CompilerService:
                         meta_num = int(rng.group(1))
 
                 if meta_num is not None:
+                    # Паттерн N.M (dot_part) имеет приоритет над series_number:
+                    # файлы вида «Расходники 2.3» должны получить sort_key (0,2,3)
+                    # а не (0,5,0) из метаданных, иначе они не попадут в один run
+                    # с файлами 1.1, 1.2, 2.1, у которых sn отсутствует.
+                    _dp = self._extract_dot_part(stem, rec.file_title or '')
+                    if _dp is not None:
+                        _dv, _dpt = _dp
+                        return (0, _dv, _dpt), 'dot_part', False, f'{_dv}.{_dpt}'
+
                     # Перекрёстная проверка с именем файла.
                     # Если в stem явно написан другой номер — доверяем файлу,
                     # иначе метаданные могут быть ошибочными (например, sn='1' для тома 2).
@@ -1074,6 +1125,13 @@ class FB2CompilerService:
         _proposed = getattr(rec, 'proposed_series', '') or ''
         _ft_is_series = bool(_ft) and _norm_key(_ft) == _norm_key(_proposed)
 
+        # Паттерн N.M (том.часть) — проверяем первым, до других inline-методов.
+        # Пример: «Расходники 1.2_Название» → том=1, часть=2.
+        dp = self._extract_dot_part(stem, _ft or '')
+        if dp is not None:
+            vol, part = dp
+            return (0, vol, part), 'dot_part', False, f'{vol}.{part}'
+
         # Проверяем паттерн «Том N. Часть M» до общего inline-поиска,
         # чтобы «Часть» не интерпретировалась как ключевое слово тома.
         vp = self._extract_volume_part(_ft or stem, stem)
@@ -1095,7 +1153,7 @@ class FB2CompilerService:
         # Уровень 4: дата из publish-info
         year = self._extract_year_from_fb2(abs_path, section='publish-info')
         if year:
-            return (3, year, 0), 'publish_date', False
+            return (3, year, 0), 'publish_date', False, str(year)
 
         # Порядок не определён
         return (9, 0, 0), 'unknown', True, ''
@@ -1389,10 +1447,11 @@ class FB2CompilerService:
                 genre=meta.get('genre', ''),
                 bodies=bodies,
                 binaries=collected_binaries,
+                part_count=getattr(group, 'part_count', 0),
             )
 
             # --- Имя выходного файла ---
-            suffix = self._series_suffix(len(group.books), volume_range)
+            suffix = self._series_suffix(len(group.books), volume_range, getattr(group, 'part_count', 0))
             fname = f"{safe_author} - {safe_series} ({suffix}).fb2"
 
             output_path = dest_dir / fname
@@ -1700,6 +1759,7 @@ class FB2CompilerService:
         genre: str,
         bodies: List[Tuple[str, str]],
         binaries: Optional[List[str]] = None,
+        part_count: int = 0,
     ) -> str:
         """Собрать итоговый FB2 XML из компонентов."""
         # Разбиваем автора на фамилию и имя
@@ -1709,7 +1769,7 @@ class FB2CompilerService:
 
         safe_series = _html.escape(series)
         n_books = len(bodies)
-        suffix = self._series_suffix(n_books, volume_range)
+        suffix = self._series_suffix(n_books, volume_range, part_count)
         book_title = f"{safe_series} ({suffix})"
 
         # Жанр — берём первый, если несколько через запятую

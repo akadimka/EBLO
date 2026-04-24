@@ -561,7 +561,7 @@ class CompilerDialog:
             safe_author  = _re.sub(r'[\\/:*?"<>|]', '_', group.author)
             safe_series  = _re.sub(r'[\\/:*?"<>|]', '_', clean_series)
             volume_range = group.volume_range or self._service._compute_volume_range(group.books)
-            suffix       = self._service._series_suffix(len(group.books), volume_range)
+            suffix       = self._service._series_suffix(len(group.books), volume_range, getattr(group, 'part_count', 0))
             fname        = f'{safe_author} - {safe_series} ({suffix}).fb2'
             self._fname_var.set(fname)
         except Exception:
