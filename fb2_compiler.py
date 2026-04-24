@@ -258,8 +258,15 @@ class FB2CompilerService:
             #      удаляем предкомпиляцию, компилируем из отдельных томов.
             precompiled: List[Tuple[CompilationBook, int, int]] = []  # (book, lo, hi)
             regular_books: List[CompilationBook] = []
+            _is_target_series = '\u0422\u044b\u0441\u044f\u0447\u0430' in series  # "Тысяча"
             for book in books:
                 lo, hi = self._precompiled_range(book, series)
+                if _is_target_series:
+                    try:
+                        with open(Path(__file__).parent / 'fb2_sort_debug.txt', 'a', encoding='utf-8') as _dbg2:
+                            _dbg2.write(f"  PRE_RANGE sk={book.sort_key} vl={book.volume_label!r} pre=({lo},{hi}) | {book.abs_path.name}\n")
+                    except Exception:
+                        pass
                 if hi > lo:
                     # Обновляем sort_key и volume_label по реальному диапазону файла.
                     # Без этого "1-2. Название.fb2" получает sk=(0,2,0) vl='2' вместо
@@ -423,9 +430,12 @@ class FB2CompilerService:
             # Из дублей оставляем первый по алфавиту путь (детерминированный выбор)
             seen_titles: Dict[str, CompilationBook] = {}
             for book in sorted(books, key=lambda b: str(b.abs_path)):
-                title_key = self._normalize_title_key(
-                    book.record.file_title or book.abs_path.stem, series
-                )
+                # Если file_title совпадает с именем серии — он не несёт информации
+                # о конкретном томе, используем stem файла как более информативный.
+                raw_title = book.record.file_title or book.abs_path.stem
+                if _norm_key(raw_title) == _norm_key(series):
+                    raw_title = book.abs_path.stem
+                title_key = self._normalize_title_key(raw_title, series)
                 # Для книг с известной позицией тома (level-0) добавляем позицию к ключу,
                 # чтобы не дедуплицировать разные тома с одинаковым названием.
                 # Пример: «Маршал 1-5» и «Маршал 6-9» оба имеют file_title="Маршал" —
@@ -443,6 +453,13 @@ class FB2CompilerService:
             # на уровнях 0 (series_number) или 1 (filename number), оставляем
             # первую по алфавиту, остальные помечаем как дубликаты.
             books = self._dedup_by_position(books, duplicate_paths)
+
+            if _is_target_series:
+                try:
+                    with open(Path(__file__).parent / 'fb2_sort_debug.txt', 'a', encoding='utf-8') as _dbg3:
+                        _dbg3.write(f"  AFTER_DEDUP books={[(b.sort_key,b.volume_label) for b in books]} dups={len(duplicate_paths)}\n")
+                except Exception:
+                    pass
 
             if len(books) < 2:
                 # Если после dedup остался один файл, но есть дубликаты — создаём cleanup_only.
@@ -597,6 +614,16 @@ class FB2CompilerService:
         re.IGNORECASE | re.UNICODE,
     )
 
+    # Паттерн «Том N. Часть M» / «Vol N. Part M» — два файла одного тома.
+    # Группы: (1) номер тома (арабский или римский), (2) номер части (арабский).
+    _VOLUME_PART_RE = re.compile(
+        r'(?:том|volume|vol\.?)\s*[.:-]?\s*'
+        r'(M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})|\d{1,4})'
+        r'\s*[.,;]?\s*'
+        r'(?:часть|part|ч\.?)\s*[.:-]?\s*(\d{1,4})\b',
+        re.IGNORECASE | re.UNICODE,
+    )
+
     @staticmethod
     def _roman_to_int(s: str) -> Optional[int]:
         """Конвертировать римскую цифру в целое. Возвращает None если s пустая или невалидна."""
@@ -615,6 +642,31 @@ class FB2CompilerService:
         return result if result > 0 else None
 
     @classmethod
+    def _extract_volume_part(cls, title: str, stem: str) -> Optional[Tuple[int, int]]:
+        """Извлечь (том, часть) из паттерна «Том N. Часть M» / «Vol N. Part M».
+
+        Возвращает (volume, part) или None если паттерн не найден.
+        volume — целое число тома, part — номер части (1, 2, …).
+        """
+        for text in (title, stem):
+            if not text:
+                continue
+            text_norm = unicodedata.normalize('NFKC', text)
+            m = cls._VOLUME_PART_RE.search(text_norm)
+            if m:
+                vol_str, part_str = m.group(1), m.group(2)
+                # vol_str может быть арабским или римским числом
+                if vol_str.isdigit():
+                    vol = int(vol_str)
+                else:
+                    vol = cls._roman_to_int(vol_str)
+                if vol and 1 <= vol <= 100:
+                    part = int(part_str)
+                    if 1 <= part <= 20:
+                        return vol, part
+        return None
+
+    @classmethod
     def _extract_inline_volume_number(cls, title: str, stem: str) -> Optional[int]:
         """Извлечь номер тома из ключевых слов внутри названия.
 
@@ -629,6 +681,15 @@ class FB2CompilerService:
                 continue
             # Нормализовать Unicode-символы римских цифр в ASCII: Ⅻ → XII, Ⅰ → I и т.п.
             text_norm = unicodedata.normalize('NFKC', text)
+            # TEMP DEBUG
+            try:
+                with open(Path(__file__).parent / 'fb2_inline_debug.txt', 'a', encoding='utf-8') as _d:
+                    _d.write(f"INLINE text={text!r} norm={text_norm!r}\n")
+                    m0 = cls._VOLUME_KEYWORDS_RE.search(text_norm)
+                    m1 = cls._VOLUME_ROMAN_RE.search(text_norm)
+                    _d.write(f"  kw_match={m0} roman_match={m1} roman_group={m1.group(1) if m1 else None}\n")
+            except Exception:
+                pass
             m = cls._VOLUME_KEYWORDS_RE.search(text_norm)
             if m:
                 return int(m.group(1))
@@ -805,12 +866,17 @@ class FB2CompilerService:
         Убирает возможный префикс в виде «<Серия>. » или «<Серия> » перед
         собственно названием книги, чтобы «Аквилон. Маг воды. Том 3» и
         «Маг воды. Том 3» воспринимались как один и тот же том.
+
+        Применяет NFKC-нормализацию чтобы Unicode-символы римских цифр
+        (Ⅰ U+2160 … Ⅻ U+216B) приводились к ASCII-эквивалентам (I … XII)
+        и не создавали ложных дублей.
         """
-        key = raw_title.strip().lower()
+        # NFKC: Ⅰ→I, Ⅱ→II, …, Ⅻ→XII и т.п.
+        key = unicodedata.normalize('NFKC', raw_title).strip().lower().replace('ё', 'е')
+        series_norm = unicodedata.normalize('NFKC', series).strip().lower().replace('ё', 'е')
         # Попробовать отрезать префикс вида "<серия>. " или "<серия> "
-        series_prefix = series.strip().lower()
         for sep in ('. ', ' '):
-            candidate = series_prefix + sep
+            candidate = series_norm + sep
             if key.startswith(candidate):
                 key = key[len(candidate):]
                 break
@@ -881,6 +947,13 @@ class FB2CompilerService:
         """
         stem = Path(rec.file_path).stem
 
+        # DEBUG
+        try:
+            with open(Path(__file__).parent / 'fb2_sort_debug.txt', 'a', encoding='utf-8') as _dbg:
+                _dbg.write(f"SORT stem={stem!r} sn={getattr(rec,'series_number','?')!r} ft={getattr(rec,'file_title','?')!r} ps={getattr(rec,'proposed_series','?')!r}\n")
+        except Exception:
+            pass
+
         # Источник А: series_number из FB2-метаданных.
         # Пропускаем для подсерий (proposed_series содержит '\') — там series_number
         # относится к родительской серии и не отражает позицию внутри подсерии.
@@ -919,15 +992,28 @@ class FB2CompilerService:
                             or re.search(r'(?:^|[-–\s])(\d{1,4})\.\s+[А-ЯЁA-Z]', stem))
                     if fn_m:
                         fn_num = int(next(g for g in fn_m.groups() if g is not None))
-                        if fn_num != meta_num:
+                        # Числа >= 1900 — год в имени файла, не номер тома; игнорируем
+                        if fn_num < 1900 and fn_num != meta_num:
                             # Расхождение: имя файла важнее ошибочных метаданных
                             return (0, fn_num, 0), 'filename', False, str(fn_num)
                     # Дополнительная проверка: Roman numeral inline («Том Ⅱ», «Том III» …).
                     # FB2-метаданные нередко хранят series_number="1" для всех томов серии,
                     # тогда как имя файла содержит точный номер в виде римской цифры.
-                    roman_inline = self._extract_inline_volume_number(rec.file_title or stem, stem)
+                    _ft2 = rec.file_title or ''
+                    _ft2_is_series = bool(_ft2) and _norm_key(_ft2) == _norm_key(rec.proposed_series or '')
+                    roman_inline = self._extract_inline_volume_number(
+                        stem if _ft2_is_series else (_ft2 or stem), stem
+                    )
                     if roman_inline is not None and roman_inline != meta_num:
                         return (0, roman_inline, 0), 'inline_title', False, str(roman_inline)
+                    # Проверяем паттерн «Том N. Часть M» — два файла одного тома.
+                    # Если найден, используем sort_key=(0, vol, part) чтобы оба файла
+                    # части попали в один run и не конфликтовали при дедупликации.
+                    _ft_for_part = rec.file_title or ''
+                    vp = self._extract_volume_part(_ft_for_part, stem)
+                    if vp is not None:
+                        vol, part = vp
+                        return (0, vol, part), 'volume_part', False, str(vol)
                     return (0, meta_num, 0), 'series_number', False, sn
 
         # Для подсерий: «Том N» в названии файла/title важнее общего числа в stem.
@@ -944,7 +1030,10 @@ class FB2CompilerService:
         )
         if num_m:
             num = int(next(g for g in num_m.groups() if g is not None))
-            return (0, num, 0), 'filename', False, str(num)
+            # Числа >= 1900 — скорее всего год в имени файла, не номер тома.
+            # Пример: «Тысяча и одна ночь. Том Ⅰ - 2022» → 2022 не номер тома.
+            if num < 1900:
+                return (0, num, 0), 'filename', False, str(num)
 
         # Источник В: диапазон томов в скобках внутри stem — «(Серия 1-3)», «(4-6)»
         # Используем MIN как позицию сортировки: файл (1-3) → 1, файл (4-6) → 4
@@ -956,8 +1045,22 @@ class FB2CompilerService:
             return (0, int(lo), 0), 'filename_range', False, f'{lo}-{hi}'
 
         # Источник Г: ключевое слово внутри title/stem («Свиток 1», «Том 3» …)
+        # Если file_title совпадает с именем серии — он не несёт информации о конкретном
+        # томе (например, «Тысяча и одна ночь. В 12 томах» для всех 12 файлов).
+        # В таком случае используем только stem, где есть реальный номер тома.
+        _ft = rec.file_title or ''
+        _proposed = getattr(rec, 'proposed_series', '') or ''
+        _ft_is_series = bool(_ft) and _norm_key(_ft) == _norm_key(_proposed)
+
+        # Проверяем паттерн «Том N. Часть M» до общего inline-поиска,
+        # чтобы «Часть» не интерпретировалась как ключевое слово тома.
+        vp = self._extract_volume_part(_ft or stem, stem)
+        if vp is not None:
+            vol, part = vp
+            return (0, vol, part), 'volume_part', False, str(vol)
+
         inline = self._extract_inline_volume_number(
-            rec.file_title or stem, stem
+            stem if _ft_is_series else (_ft or stem), stem
         )
         if inline is not None:
             return (0, inline, 0), 'inline_title', False, str(inline)
