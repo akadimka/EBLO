@@ -1097,6 +1097,35 @@ class FB2CompilerService:
             if inline is not None:
                 return (0, inline, 0), 'inline_title', False, str(inline)
 
+            # Извлечь номер подсерии по её имени в stem.
+            # Пример: proposed_series="Земной круг 1\Первый закон", stem содержит
+            # "Первый закон 2. Прежде чем их повесят" → номер подсерии = 2.
+            subseries_name = (rec.proposed_series or '').split('\\')[-1].strip()
+            if subseries_name:
+                _sub_re = re.compile(
+                    re.escape(subseries_name) + r'\s+(\d{1,4})',
+                    re.IGNORECASE | re.UNICODE,
+                )
+                _sm = _sub_re.search(stem) or _sub_re.search(rec.file_title or '')
+                if _sm:
+                    sub_num = int(_sm.group(1))
+                    if sub_num < 1900:
+                        return (0, sub_num, 0), 'subseries_number', False, str(sub_num)
+
+            # Если series_number из метаданных относится к подсерии (metadata_series
+            # совпадает с именем подсерии) — использовать его.
+            if sn:
+                sub_name = (rec.proposed_series or '').split('\\')[-1].strip()
+                meta_s_low = (rec.metadata_series or '').strip().lower().replace('ё', 'е')
+                sub_name_low = sub_name.lower().replace('ё', 'е')
+                if meta_s_low and sub_name_low and (
+                    meta_s_low == sub_name_low
+                    or meta_s_low in sub_name_low
+                    or sub_name_low in meta_s_low
+                ):
+                    if re.match(r'^\d+$', sn):
+                        return (0, int(sn), 0), 'series_number', False, sn
+
         # Источник Б: число в начале/конце имени файла
         num_m = self._STEM_NUM_RE.match(stem) or self._STEM_NUM_RE.search(stem) or re.search(
             r'(?:^|[-–\s])(\d{1,4})\.\s+[А-ЯЁA-Z]', stem
@@ -1433,7 +1462,7 @@ class FB2CompilerService:
             # --- Имя выходного файла и clean_series ---
             clean_series = self._clean_series_name(group.series)
             safe_author = re.sub(r'[\\/:*?"<>|]', '_', group.author)
-            safe_series = re.sub(r'[\\/:*?"<>|]', '_', clean_series)
+            safe_series = re.sub(r'[/:*?"<>|]', '_', clean_series.replace('\\', '. '))
 
             # --- Папка назначения: явная или рядом с исходниками ---
             dest_dir = output_dir if output_dir is not None else group.books[0].abs_path.parent

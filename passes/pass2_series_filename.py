@@ -24,6 +24,7 @@ PASS 2 для СЕРИЙ: Извлечение серий из имён файл
 
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Dict, List
 
@@ -1982,7 +1983,38 @@ class Pass2SeriesFilename:
         # При таком score title-as-series guard не должен отбрасывать результат
         block_matcher_high_confidence = False
         self._last_from_block_matcher = False
-        
+
+        # ══════════════════════════════════════════════════════════════════
+        # ШАГ 0: Двухуровневая иерархия «Серия N. Подсерия M. Название»
+        # Паттерн: после автора идут ДВА именованных уровня с номерами,
+        # затем заголовок. Пример:
+        #   «Земной круг 1. Первый закон 2. Прежде чем их повесят»
+        #   → proposed_series = «Земной круг 1\Первый закон»
+        # Подтверждение: metadata_series совпадает с root или subseries.
+        # ══════════════════════════════════════════════════════════════════
+        _TWO_LEVEL_RE = re.compile(
+            r'^(.+?)\s+(\d{1,4})\.\s+([А-ЯЁA-Z][^.]{2,}?)\s+(\d{1,4})\.\s+(.+)$',
+            re.UNICODE,
+        )
+        # Применяем только к части после " - " чтобы не захватывать автора
+        _name_after_dash = name_for_parsing
+        if ' - ' in name_for_parsing:
+            _name_after_dash = name_for_parsing.split(' - ', 1)[1]
+        _tl = _TWO_LEVEL_RE.match(_name_after_dash)
+        if _tl and metadata_series:
+            _root_name   = _tl.group(1).strip()   # «Земной круг»
+            _root_num    = _tl.group(2)            # «1»
+            _sub_name    = _tl.group(3).strip()    # «Первый закон»
+            _sub_num     = _tl.group(4)            # «2»
+            _meta_norm   = lambda s: unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
+            _meta_low    = _meta_norm(metadata_series.strip())
+            _root_low    = _meta_norm(_root_name)
+            _sub_low     = _meta_norm(_sub_name)
+            # Подтверждение: metadata совпадает с root или subseries
+            if _meta_low == _root_low or _meta_low == _sub_low:
+                _hier = f'{_root_name} {_root_num}\\{_sub_name}'
+                return _hier
+
         # ══════════════════════════════════════════════════════════════════
         # ШАГ 1 (NEW): Попробовать BlockLevelPatternMatcher 🎯
         # ══════════════════════════════════════════════════════════════════
