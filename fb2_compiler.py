@@ -130,6 +130,23 @@ class FB2CompilerService:
         re.IGNORECASE | re.UNICODE,
     )
 
+    @staticmethod
+    def _series_to_display(series: str) -> str:
+        """Конвертировать внутренний формат серии в отображаемую строку.
+
+        'Отрок_Сотник\\1. Отрок'  → 'Отрок_Сотник 1. Отрок'
+        'Хроники\\Первый цикл'    → 'Хроники. Первый цикл'
+        'Серия'                   → 'Серия'
+        """
+        if '\\' not in series:
+            return series
+        root, sub = series.split('\\', 1)
+        sub = sub.strip()
+        m = re.match(r'^(\d+)\s*[\.\)]\s*(.+)$', sub)
+        if m:
+            return f'{root} {m.group(1)}. {m.group(2).strip()}'
+        return f'{root}. {sub}'
+
     @classmethod
     def _clean_series_name(cls, series: str) -> str:
         """Убрать сервисные слова и диапазоны из имени серии.
@@ -172,20 +189,28 @@ class FB2CompilerService:
 
         _RNG = re.compile(r'^(\d+)\s*[-–—]\s*(\d+)$')
 
-        top_lo = min(b.sort_key[1] for b in level0)
+        # Для подсерий без числа в корне позиция хранится в sort_key[2] (parent_num=0).
+        # Пример: "Отрок_Сотник\1. Отрок" → sort_key=(0,0,sub_ordinal,0).
+        all_sub_plane = all(b.sort_key[1] == 0 for b in level0) and any(b.sort_key[2] != 0 for b in level0)
+        if all_sub_plane:
+            sub_positions = [b.sort_key[2] for b in level0 if b.sort_key[2] != 0]
+            top_lo = min(sub_positions)
+            top_hi = max(sub_positions)
+            has_subseries = False
+        else:
+            top_lo = min(b.sort_key[1] for b in level0)
 
-        top_hi_vals = []
-        for b in level0:
-            vl = (b.volume_label or '').strip()
-            if b.sort_key[2] != 0:
-                # sub-level: верхнеуровневая позиция = sort_key[1]
-                top_hi_vals.append(b.sort_key[1])
-            else:
-                m = _RNG.match(vl)
-                top_hi_vals.append(int(m.group(2)) if m else b.sort_key[1])
-        top_hi = max(top_hi_vals)
+            top_hi_vals = []
+            for b in level0:
+                vl = (b.volume_label or '').strip()
+                if b.sort_key[2] != 0:
+                    top_hi_vals.append(b.sort_key[1])
+                else:
+                    m = _RNG.match(vl)
+                    top_hi_vals.append(int(m.group(2)) if m else b.sort_key[1])
+            top_hi = max(top_hi_vals)
 
-        has_subseries = any(b.sort_key[2] != 0 for b in level0)
+            has_subseries = any(b.sort_key[2] != 0 for b in level0)
 
         # dot_part: «Том N Книга M» — secondary = номер книги внутри тома.
         # n_volumes = число различных томов (sort_key[1]), не число файлов.
@@ -202,24 +227,34 @@ class FB2CompilerService:
         return top_lo, top_hi, n_volumes, has_subseries
 
     @classmethod
-    def _series_suffix(cls, n_volumes: int, lo: int, part_count: int = 0) -> str:
+    def _series_suffix(cls, n_volumes: int, lo: int, hi: int = None, part_count: int = 0) -> str:
         """Вернуть суффикс для имени файла компиляции.
 
         n_volumes   — число логических томов в run'е
-        lo          — первая верхнеуровневая позиция (1 = с начала серии)
-        part_count  — для dot_part: число физических частей (книг); если > n_volumes,
+        lo          — первая позиция run'а
+        hi          — последняя позиция run'а (если None — вычисляется как lo+n_volumes-1)
+        part_count  — для dot_part: число физических частей; если > n_volumes,
                       добавляем «в N книгах» к служебному слову
 
-        Служебное слово (Дилогия…) — только если lo == 1 и n_volumes ≤ 10.
-        Иначе: «в N книгах» (N = part_count или n_volumes).
+        Правила:
+          • lo ∈ {0, 1} (серия с начала) → служебное слово (Дилогия, Трилогия…)
+            или «в N книгах» если слова нет.
+          • lo > 1 (частичный run) → «т. N» или «т. N-M».
         """
+        if hi is None:
+            hi = lo + n_volumes - 1
         n_books = part_count if part_count > 0 else n_volumes
-        if lo == 1 and 2 <= n_volumes < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n_volumes]:
-            word = cls._SERIES_WORDS[n_volumes]
-            if n_books > n_volumes:
-                return f'{word} в {n_books} книгах'
-            return word
-        return f'в {n_books} книгах'
+        if lo in (0, 1):
+            if 2 <= n_volumes < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n_volumes]:
+                word = cls._SERIES_WORDS[n_volumes]
+                if n_books > n_volumes:
+                    return f'{word} в {n_books} книгах'
+                return word
+            return f'в {n_books} книгах'
+        # Частичный run — указываем диапазон томов
+        if lo == hi:
+            return f'т. {lo}'
+        return f'т. {lo}-{hi}'
 
     def __init__(self, logger=None):
         self.logger = logger
@@ -270,6 +305,12 @@ class FB2CompilerService:
                 return _norm_key(series)
             root = series.split('\\')[0].strip()
             root_no_num = re.sub(r'\s+\d{1,4}\s*$', '', root).strip()
+            # Сливаем подсерии в одну группу ТОЛЬКО если корень имел числовой суффикс
+            # (Серия 1\X + Серия 2\Y → общий ключ «Серия»).
+            # Если корень без числа (Отрок_Сотник\Отрок vs Отрок_Сотник\Сотник) —
+            # подсерии независимы, упорядочить их нельзя, держим каждую отдельно.
+            if root_no_num == root:
+                return _norm_key(series)  # ключ включает имя подсерии
             return _norm_key(root_no_num) if root_no_num else _norm_key(series)
 
         buckets: Dict[Tuple[str, str], List] = {}
@@ -285,18 +326,30 @@ class FB2CompilerService:
         for (_, _), recs in buckets.items():
             if len(recs) < 2:
                 continue
-            # Используем реальное написание из первой записи без подсерии и номера
             author = recs[0].proposed_author.strip()
+
+            # Определяем имя серии для группы.
+            # Если все записи принадлежат одной подсерии — используем полный путь
+            # (Root\Sub), чтобы сохранить имя и порядковый номер подсерии.
+            # Если записи из разных подсерий (объединённая группа вида Серия N\X +
+            # Серия M\Y) — используем очищенный корень.
+            _all_subs = {r.proposed_series.strip().split('\\', 1)[1]
+                         for r in recs if '\\' in r.proposed_series}
             _s0 = recs[0].proposed_series.strip()
-            if '\\' in _s0:
-                _root = _s0.split('\\')[0].strip()
-                series = re.sub(r'\s+\d{1,4}\s*$', '', _root).strip() or _root
-            else:
+            if len(_all_subs) == 1 and '\\' in _s0:
+                # Единственная подсерия — берём полный путь как есть
                 series = _s0
-            # Если в группе есть файлы без подсерии — их название точнее
-            _plain = next((r.proposed_series.strip() for r in recs if '\\' not in r.proposed_series), None)
-            if _plain:
-                series = _plain
+            else:
+                if '\\' in _s0:
+                    _root = _s0.split('\\')[0].strip()
+                    series = re.sub(r'\s+\d{1,4}\s*$', '', _root).strip() or _root
+                else:
+                    series = _s0
+                # Если в группе есть файлы без подсерии — их название точнее
+                _plain = next((r.proposed_series.strip() for r in recs
+                               if '\\' not in r.proposed_series), None)
+                if _plain:
+                    series = _plain
 
             books = [self._make_book(rec, work_dir) for rec in recs]
 
@@ -342,7 +395,15 @@ class FB2CompilerService:
                     # Без этого "1-2. Название.fb2" получает sk=(0,2,0) vl='2' вместо
                     # sk=(0,1,0) vl='1-2', и _split_into_consecutive_runs считает
                     # что "1-2" и "3-4" не идут подряд (lo=4 ≠ hi=2+1).
-                    book.sort_key = (0, lo, 0, 0)
+                    # Для подсерий без числа в корне (parent_num=0) отдельные книги
+                    # используют (0, 0, sub_ordinal, 0). Ставим предкомпиляцию в ту же
+                    # плоскость, иначе она сортируется после всех (0 < lo).
+                    _pre_series_root = series.split('\\')[0].strip() if '\\' in series else ''
+                    _pre_root_has_num = bool(re.search(r'\d+\s*$', _pre_series_root))
+                    if '\\' in series and not _pre_root_has_num:
+                        book.sort_key = (0, 0, lo, 0)
+                    else:
+                        book.sort_key = (0, lo, 0, 0)
                     book.volume_label = f'{lo}-{hi}'
                     book.sort_source = 'filename_range'
                     book.order_ambiguous = False
@@ -386,7 +447,8 @@ class FB2CompilerService:
                 # Пример: предкомпиляция 1-2 + предкомпиляция 3-4 → НЕ актуальна (нужно объединить).
                 def _vol_num_for_check(b: 'CompilationBook') -> Optional[int]:
                     if b.sort_key and b.sort_key[0] == 0:
-                        return b.sort_key[1]
+                        # Для подсерий без числа в корне позиция хранится в sort_key[2]
+                        return b.sort_key[2] if b.sort_key[1] == 0 else b.sort_key[1]
                     return None
 
                 all_covered = (
@@ -418,9 +480,10 @@ class FB2CompilerService:
                 else:
                     # Определяем, какие тома предкомпиляции присутствуют отдельно
                     def _vol_num(b: CompilationBook) -> Optional[int]:
-                        """Номер тома из sort_key[1] если источник надёжен."""
+                        """Номер тома из sort_key если источник надёжен."""
                         if b.sort_key and b.sort_key[0] == 0:
-                            return b.sort_key[1]
+                            # Для подсерий без числа в корне позиция в sort_key[2]
+                            return b.sort_key[2] if b.sort_key[1] == 0 else b.sort_key[1]
                         return None
 
                     # Если regular_books пуст — нечем покрывать тома по отдельности.
@@ -643,14 +706,13 @@ class FB2CompilerService:
                         lone_numeric = [b for b in lone_numeric if b not in lone_regular]
 
                 if len(all_others) >= 2:
+                    # Не компилируем если ни одна книга не имеет реального номера тома
+                    # (sort_key[0] == 0). Год публикации и «не определён» — не основание
+                    # для компиляции: порядок чтения неизвестен.
+                    if not any(b.sort_key[0] == 0 for b in all_others):
+                        continue
                     all_oth_ambig = all(b.order_ambiguous for b in all_others)
-                    if all_oth_ambig:
-                        oth_sorted = sorted(
-                            all_others,
-                            key=lambda b: (b.record.file_title or b.abs_path.stem).lower(),
-                        )
-                    else:
-                        oth_sorted = sorted(all_others, key=lambda b: b.sort_key)
+                    oth_sorted = sorted(all_others, key=lambda b: b.sort_key)
                     groups.append(CompilationGroup(
                         author=author,
                         series=series,
@@ -846,9 +908,13 @@ class FB2CompilerService:
         for candidate in (_stem_val, book.record.file_title or ''):
             if is_subseries:
                 # Для подсерий: убираем пометки тома родительской серии вида «(т. 7-8)»,
-                # затем ищем диапазон без проверки series_link (имя подсерии редко
-                # фигурирует в имени файла компиляции).
+                # затем проверяем series_link — иначе "Перелом 1-3" в подсерии
+                # "Ратнинские бабы" ложно трактуется как предкомпиляция этой подсерии.
+                # Исключение: ведущий диапазон "N-M..." принимаем без series_link.
                 bare = _VOL_ANNOT_STRIP.sub('', candidate).strip()
+                stem_leading = (candidate == _stem_val) and bool(_LEADING_RANGE_RE.match(bare))
+                if not stem_leading and not _has_series_link(bare):
+                    continue
                 m = _RANGE_RE.search(bare)
             else:
                 # Если диапазон стоит в начале имени файла — принимаем без series_link.
@@ -1195,7 +1261,18 @@ class FB2CompilerService:
             # tertiary: номер тома внутри подсерии («Том N», «Книга N»)
             inline = self._extract_inline_volume_number(rec.file_title or stem, stem) or 0
 
-            # Метаданные как fallback для sub_ordinal
+            # Fallback для подсерий без числа в корне: ведущее число stem — позиция подсерии.
+            # Проверяем ДО метаданных: stem авторитетнее ошибочного sn.
+            # Пример: "5. Ближний круг" sn='4' (неверно) → берём 5 из стема, не 4 из sn.
+            # Пример: "4. Перелом" sn='' → берём 4 из стема.
+            if is_subseries and not parent_num and not sub_ordinal and not inline:
+                _fn_m = self._STEM_NUM_RE.match(stem)
+                if _fn_m:
+                    _fn_n = int(next(g for g in _fn_m.groups() if g is not None))
+                    if _fn_n and _fn_n < 1900:
+                        sub_ordinal = _fn_n
+
+            # Метаданные как fallback для sub_ordinal (только если stem не дал результата)
             if not sub_ordinal and not inline and sn:
                 meta_s_low = (rec.metadata_series or '').strip().lower().replace('ё', 'е')
                 sub_name_low = subseries_name.lower().replace('ё', 'е')
@@ -1594,27 +1671,17 @@ class FB2CompilerService:
             part_count = getattr(group, 'part_count', 0)
             top_lo, top_hi, n_volumes, has_subseries = self._run_stats(group.books)
 
-            # Квалификатор позиции добавляется в имя серии когда:
-            #   — run не начинается с позиции 1, или
-            #   — run охватывает ровно одну позицию, которая является частью нумерованной серии.
-            # Примеры: «Брия 1», «Брия 3-4», «Дюна 3-5».
-            needs_qualifier = top_lo > 1 or (top_lo == top_hi and top_lo != 0 and has_subseries)
-            if needs_qualifier:
-                _q = str(top_lo) if top_lo == top_hi else f'{top_lo}-{top_hi}'
-                qualified_series = f'{clean_series} {_q}'
-            else:
-                qualified_series = clean_series
-
-            safe_series = re.sub(r'[/:*?"<>|]', '_', qualified_series.replace('\\', '. '))
+            safe_series = re.sub(r'[/:*?"<>|]', '_', self._series_to_display(clean_series))
 
             # --- Папка назначения: явная или рядом с исходниками ---
             dest_dir = output_dir if output_dir is not None else group.books[0].abs_path.parent
 
             # --- Суффикс и XML ---
-            suffix = self._series_suffix(n_volumes, top_lo, part_count)
+            # Позиция run'а идёт в суффикс: полная серия → слово, частичная → «т. N-M».
+            suffix = self._series_suffix(n_volumes, top_lo, top_hi, part_count)
             output_xml = self._build_fb2(
                 author=group.author,
-                series=qualified_series,
+                series=clean_series,
                 suffix=suffix,
                 genre=meta.get('genre', ''),
                 bodies=bodies,

@@ -477,9 +477,9 @@ class Pass2SeriesFilename:
 
                                 if has_parent_series:
                                     # Б) Иерархия: {цикл}\{Подсерия}
-                                    # Убираем суффикс "(Автор)" и числовой префикс "N. " из подпапки.
+                                    # Убираем суффикс "(Автор)", но сохраняем числовой префикс "N. "
+                                    # — он становится порядковым номером подсерии в компиляции.
                                     subfolder_display = re.sub(r'\s*\([^)]*\)\s*$', '', series_folder).strip()
-                                    subfolder_display = re.sub(r'^\d+[\.\)\-]\s*', '', subfolder_display).strip()
                                     record.proposed_series = f"{author_folder_series}\\{subfolder_display}"
 
                                     # Костыль для многоавторных папок: "Серия (Фамилия и др)" →
@@ -1093,8 +1093,9 @@ class Pass2SeriesFilename:
                 if hint_depth < len(record_parts) - 1:
                     subfolder_raw = record_parts[hint_depth]
                     if not subfolder_raw.endswith('.fb2'):
-                        # Убрать числовой префикс "1. " "2) " и т.п.
-                        subfolder_display = re.sub(r'^\d+[\.\)\-]\s*', '', subfolder_raw).strip()
+                        # Сохраняем числовой префикс "1. " "2) " — он становится
+                        # порядковым номером подсерии. Убираем только лишние пробелы.
+                        subfolder_display = subfolder_raw.strip()
                         new_series = f"{root_series}\\{subfolder_display}"
                         # Устанавливаем серию для всех файлов в мультиавторной папке:
                         # физическое расположение в подпапке авторитетнее имени файла.
@@ -1992,28 +1993,38 @@ class Pass2SeriesFilename:
         #   → proposed_series = «Земной круг 1\Первый закон»
         # Подтверждение: metadata_series совпадает с root или subseries.
         # ══════════════════════════════════════════════════════════════════
+        # Вариант А: «Серия N. Подсерия M. Название»
         _TWO_LEVEL_RE = re.compile(
             r'^(.+?)\s+(\d{1,4})\.\s+([А-ЯЁA-Z][^.]{2,}?)\s+(\d{1,4})\.\s+(.+)$',
             re.UNICODE,
+        )
+        # Вариант Б: «Серия N. Подсерия. Том/Книга M» — подсерия без своего номера
+        _TWO_LEVEL_TOM_RE = re.compile(
+            r'^(.+?)\s+(\d{1,4})\.\s+([А-ЯЁA-Z][^.]{2,}?)\.\s+(?:Том|Книга|Часть|кн\.|Book|Vol\.?)\s+\d',
+            re.IGNORECASE | re.UNICODE,
         )
         # Применяем только к части после " - " чтобы не захватывать автора
         _name_after_dash = name_for_parsing
         if ' - ' in name_for_parsing:
             _name_after_dash = name_for_parsing.split(' - ', 1)[1]
+        _meta_norm = lambda s: unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
         _tl = _TWO_LEVEL_RE.match(_name_after_dash)
         if _tl and metadata_series:
-            _root_name   = _tl.group(1).strip()   # «Земной круг»
-            _root_num    = _tl.group(2)            # «1»
-            _sub_name    = _tl.group(3).strip()    # «Первый закон»
-            _sub_num     = _tl.group(4)            # «2»
-            _meta_norm   = lambda s: unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
-            _meta_low    = _meta_norm(metadata_series.strip())
-            _root_low    = _meta_norm(_root_name)
-            _sub_low     = _meta_norm(_sub_name)
-            # Подтверждение: metadata совпадает с root или subseries
-            if _meta_low == _root_low or _meta_low == _sub_low:
-                _hier = f'{_root_name} {_root_num}\\{_sub_name}'
-                return _hier
+            _root_name = _tl.group(1).strip()
+            _root_num  = _tl.group(2)
+            _sub_name  = _tl.group(3).strip()
+            _meta_low  = _meta_norm(metadata_series.strip())
+            if _meta_low == _meta_norm(_root_name) or _meta_low == _meta_norm(_sub_name):
+                return f'{_root_name} {_root_num}\\{_sub_name}'
+        # Вариант Б: metadata подтверждает root-серию, подсерия без номера
+        _tl2 = _TWO_LEVEL_TOM_RE.match(_name_after_dash)
+        if _tl2 and metadata_series:
+            _root_name = _tl2.group(1).strip()
+            _root_num  = _tl2.group(2)
+            _sub_name  = _tl2.group(3).strip()
+            _meta_low  = _meta_norm(metadata_series.strip())
+            if _meta_low == _meta_norm(_root_name) or _meta_low == _meta_norm(_sub_name):
+                return f'{_root_name} {_root_num}\\{_sub_name}'
 
         # ══════════════════════════════════════════════════════════════════
         # ШАГ 1 (NEW): Попробовать BlockLevelPatternMatcher 🎯
