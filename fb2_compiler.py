@@ -281,21 +281,6 @@ class FB2CompilerService:
         Returns:
             Список CompilationGroup, отсортированный по (author, series).
         """
-        # Пересоздаём debug-файлы при каждом запуске (не дозаписываем)
-        import tempfile, os as _os
-        _base = Path(__file__).parent
-        for _dbg_name in ('fb2_sort_debug.txt', 'fb2_inline_debug.txt'):
-            _dbg_path = _base / _dbg_name
-            try:
-                _tmp_fd, _tmp_path = tempfile.mkstemp(dir=_base, prefix=_dbg_name + '.tmp')
-                _os.close(_tmp_fd)
-                _os.replace(_tmp_path, _dbg_path)
-            except Exception:
-                try:
-                    _dbg_path.write_text('', encoding='utf-8')
-                except Exception:
-                    pass
-
         # Группировка по (author_lower, series_lower)
         # Нормализуем ё→е в ключах, чтобы "Тёмные звёзды" и "Темные звезды" попали в одну группу.
         # Для подсерий ("Серия N\Подсерия") ключ группировки — корневое название без номера,
@@ -356,16 +341,6 @@ class FB2CompilerService:
             duplicate_paths: List[Path] = []
 
             # Debug: вывести классификацию файлов для конкретной пары автор/серия
-            _debug = getattr(self, '_debug_filter', None)
-            import sys as _sys
-            _dbg_out = _sys.__stdout__  # bypass any stdout redirect
-            if _debug and any(kw in author.lower() or kw in series.lower() for kw in _debug):
-                print(f"\n[DEBUG] {author} / {series} ({len(books)} файлов):", file=_dbg_out)
-                for b in books:
-                    lo, hi = self._precompiled_range(b, series)
-                    print(f"  {'PRE' if hi>lo else 'REG'} sk={b.sort_key} vl={b.volume_label!r} "
-                          f"pre=({lo},{hi}) | {b.abs_path.name}", file=_dbg_out)
-
             # --- Фильтр 1: обработка заранее скомпилированных файлов ----------
             # Признак: stem/title содержит сервисное слово (Трилогия …) или
             # series_number — диапазон вида "1-3".
@@ -381,15 +356,6 @@ class FB2CompilerService:
             #      удаляем предкомпиляцию, компилируем из отдельных томов.
             precompiled: List[Tuple[CompilationBook, int, int]] = []  # (book, lo, hi)
             regular_books: List[CompilationBook] = []
-            _is_target_series = '\u0422\u044b\u0441\u044f\u0447\u0430' in series  # "Тысяча"
-            for book in books:
-                lo, hi = self._precompiled_range(book, series)
-                if _is_target_series:
-                    try:
-                        with open(Path(__file__).parent / 'fb2_sort_debug.txt', 'a', encoding='utf-8') as _dbg2:
-                            _dbg2.write(f"  PRE_RANGE sk={book.sort_key} vl={book.volume_label!r} pre=({lo},{hi}) | {book.abs_path.name}\n")
-                    except Exception:
-                        pass
                 if hi > lo:
                     # Обновляем sort_key и volume_label по реальному диапазону файла.
                     # Без этого "1-2. Название.fb2" получает sk=(0,2,0) vl='2' вместо
@@ -593,13 +559,6 @@ class FB2CompilerService:
             # первую по алфавиту, остальные помечаем как дубликаты.
             books = self._dedup_by_position(books, duplicate_paths)
 
-            if _is_target_series:
-                try:
-                    with open(Path(__file__).parent / 'fb2_sort_debug.txt', 'a', encoding='utf-8') as _dbg3:
-                        _dbg3.write(f"  AFTER_DEDUP books={[(b.sort_key,b.volume_label) for b in books]} dups={len(duplicate_paths)}\n")
-                except Exception:
-                    pass
-
             if len(books) < 2:
                 # Если после dedup остался один файл, но есть дубликаты — создаём cleanup_only.
                 # Пример: два файла с одинаковым sort_key (01. vs 1.) — dedup оставляет один,
@@ -616,10 +575,6 @@ class FB2CompilerService:
                         cleanup_only=True,
                     ))
                 continue
-            if _debug and any(kw in author.lower() or kw in series.lower() for kw in _debug):
-                print(f"  → to_compile: {[b.abs_path.name for b in books]}", file=_dbg_out)
-                print(f"  → to_delete:  {[p.name for p in duplicate_paths]}", file=_dbg_out)
-
             books_sorted, order_determined, alphabetical_order = self._sort_books(books)
 
             if alphabetical_order:
@@ -854,15 +809,6 @@ class FB2CompilerService:
                 continue
             # Нормализовать Unicode-символы римских цифр в ASCII: Ⅻ → XII, Ⅰ → I и т.п.
             text_norm = unicodedata.normalize('NFKC', text)
-            # TEMP DEBUG
-            try:
-                with open(Path(__file__).parent / 'fb2_inline_debug.txt', 'a', encoding='utf-8') as _d:
-                    _d.write(f"INLINE text={text!r} norm={text_norm!r}\n")
-                    m0 = cls._VOLUME_KEYWORDS_RE.search(text_norm)
-                    m1 = cls._VOLUME_ROMAN_RE.search(text_norm)
-                    _d.write(f"  kw_match={m0} roman_match={m1} roman_group={m1.group(1) if m1 else None}\n")
-            except Exception:
-                pass
             m = cls._VOLUME_KEYWORDS_RE.search(text_norm)
             if m:
                 return int(m.group(1))
@@ -1150,12 +1096,6 @@ class FB2CompilerService:
         """
         stem = Path(rec.file_path).stem
 
-        # DEBUG
-        try:
-            with open(Path(__file__).parent / 'fb2_sort_debug.txt', 'a', encoding='utf-8') as _dbg:
-                _dbg.write(f"SORT stem={stem!r} sn={getattr(rec,'series_number','?')!r} ft={getattr(rec,'file_title','?')!r} ps={getattr(rec,'proposed_series','?')!r}\n")
-        except Exception:
-            pass
 
         # Источник А: series_number из FB2-метаданных.
         # Пропускаем для подсерий (proposed_series содержит '\') — там series_number
