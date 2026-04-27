@@ -1,5 +1,7 @@
 import os
+import re
 import hashlib
+import unicodedata
 import threading
 from pathlib import Path
 import tkinter as tk
@@ -26,10 +28,42 @@ def _file_hash(path: Path, chunk_size: int = 65536) -> str:
     return h.hexdigest()
 
 
+def _norm_str(s: str) -> str:
+    """Нормализация строки для сравнения: NFKC, строчные, ё→е, без лишних символов."""
+    s = unicodedata.normalize('NFKC', s or '').lower().replace('ё', 'е')
+    s = re.sub(r'[«»"\'„"‟\(\)\[\]…]', '', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def _norm_author(s: str) -> str:
+    """Нормализация имени автора: точки → пробел (С.А. → с а), затем collapse spaces."""
+    s = unicodedata.normalize('NFKC', s or '').lower().replace('ё', 'е')
+    s = re.sub(r'\.', ' ', s)   # С.А.Кори → С А Кори
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def _rec_authors(rec) -> frozenset:
+    """Извлечь frozenset нормализованных имён авторов.
+
+    Приоритет: proposed_author (нормализован пайплайном), затем metadata_authors.
+    """
+    proposed = getattr(rec, 'proposed_author', '') or ''
+    meta = getattr(rec, 'metadata_authors', '') or ''
+    src = proposed if proposed else meta
+    parts = re.split(r'[;,]', src)
+    return frozenset(a for a in (_norm_author(p) for p in parts) if len(a) >= 3)
+
+
+def _authors_set(s: str) -> frozenset:
+    """Разбить строку авторов на frozenset нормализованных имён."""
+    parts = re.split(r'[;,]', s or '')
+    return frozenset(a for a in (_norm_author(p) for p in parts) if len(a) >= 3)
+
+
 class DuplicateFinderWindow:
     def __init__(self, parent=None, settings_manager=None, on_close=None):
         self.window = tk.Toplevel(parent) if parent else tk.Tk()
-        self.window.withdraw()  # скрываем до позиционирования
+        self.window.withdraw()
         self.window.title("Поиск дубликатов")
         self.settings_manager = settings_manager
         self.search_path = tk.StringVar()
@@ -38,12 +72,12 @@ class DuplicateFinderWindow:
         self._on_close_cb = on_close
 
         if settings_manager:
-            setup_window_persistence(self.window, 'duplicate_finder', settings_manager, '1100x700+200+150', parent_window=parent)
+            setup_window_persistence(self.window, 'duplicate_finder', settings_manager, '1200x700+200+150', parent_window=parent)
             saved = settings_manager.settings.get('duplicate_finder_path', '')
             if saved and os.path.isdir(saved):
                 self.search_path.set(saved)
         else:
-            self.window.geometry("1100x700")
+            self.window.geometry("1200x700")
 
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
         self.search_path.trace_add('write', self._save_search_path)
@@ -109,7 +143,7 @@ class DuplicateFinderWindow:
 
         # Правая панель — дубликаты (Treeview с чекбоксами)
         right_pane = ttk.Frame(paned)
-        paned.add(right_pane, weight=1)
+        paned.add(right_pane, weight=2)
         right_pane.rowconfigure(1, weight=1)
         right_pane.columnconfigure(0, weight=1)
 
@@ -123,16 +157,22 @@ class DuplicateFinderWindow:
         rf.columnconfigure(0, weight=1)
 
         self.dup_tree = ttk.Treeview(
-            rf, columns=('check', 'path', 'size'),
+            rf, columns=('check', 'path', 'reason', 'series', 'size'),
             show='headings', selectmode='none')
-        self.dup_tree.heading('check', text='✓', anchor='center')
-        self.dup_tree.heading('path',  text='Путь',  anchor='w',
+        self.dup_tree.heading('check',  text='✓',       anchor='center')
+        self.dup_tree.heading('path',   text='Путь',    anchor='w',
                               command=lambda: self._sort_dup('path'))
-        self.dup_tree.heading('size',  text='Размер', anchor='e',
+        self.dup_tree.heading('reason', text='Тип',     anchor='center',
+                              command=lambda: self._sort_dup('reason'))
+        self.dup_tree.heading('series', text='Серия',   anchor='w',
+                              command=lambda: self._sort_dup('series'))
+        self.dup_tree.heading('size',   text='Размер',  anchor='e',
                               command=lambda: self._sort_dup('size'))
-        self.dup_tree.column('check', width=30,  stretch=False, anchor='center')
-        self.dup_tree.column('path',  width=460, stretch=True)
-        self.dup_tree.column('size',  width=80,  stretch=False, anchor='e')
+        self.dup_tree.column('check',  width=30,  stretch=False, anchor='center')
+        self.dup_tree.column('path',   width=380, stretch=True)
+        self.dup_tree.column('reason', width=100, stretch=False, anchor='center')
+        self.dup_tree.column('series', width=160, stretch=False)
+        self.dup_tree.column('size',   width=80,  stretch=False, anchor='e')
         self.dup_tree.tag_configure('checked',   background='#ffe0e0')
         self.dup_tree.tag_configure('unchecked', background='white')
         self.dup_tree.bind('<Button-1>', self._toggle_check)
@@ -221,7 +261,7 @@ class DuplicateFinderWindow:
     def _sort_dup(self, col):
         items = [(self.dup_tree.item(i, 'values'), i)
                  for i in self.dup_tree.get_children()]
-        idx = {'path': 1, 'size': 2}[col]
+        idx = {'path': 1, 'reason': 2, 'series': 3, 'size': 4}[col]
         reverse = getattr(self, '_sort_rev', False)
         self._sort_rev = not reverse
         items.sort(key=lambda x: x[0][idx], reverse=reverse)
@@ -248,7 +288,7 @@ class DuplicateFinderWindow:
         self.btn_check_all.configure(state=tk.DISABLED)
         self.btn_search.configure(state=tk.DISABLED)
         self.progress['value'] = 0
-        self.status_var.set('Сканирование…')
+        self.status_var.set('Фаза 1: генерация индекса…')
         self._searching = True
 
         threading.Thread(target=self._search_worker,
@@ -256,11 +296,29 @@ class DuplicateFinderWindow:
 
     def _search_worker(self, folder: str):
         try:
+            # ── Фаза 1: генерация CSV (0–60%) ──────────────────────────
+            try:
+                from regen_csv import RegenCSVService
+            except ImportError:
+                from .regen_csv import RegenCSVService
+
+            svc = RegenCSVService()
+
+            def _csv_progress(current, total, status):
+                pct = int(current / max(total, 1) * 60)
+                self.window.after(0, lambda p=pct, s=status: (
+                    self.progress.__setitem__('value', p),
+                    self.status_var.set(f'Фаза 1: {s}'),
+                ))
+
+            records = svc.generate_csv(folder, output_csv_path=None,
+                                       progress_callback=_csv_progress) or []
+
+            # ── Фаза 2: поиск по хэшу (60–100%) ───────────────────────
+            self.window.after(0, lambda: self.status_var.set('Фаза 2: поиск по хэшу…'))
+
             files = list(Path(folder).rglob('*.fb2'))
             total = len(files)
-            if total == 0:
-                self.window.after(0, lambda: self._on_done({}, total))
-                return
 
             hash_map: dict = {}
             for i, path in enumerate(files, 1):
@@ -268,45 +326,118 @@ class DuplicateFinderWindow:
                 if h:
                     hash_map.setdefault(h, []).append(path)
                 if i % 20 == 0 or i == total:
-                    pct = int(i / total * 100)
-                    msg = f'Проверено: {i} / {total}'
+                    pct = 60 + int(i / max(total, 1) * 40)
+                    msg = f'Фаза 2: проверено {i} / {total} файлов'
                     self.window.after(0, lambda p=pct, m=msg: (
                         self.progress.__setitem__('value', p),
-                        self.status_var.set(m)
+                        self.status_var.set(m),
                     ))
-            self.window.after(0, lambda: self._on_done(hash_map, total))
+
+            # ── Объединение результатов ─────────────────────────────────
+            all_dups = self._merge_duplicates(folder, hash_map, records)
+            self.window.after(0, lambda: self._on_done(all_dups, total))
+
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self.window.after(0, lambda: self._on_error(str(e)))
 
-    def _on_done(self, hash_map: dict, total: int):
-        self._searching = False
-        self.btn_search.configure(state=tk.NORMAL)
-        self.progress['value'] = 100
+    def _merge_duplicates(self, folder: str, hash_map: dict, records: list) -> dict:
+        """Объединить хэш-дубликаты и метадата-дубликаты.
 
-        sources = []
-        duplicates = []
+        Возвращает {dup_path: {'source': Path, 'reasons': set, 'series': str}}.
+        """
+        work_dir = Path(folder)
+        result: dict = {}  # dup_path → {source, reasons, series}
+
+        # ── Хэш-дубликаты ──────────────────────────────────────────────
         for paths in hash_map.values():
             if len(paths) < 2:
                 continue
             paths_sorted = sorted(paths)
-            sources.append(paths_sorted[0])
-            duplicates.extend(paths_sorted[1:])
+            src = paths_sorted[0]
+            for dup in paths_sorted[1:]:
+                if dup not in result:
+                    result[dup] = {'source': src, 'reasons': {'Хэш'}, 'series': ''}
+                else:
+                    result[dup]['reasons'].add('Хэш')
 
-        for p in sorted(sources):
-            self.src_list.insert(tk.END, str(p))
+        # ── Метаданные-дубликаты ───────────────────────────────────────
+        # Группируем по нормализованному title, затем попарно проверяем
+        # пересечение авторов (хотя бы один общий).
+        title_map: dict = {}  # title_norm → [rec]
+        for rec in records:
+            title = _norm_str(getattr(rec, 'file_title', '') or '')
+            if title:
+                title_map.setdefault(title, []).append(rec)
+
+        for title, recs in title_map.items():
+            if len(recs) < 2:
+                continue
+            recs_sorted = sorted(recs, key=lambda r: str(getattr(r, 'file_path', '')))
+            # Попарная проверка: пересечение авторов → дубликат
+            for i, rec_a in enumerate(recs_sorted):
+                authors_a = _rec_authors(rec_a)
+                if not authors_a:
+                    continue
+                for rec_b in recs_sorted[i + 1:]:
+                    authors_b = _rec_authors(rec_b)
+                    if not authors_b or not (authors_a & authors_b):
+                        continue
+                    # Дубликат: src = первый по пути, dup = второй
+                    src_path = self._resolve_path(work_dir, getattr(rec_a, 'file_path', ''))
+                    dup_path = self._resolve_path(work_dir, getattr(rec_b, 'file_path', ''))
+                    if dup_path is None or not dup_path.exists():
+                        continue
+                    series = (getattr(rec_b, 'proposed_series', '') or
+                              getattr(rec_a, 'proposed_series', '') or '')
+                    if dup_path not in result:
+                        result[dup_path] = {
+                            'source': src_path,
+                            'reasons': {'Метаданные'},
+                            'series': series,
+                        }
+                    else:
+                        result[dup_path]['reasons'].add('Метаданные')
+                        if series and not result[dup_path]['series']:
+                            result[dup_path]['series'] = series
+
+        return result
+
+    @staticmethod
+    def _resolve_path(work_dir: Path, file_path: str) -> Path:
+        if not file_path:
+            return None
+        p = Path(file_path)
+        if p.is_absolute():
+            return p
+        return work_dir / p
+
+    def _on_done(self, all_dups: dict, total: int):
+        self._searching = False
+        self.btn_search.configure(state=tk.NORMAL)
+        self.progress['value'] = 100
+
+        sources = sorted({str(v['source']) for v in all_dups.values() if v['source']})
+        for s in sources:
+            self.src_list.insert(tk.END, s)
 
         dup_size_total = 0
-        for p in sorted(duplicates):
-            sz = p.stat().st_size if p.exists() else 0
+        for dup_path in sorted(all_dups):
+            info = all_dups[dup_path]
+            sz = dup_path.stat().st_size if dup_path.exists() else 0
             dup_size_total += sz
-            sz_str = f'{sz // 1024} КБ' if sz < 1_048_576 else f'{sz / 1_048_576:.1f} МБ'
+            sz_str = (f'{sz // 1024} КБ' if sz < 1_048_576
+                      else f'{sz / 1_048_576:.1f} МБ')
+            reason = '+'.join(sorted(info['reasons']))
             self.dup_tree.insert('', tk.END,
-                values=('✓', str(p), sz_str), tags=('checked',))
+                values=('✓', str(dup_path), reason, info['series'], sz_str),
+                tags=('checked',))
 
-        if duplicates:
+        if all_dups:
             mb = dup_size_total / 1_048_576
             self.status_var.set(
-                f'Найдено {len(duplicates)} дубликат(а/ов) из {total} файлов'
+                f'Найдено {len(all_dups)} дубликат(а/ов) из {total} файлов'
                 f' — можно освободить {mb:.1f} МБ')
             self.btn_check_all.configure(state=tk.NORMAL)
             self._update_delete_btn()
@@ -341,10 +472,19 @@ class DuplicateFinderWindow:
 
         failed = []
         deleted = []
+        root = Path(self.search_path.get().strip())
         for path_str in to_delete:
             try:
-                Path(path_str).unlink(missing_ok=True)
+                p = Path(path_str)
+                p.unlink(missing_ok=True)
                 deleted.append(path_str)
+                parent = p.parent
+                while parent != root and parent.is_dir():
+                    if not any(parent.iterdir()):
+                        parent.rmdir()
+                        parent = parent.parent
+                    else:
+                        break
             except OSError as e:
                 failed.append(f'{path_str}: {e}')
 
