@@ -191,6 +191,7 @@ class CompilerDialog:
         vsb.grid(row=0, column=1, sticky='ns')
 
         self._tree.bind('<ButtonRelease-1>', self._on_select)
+        self._tree.bind('<<TreeviewSelect>>', self._on_select)
         paned.add(top_frm, weight=3)
 
         # ── Нижняя панель: детали выбранной группы ───────────────────

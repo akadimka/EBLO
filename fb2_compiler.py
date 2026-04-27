@@ -356,6 +356,8 @@ class FB2CompilerService:
             #      удаляем предкомпиляцию, компилируем из отдельных томов.
             precompiled: List[Tuple[CompilationBook, int, int]] = []  # (book, lo, hi)
             regular_books: List[CompilationBook] = []
+            for book in books:
+                lo, hi = self._precompiled_range(book, series)
                 if hi > lo:
                     # Обновляем sort_key и volume_label по реальному диапазону файла.
                     # Без этого "1-2. Название.fb2" получает sk=(0,2,0) vl='2' вместо
@@ -1146,8 +1148,12 @@ class FB2CompilerService:
                         fn_num = int(next(g for g in fn_m.groups() if g is not None))
                         # Числа >= 1900 — год в имени файла, не номер тома; игнорируем
                         if fn_num < 1900 and fn_num != meta_num:
-                            # Расхождение: имя файла важнее ошибочных метаданных
-                            return (0, fn_num, 0, 0), 'filename', False, str(fn_num)
+                            # Расхождение: проверяем что meta_num не стоит ПОЗЖЕ в стеме.
+                            # Иначе "Хоттабыч 1. Позывной Хоттабыч 5" → fn_num=1, meta_num=5,
+                            # но "5" есть после "1" → метаданные точнее, не перебиваем.
+                            _after_fn = stem[fn_m.end():]
+                            if not re.search(r'\b' + str(meta_num) + r'\b', _after_fn):
+                                return (0, fn_num, 0, 0), 'filename', False, str(fn_num)
                     # Дополнительная проверка: Roman numeral inline («Том Ⅱ», «Том III» …).
                     # FB2-метаданные нередко хранят series_number="1" для всех томов серии,
                     # тогда как имя файла содержит точный номер в виде римской цифры.
@@ -1165,7 +1171,11 @@ class FB2CompilerService:
                         stem if _ft2_is_series else (_ft2 or stem), stem
                     )
                     if roman_inline is not None and roman_inline != meta_num:
-                        return (0, roman_inline, 0, 0), 'inline_title', False, str(roman_inline)
+                        # Если meta_num явно присутствует в стеме — доверяем метаданным.
+                        # Иначе "Аватар Х. Часть 2" с meta_num=7 даёт roman_inline=2 →
+                        # коллизия с книгой 2, хотя "7" есть прямо в имени файла.
+                        if not re.search(r'\b' + str(meta_num) + r'\b', stem):
+                            return (0, roman_inline, 0, 0), 'inline_title', False, str(roman_inline)
                     return (0, meta_num, 0, 0), 'series_number', False, sn
 
         # Для подсерий: позиция (primary=родитель, secondary=подсерия, tertiary=том).
