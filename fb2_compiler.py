@@ -1162,11 +1162,15 @@ class FB2CompilerService:
                     # Проверяем паттерн «Том N. Часть M» ДО roman_inline —
                     # иначе «Том XII. Часть вторая» даёт roman_inline=12 != meta_num=13
                     # и возвращает (0, 12, 0, 0) без учёта части.
+                    # Условие: используем только если vol совпадает с meta_num.
+                    # Иначе «Том 7. Часть 2» при sn='08' даёт (0,7,2,0) вместо (0,8,0,0):
+                    # «Том 7» описывает структуру внутри тома, а не позицию в серии.
                     _ft_for_part = rec.file_title or ''
                     vp = self._extract_volume_part(_ft_for_part, stem)
                     if vp is not None:
                         vol, part = vp
-                        return (0, vol, part, 0), 'volume_part', False, str(vol)
+                        if vol == meta_num:
+                            return (0, vol, part, 0), 'volume_part', False, str(vol)
                     roman_inline = self._extract_inline_volume_number(
                         stem if _ft2_is_series else (_ft2 or stem), stem
                     )
