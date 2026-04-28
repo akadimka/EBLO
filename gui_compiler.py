@@ -224,6 +224,8 @@ class CompilerDialog:
 
         self._det_tree.grid(row=0, column=0, sticky='nsew')
         det_vsb.grid(row=0, column=1, sticky='ns')
+        self._det_paths: dict = {}
+        self._det_tree.bind('<Double-1>', self._on_book_dblclick)
 
         # ── Строка предпросмотра имени файла ─────────────────────────
         fname_frm = ttk.Frame(bot_frm)
@@ -490,11 +492,12 @@ class CompilerDialog:
 
         for iid in self._det_tree.get_children():
             self._det_tree.delete(iid)
+        self._det_paths.clear()
 
         if getattr(group, 'cleanup_only', False):
             # Сначала — файлы, которые остаются (зелёные)
             for pos, kept_path in enumerate(group.kept_paths or [], 1):
-                self._det_tree.insert(
+                _iid = self._det_tree.insert(
                     '', tk.END,
                     values=(
                         pos,
@@ -505,10 +508,11 @@ class CompilerDialog:
                     ),
                     tags=('kept',),
                 )
+                self._det_paths[_iid] = kept_path
             # Затем — файлы к удалению (красные)
             offset = len(group.kept_paths or [])
             for pos, dup_path in enumerate(group.duplicate_paths, offset + 1):
-                self._det_tree.insert(
+                _iid = self._det_tree.insert(
                     '', tk.END,
                     values=(
                         pos,
@@ -519,6 +523,7 @@ class CompilerDialog:
                     ),
                     tags=('to_delete',),
                 )
+                self._det_paths[_iid] = dup_path
             kept_label = f'Уже скомпилировано: {group.volume_range}' if group.volume_range else 'Уже скомпилировано'
             self._fname_var.set(kept_label)
             return
@@ -529,7 +534,7 @@ class CompilerDialog:
             is_alpha = getattr(group, 'alphabetical_order', False)
             sn = book.volume_label or ('α' if is_alpha else ('?' if book.order_ambiguous else '—'))
             warn = '' if is_alpha else (' ⚠' if book.order_ambiguous else '')
-            self._det_tree.insert(
+            _iid = self._det_tree.insert(
                 '', tk.END,
                 values=(
                     pos,
@@ -539,11 +544,12 @@ class CompilerDialog:
                     sn,
                 ),
             )
+            self._det_paths[_iid] = book.abs_path
 
         # Файлы-дубликаты, которые будут удалены при компиляции
         offset = len(group.books)
         for pos, dup_path in enumerate(group.duplicate_paths or [], offset + 1):
-            self._det_tree.insert(
+            _iid = self._det_tree.insert(
                 '', tk.END,
                 values=(
                     pos,
@@ -554,6 +560,7 @@ class CompilerDialog:
                 ),
                 tags=('to_delete',),
             )
+            self._det_paths[_iid] = dup_path
 
         # Предпросмотр имени файла компиляции
         try:
@@ -568,6 +575,15 @@ class CompilerDialog:
             self._fname_var.set(fname)
         except Exception:
             self._fname_var.set('—')
+
+    def _on_book_dblclick(self, _event=None):
+        sel = self._det_tree.selection()
+        if not sel:
+            return
+        path = self._det_paths.get(sel[0])
+        if path:
+            import subprocess
+            subprocess.Popen(f'explorer /select,"{path}"', shell=True)
 
     def _select_all(self):
         self._tree.selection_set(self._tree.get_children())
