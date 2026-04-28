@@ -1144,12 +1144,15 @@ class FB2CompilerService:
                     ratio = SequenceMatcher(None, text_a, text_b).ratio()
                 if ratio < similarity_threshold:
                     continue
-                # Похожи: решаем, какую оставить
-                spec_a, spec_b = _specificity(book_a), _specificity(book_b)
-                if spec_a != spec_b:
-                    loser = book_b if spec_a > spec_b else book_a
+                # Похожи: решаем, какую оставить.
+                # Приоритет 1: размер файла — больший файл содержит больше текста.
+                # Приоритет 2 (тайбрейкер): точность позиции в серии (subseries-компоненты).
+                size_a, size_b = _file_size(book_a), _file_size(book_b)
+                if size_a != size_b:
+                    loser = book_b if size_a > size_b else book_a
                 else:
-                    loser = book_b if _file_size(book_a) >= _file_size(book_b) else book_a
+                    spec_a, spec_b = _specificity(book_a), _specificity(book_b)
+                    loser = book_b if spec_a >= spec_b else book_a
                 to_remove.add(id(loser))
                 duplicate_paths.append(loser.abs_path)
                 self._log(
