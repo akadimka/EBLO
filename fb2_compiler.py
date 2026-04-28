@@ -561,6 +561,14 @@ class FB2CompilerService:
             # первую по алфавиту, остальные помечаем как дубликаты.
             books = self._dedup_by_position(books, duplicate_paths)
 
+            # --- Фильтр 4: дедупликация по содержимому -----------------------
+            # Если два файла начинаются с практически одинакового текста
+            # (SequenceMatcher ratio ≥ 0.85 на первых 2000 символах), один
+            # из них — незарегистрированная предкомпиляция или дубликат с
+            # другим форматированием. Оставляем файл с более детальной позицией
+            # в серии (ненулевой subseries-компонент), иначе — больший по размеру.
+            books = self._dedup_by_content(books, duplicate_paths)
+
             if len(books) < 2:
                 # Если после dedup остался один файл, но есть дубликаты — создаём cleanup_only.
                 # Пример: два файла с одинаковым sort_key (01. vs 1.) — dedup оставляет один,
@@ -1028,6 +1036,97 @@ class FB2CompilerService:
                 key = key[len(candidate):]
                 break
         return key
+
+    _STRIP_TAGS_RE = re.compile(r'<[^>]+>')
+
+    def _extract_opening_text(self, book: CompilationBook, chars: int = 2000) -> str:
+        """Вернуть первые `chars` символов нормализованного plain-text из <body>."""
+        try:
+            if not book.abs_path.exists():
+                return ''
+            text = self._read_file_text(book.abs_path)
+            # Вырезаем только содержимое <body> (без тегов notes/footnotes)
+            body_m = re.search(
+                r'<(?:fb:)?body(?!\s[^>]*\bname\s*=)[^>]*>(.*?)</(?:fb:)?body>',
+                text, re.DOTALL | re.IGNORECASE,
+            )
+            raw = body_m.group(1) if body_m else text
+            plain = self._STRIP_TAGS_RE.sub(' ', raw)
+            plain = re.sub(r'\s+', ' ', plain).strip()
+            return plain[:chars]
+        except Exception:
+            return ''
+
+    def _dedup_by_content(
+        self,
+        books: List[CompilationBook],
+        duplicate_paths: List[Path],
+        similarity_threshold: float = 0.85,
+        compare_chars: int = 2000,
+    ) -> List[CompilationBook]:
+        """Убрать книги, чьё открывающее содержимое совпадает с другой книгой группы.
+
+        Сравниваем первые `compare_chars` символов нормализованного текста через
+        SequenceMatcher. Порог схожести — `similarity_threshold` (0.85 по умолчанию).
+
+        Из пары дублей оставляем книгу с более конкретной позицией в серии
+        (ненулевой subseries-компонент sort_key[2] или sort_key[3]). При равной
+        конкретности — большй по размеру файл (вероятный сборник).
+        """
+        from difflib import SequenceMatcher
+
+        if len(books) < 2:
+            return books
+
+        # Кэшируем вступительный текст; пустая строка → файл недоступен
+        opening: dict = {id(b): self._extract_opening_text(b, compare_chars) for b in books}
+
+        def _specificity(b: CompilationBook) -> int:
+            """Чем выше — тем точнее известна позиция в серии."""
+            sk = b.sort_key
+            return (1 if len(sk) > 2 and sk[2] != 0 else 0) + (1 if len(sk) > 3 and sk[3] != 0 else 0)
+
+        def _file_size(b: CompilationBook) -> int:
+            try:
+                return b.abs_path.stat().st_size
+            except OSError:
+                return 0
+
+        to_remove: set = set()
+        for i, book_a in enumerate(books):
+            if id(book_a) in to_remove:
+                continue
+            text_a = opening[id(book_a)]
+            if not text_a:
+                continue
+            for book_b in books[i + 1:]:
+                if id(book_b) in to_remove:
+                    continue
+                text_b = opening[id(book_b)]
+                if not text_b:
+                    continue
+                ratio = SequenceMatcher(None, text_a, text_b).ratio()
+                if ratio < similarity_threshold:
+                    continue
+                # Похожи: решаем, какую оставить
+                spec_a, spec_b = _specificity(book_a), _specificity(book_b)
+                if spec_a != spec_b:
+                    # Оставляем более конкретную позицию
+                    loser = book_b if spec_a > spec_b else book_a
+                else:
+                    # Одинаковая конкретность — оставляем больший файл
+                    loser = book_b if _file_size(book_a) >= _file_size(book_b) else book_a
+                to_remove.add(id(loser))
+                duplicate_paths.append(loser.abs_path)
+                self._log(
+                    f"  ≈ Контент-дубликат (ratio={ratio:.2f}): "
+                    f"{loser.abs_path.name} → удаляется в пользу "
+                    f"{'другого' if loser is book_b else book_a.abs_path.name}"
+                )
+                if id(book_a) in to_remove:
+                    break  # book_a удалена, переходим к следующей
+
+        return [b for b in books if id(b) not in to_remove]
 
     def _dedup_by_position(
         self,
