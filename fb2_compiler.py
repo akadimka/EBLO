@@ -1092,15 +1092,26 @@ class FB2CompilerService:
             except OSError:
                 return 0
 
+        # Уже распознанные precompile-файлы (volume_label="N-M") исключаем из сравнения:
+        # их начало совпадает с томом 1 по определению, но удалять том 1 нельзя.
+        _RANGE_VL = re.compile(r'^\d+\s*[-–—]\s*\d+$')
+
+        def _is_known_precompile(b: CompilationBook) -> bool:
+            return bool(_RANGE_VL.match(b.volume_label or ''))
+
         to_remove: set = set()
         for i, book_a in enumerate(books):
             if id(book_a) in to_remove:
+                continue
+            if _is_known_precompile(book_a):
                 continue
             text_a = opening[id(book_a)]
             if not text_a:
                 continue
             for book_b in books[i + 1:]:
                 if id(book_b) in to_remove:
+                    continue
+                if _is_known_precompile(book_b):
                     continue
                 text_b = opening[id(book_b)]
                 if not text_b:
