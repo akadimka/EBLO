@@ -1073,12 +1073,27 @@ class FB2CompilerService:
     _STRIP_TAGS_RE = re.compile(r'<[^>]+>')
     # Читаем только первые 64 КБ файла — достаточно для захвата начала <body>
     _OPENING_READ_LIMIT = 65_536
+    # Заголовки секций-предисловий — пропускаем при сравнении содержимого
+    _PREFACE_SECTION_RE = re.compile(
+        r'предисловие|вступлени[ея]|от\s+автор|от\s+переводчик|foreword|preface|'
+        r'introduction|аннотаци[яи]|copyright|копирайт|все\s+права',
+        re.IGNORECASE | re.UNICODE,
+    )
+    # URL и издательские копирайт-блоки — удаляем из сравниваемого текста
+    _BOILERPLATE_RE = re.compile(
+        r'https?://\S+|'                                          # URL
+        r'©[^©\n]{1,120}|'                                       # © строка
+        r'выпуск\s+произведения[^©\n]*|'                         # «Выпуск произведения без разрешения...»
+        r'isbn[\s:]*[\d\-–—Xx]{5,}',                             # ISBN
+        re.IGNORECASE | re.UNICODE,
+    )
 
     def _extract_opening_text(self, book: CompilationBook, chars: int = 2000) -> str:
         """Вернуть первые `chars` символов нормализованного plain-text из <body>.
 
-        Читает только первые _OPENING_READ_LIMIT байт файла, не весь файл,
-        что даёт 10-100× ускорение по сравнению с полным чтением.
+        Пропускает секции-предисловия (одинаковые у многих книг одной серии),
+        удаляет URL и copyright-блоки, берёт текст первой содержательной секции.
+        Читает только первые _OPENING_READ_LIMIT байт файла.
         """
         try:
             if not book.abs_path.exists():
@@ -1092,13 +1107,34 @@ class FB2CompilerService:
                 text = raw.decode(enc, errors='replace')
             except (LookupError, UnicodeDecodeError):
                 text = raw.decode('utf-8', errors='replace')
-            # Находим начало основного <body> (не notes/footnotes) и берём текст после него
+            # Находим начало основного <body> (не notes/footnotes)
             body_m = re.search(
                 r'<(?:fb:)?body(?!\s[^>]*\bname\s*=)[^>]*>',
                 text, re.IGNORECASE,
             )
             content = text[body_m.end():] if body_m else text
-            plain = self._STRIP_TAGS_RE.sub(' ', content)
+
+            # Ищем первую содержательную секцию, пропуская предисловия
+            # Каждая <section> проверяется по заголовку <title>
+            content_start = 0
+            for sec_m in re.finditer(r'<(?:fb:)?section[^>]*>', content, re.IGNORECASE):
+                sec_pos = sec_m.end()
+                # Заголовок секции: следующий <title>…</title>
+                title_m = re.search(
+                    r'<(?:fb:)?title[^>]*>(.*?)</(?:fb:)?title>',
+                    content[sec_pos:sec_pos + 400], re.IGNORECASE | re.DOTALL,
+                )
+                if title_m:
+                    title_plain = self._STRIP_TAGS_RE.sub('', title_m.group(1)).strip()
+                    if self._PREFACE_SECTION_RE.search(title_plain):
+                        continue  # пропускаем предисловие
+                # Первая не-предисловие секция
+                content_start = sec_m.start()
+                break
+
+            plain = self._STRIP_TAGS_RE.sub(' ', content[content_start:])
+            # Удаляем URL, © строки, ISBN — они одинаковы у всех книг издательства
+            plain = self._BOILERPLATE_RE.sub(' ', plain)
             plain = re.sub(r'\s+', ' ', plain).strip()
             return plain[:chars]
         except Exception:
