@@ -46,6 +46,8 @@ class FB2SAXHandler(xml.sax.handler.ContentHandler):
         self.series_number = ""
         self.book_title = ""
         self.genres = []
+        # Накапливаем все sequence-теги: list of (name, number_str)
+        self._all_sequences: list = []
 
         self.current_element = ""
         self.element_stack = []
@@ -69,11 +71,14 @@ class FB2SAXHandler(xml.sax.handler.ContentHandler):
             self.in_last_name = True
         elif self.in_title_info and local_name == 'sequence':
             self.in_sequence = True
-            # Извлекаем атрибуты серии
-            if 'name' in attrs:
-                self.series_name = attrs.get('name', '')
-            if 'number' in attrs:
-                self.series_number = attrs.get('number', '')
+            # Извлекаем атрибуты серии; series_name/series_number — последний тег (обратная совместимость)
+            seq_name = attrs.get('name', '')
+            seq_num  = attrs.get('number', '')
+            if seq_name:
+                self.series_name = seq_name
+            if seq_num:
+                self.series_number = seq_num
+            self._all_sequences.append((seq_name, seq_num))
         elif self.in_title_info and local_name == 'book-title':
             self.in_book_title = True
         elif self.in_title_info and local_name == 'genre':
@@ -1270,11 +1275,29 @@ class FB2SAXExtractor:
                     seen_lower.add(name.lower())
             authors_str = '; '.join(authors_parts)
 
+            # Если одна серия встречается несколько раз с разными номерами — это компиляция.
+            # Собираем номера по имени серии → если их ≥ 2, формируем диапазон "min-max".
+            primary_series = handler.series_name.strip()
+            series_number = handler.series_number.strip()
+            if primary_series:
+                nums = []
+                for sname, snum in handler._all_sequences:
+                    if sname.strip() == primary_series and snum.strip():
+                        try:
+                            nums.append(int(snum.strip()))
+                        except ValueError:
+                            pass
+                if len(nums) >= 2:
+                    lo, hi = min(nums), max(nums)
+                    series_number = f'{lo}-{hi}'
+                elif nums:
+                    series_number = str(nums[0])
+
             return {
                 'title': handler.book_title.strip() or '',
                 'authors': authors_str,
-                'series': handler.series_name.strip(),
-                'series_number': handler.series_number.strip(),
+                'series': primary_series,
+                'series_number': series_number,
                 'genre': ', '.join(handler.genres),
             }
         except Exception:

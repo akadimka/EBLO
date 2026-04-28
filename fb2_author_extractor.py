@@ -1216,14 +1216,34 @@ class FB2AuthorExtractor:
                         authors.append(name)
             result['authors'] = '; '.join(authors)
 
-            # Series
-            seq_m = re.search(
-                r'<sequence\s+[^>]*name=["\']([^"\']+)["\'][^>]*/?>', title_info, re.IGNORECASE
+            # Series: собираем все sequence-теги, ищем диапазон номеров
+            all_seqs = re.findall(
+                r'<sequence\s+([^>]*/?)\s*>', title_info, re.IGNORECASE
             )
-            if seq_m:
-                result['series'] = seq_m.group(1).strip()
-                num_m = re.search(r'number=["\']([\d]+)["\']', seq_m.group(0), re.IGNORECASE)
-                result['series_number'] = num_m.group(1) if num_m else ''
+            # Парсим (name, number) из каждого тега
+            seq_pairs = []
+            for attrs_str in all_seqs:
+                name_m = re.search(r'name=["\']([^"\']+)["\']', attrs_str, re.IGNORECASE)
+                num_m  = re.search(r'number=["\'](\d+)["\']', attrs_str, re.IGNORECASE)
+                if name_m:
+                    seq_pairs.append((name_m.group(1).strip(), num_m.group(1) if num_m else ''))
+            if seq_pairs:
+                # Основная серия — первая с номером, иначе просто первая
+                primary = next((n for n, _ in seq_pairs if n), '')
+                result['series'] = primary
+                nums = []
+                for sname, snum in seq_pairs:
+                    if sname == primary and snum:
+                        try:
+                            nums.append(int(snum))
+                        except ValueError:
+                            pass
+                if len(nums) >= 2:
+                    result['series_number'] = f'{min(nums)}-{max(nums)}'
+                elif nums:
+                    result['series_number'] = str(nums[0])
+                else:
+                    result['series_number'] = ''
 
             # Genre
             genres = re.findall(r'<genre[^>]*>(.*?)</genre>', title_info, re.DOTALL)

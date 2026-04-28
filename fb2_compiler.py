@@ -338,9 +338,42 @@ class FB2CompilerService:
 
             books = [self._make_book(rec, work_dir) for rec in recs]
 
+            # --- Контекстная коррекция: книги с сервисным словом (Трилогия…)
+            # без явного series_number, которые не были опознаны _precompiled_range
+            # как предкомпиляция из-за отсутствия связи с именем серии в stem.
+            # Если в группе уже есть отдельные тома 1..N (N = число из слова),
+            # принудительно задаём series_number='1-N' и пересчитываем sort_key.
+            _known_positions = {
+                (b.sort_key[2] if b.sort_key[0] == 0 and b.sort_key[1] == 0 else b.sort_key[1])
+                for b in books if b.sort_key[0] == 0
+            } - {0}
+            _SWORDS_IDX = {kw.lower(): idx for idx, kw in enumerate(self._SERIES_WORDS) if kw}
+            _SWORDS_PAT = re.compile(
+                '|'.join(re.escape(kw) for kw in _SWORDS_IDX),
+                re.IGNORECASE | re.UNICODE,
+            )
+            for book in books:
+                # Уже опознанная предкомпиляция — пропускаем
+                if self._RANGE_NUM_RE.match(book.volume_label or ''):
+                    continue
+                stem_title = (book.abs_path.stem + ' ' + (book.record.file_title or '')).lower()
+                m = _SWORDS_PAT.search(stem_title)
+                if not m:
+                    continue
+                n_vols = _SWORDS_IDX[m.group(0).lower()]
+                # Условие: все тома 1..N присутствуют среди других книг группы
+                if set(range(1, n_vols + 1)).issubset(_known_positions):
+                    book.record.series_number = f'1-{n_vols}'
+                    # Пересчитываем через _precompiled_range
+                    lo, hi = self._precompiled_range(book, series)
+                    if hi > lo:
+                        book.sort_key = (0, lo, 0, 0)
+                        book.volume_label = f'{lo}-{hi}'
+                        book.sort_source = 'filename_range'
+                        book.order_ambiguous = False
+
             duplicate_paths: List[Path] = []
 
-            # Debug: вывести классификацию файлов для конкретной пары автор/серия
             # --- Фильтр 1: обработка заранее скомпилированных файлов ----------
             # Признак: stem/title содержит сервисное слово (Трилогия …) или
             # series_number — диапазон вида "1-3".
