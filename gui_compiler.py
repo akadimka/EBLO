@@ -39,12 +39,15 @@ _SETTINGS_KEY_COMPILER_DIR = 'compiler_scan_dir'
 class CompilerDialog:
     """Диалог компиляции серий."""
 
-    def __init__(self, parent: tk.Widget, logger=None, settings=None):
+    def __init__(self, parent: tk.Widget, logger=None, settings=None,
+                 initial_dir: str = '', auto_scan: bool = False):
         """
         Args:
-            parent:   Родительское окно.
-            logger:   Logger приложения.
-            settings: SettingsManager для сохранения/восстановления состояния.
+            parent:      Родительское окно.
+            logger:      Logger приложения.
+            settings:    SettingsManager для сохранения/восстановления состояния.
+            initial_dir: Папка, подставляемая в поле сканирования при открытии.
+            auto_scan:   Если True — автоматически запустить сканирование после открытия.
         """
         self._parent   = parent
         self._logger   = logger
@@ -53,6 +56,8 @@ class CompilerDialog:
         self._groups: List[CompilationGroup] = []
         self._results: List[CompilationResult] = []
         self._scanning = False
+        self._initial_dir = initial_dir
+        self._auto_scan   = auto_scan
 
         self._win = tk.Toplevel(parent)
         self._win.withdraw()  # скрываем до позиционирования
@@ -77,7 +82,12 @@ class CompilerDialog:
             self._win.deiconify()
 
         self._build_ui()
-        self._load_saved_dir()
+        if self._initial_dir and Path(self._initial_dir).is_dir():
+            self._dir_var.set(self._initial_dir)
+            if self._auto_scan:
+                self._win.after(200, self._run_scan)
+        else:
+            self._load_saved_dir()
 
     # ------------------------------------------------------------------
     # UI

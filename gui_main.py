@@ -846,28 +846,77 @@ class MainWindow(tk.Tk):
 
         allowed_folders = set(assigned.keys())   # абсолютные пути папок с галочкой
 
-        # Confirm before starting
+        # Confirm before starting — custom dialog with auto-compile checkbox
         folder_list = '\n'.join(f'  • {Path(p).name}' for p in sorted(allowed_folders))
-        if not messagebox.askyesno(
-            "Подтверждение",
-            f"Синхронизировать {len(allowed_folders)} папок с присвоенным жанром?\n\n"
-            f"{folder_list}\n\n"
-            "Файлы будут перемещены в структурированную библиотеку."
-        ):
+        confirmed, auto_compile = self._ask_sync_confirm(folder_list, len(allowed_folders))
+        if not confirmed:
             return
 
         self._sync_running = True
-        self.logger.log(f'Синхронизация запущена: {len(allowed_folders)} папок')
+        self.logger.log(f'Синхронизация запущена: {len(allowed_folders)} папок, auto_compile={auto_compile}')
 
         # Launch synchronization in background thread
         thread = threading.Thread(
             target=self._synchronize_thread,
-            args=(allowed_folders,),
+            args=(allowed_folders, auto_compile),
             daemon=True
         )
         thread.start()
 
-    def _synchronize_thread(self, allowed_folders: set):
+    def _ask_sync_confirm(self, folder_list: str, count: int) -> tuple:
+        """Показать диалог подтверждения синхронизации с чекбоксом автокомпиляции.
+
+        Returns:
+            (confirmed: bool, auto_compile: bool)
+        """
+        result = {'confirmed': False, 'auto_compile': False}
+
+        dlg = tk.Toplevel(self)
+        dlg.title('Подтверждение синхронизации')
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.focus_set()
+
+        # Центрировать относительно главного окна
+        self.update_idletasks()
+        x = self.winfo_x() + self.winfo_width() // 2 - 230
+        y = self.winfo_y() + self.winfo_height() // 2 - 130
+        dlg.geometry(f'460x260+{x}+{y}')
+
+        ttk.Label(
+            dlg,
+            text=f'Синхронизировать {count} папок с присвоенным жанром?\n\n'
+                 f'{folder_list}\n\n'
+                 'Файлы будут перемещены в структурированную библиотеку.',
+            wraplength=420,
+            justify='left',
+        ).pack(padx=15, pady=(15, 10), anchor='w')
+
+        auto_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            dlg,
+            text='Автоматически компилировать серии (с удалением исходников)',
+            variable=auto_var,
+        ).pack(padx=15, pady=(0, 15), anchor='w')
+
+        btn_frm = ttk.Frame(dlg)
+        btn_frm.pack(side='bottom', pady=10)
+
+        def on_ok():
+            result['confirmed'] = True
+            result['auto_compile'] = auto_var.get()
+            dlg.destroy()
+
+        def on_cancel():
+            dlg.destroy()
+
+        ttk.Button(btn_frm, text='Синхронизировать', command=on_ok).pack(side='left', padx=5)
+        ttk.Button(btn_frm, text='Отмена', command=on_cancel).pack(side='left', padx=5)
+
+        dlg.wait_window()
+        return result['confirmed'], result['auto_compile']
+
+    def _synchronize_thread(self, allowed_folders: set, auto_compile: bool = False):
         """Execute synchronization in background thread."""
         original_stdout = sys.stdout
 
@@ -899,8 +948,8 @@ class MainWindow(tk.Tk):
             if self._status_bar:
                 self.after(0, lambda: self._status_bar.set("Синхронизация завершена", 'ok'))
 
-            # Show statistics popup
-            self._show_synchronization_stats(stats)
+            # Show statistics popup, then handle compilation
+            self._show_synchronization_stats(stats, auto_compile)
 
             self.logger.log("Синхронизация успешно завершена")
 
@@ -920,28 +969,117 @@ class MainWindow(tk.Tk):
             sys.stdout = original_stdout
             self._sync_running = False
     
-    def _show_synchronization_stats(self, stats: Dict):
-        """Show statistics popup after synchronization.
-        
-        Args:
-            stats: Dictionary with statistics from synchronization
-        """
-        # Calculate duration
+    def _show_synchronization_stats(self, stats: Dict, auto_compile: bool = False):
+        """Show statistics popup after synchronization, then handle compilation."""
         duration_str = stats.get('duration_str', 'неизвестно')
-        
+        files_moved = stats.get('files_moved', 0)
+
         message = (
             f"Синхронизация завершена\n\n"
-            f"Перемещено файлов: {stats['files_moved']}\n"
-            f"Найдено дубликатов: {stats['duplicates_found']}\n"
-            f"Удалено пустых папок: {stats['folders_deleted']}\n"
-            f"Ошибок: {stats['errors']}\n"
+            f"Перемещено файлов: {files_moved}\n"
+            f"Найдено дубликатов: {stats.get('duplicates_found', 0)}\n"
+            f"Удалено пустых папок: {stats.get('folders_deleted', 0)}\n"
+            f"Ошибок: {stats.get('errors', 0)}\n"
             f"Время: {duration_str}"
         )
-        
-        self.after(
-            0,
-            lambda: messagebox.showinfo("Статистика синхронизации", message)
-        )
+
+        self.after(0, lambda: self._on_sync_stats_shown(message, files_moved, auto_compile))
+
+    def _on_sync_stats_shown(self, message: str, files_moved: int, auto_compile: bool):
+        """Показать итоги синхронизации и запустить компиляцию если нужно."""
+        messagebox.showinfo("Статистика синхронизации", message)
+
+        if files_moved == 0:
+            return  # нечего компилировать
+
+        library_path = self.settings.get('library_path', '')
+        if not library_path or not Path(library_path).is_dir():
+            return
+
+        if auto_compile:
+            self._post_sync_auto_compile(library_path)
+        else:
+            self._post_sync_open_compiler(library_path)
+
+    def _post_sync_auto_compile(self, library_path: str):
+        """Автоматическая компиляция всех групп в библиотеке с удалением исходников."""
+        if self._status_bar:
+            self._status_bar.set('Автокомпиляция после синхронизации…', 'busy')
+
+        def worker():
+            import os
+            try:
+                import importlib
+                import regen_csv as _rc
+                importlib.reload(_rc)
+                from regen_csv import RegenCSVService
+            except ImportError:
+                from .regen_csv import RegenCSVService
+            try:
+                import importlib
+                import fb2_compiler as _fc
+                importlib.reload(_fc)
+                from fb2_compiler import FB2CompilerService
+            except ImportError:
+                from .fb2_compiler import FB2CompilerService
+
+            try:
+                _devnull = open(os.devnull, 'w', encoding='utf-8')
+                import sys
+                _old_out, _old_err = sys.stdout, sys.stderr
+                sys.stdout = sys.stderr = _devnull
+
+                svc_csv = RegenCSVService()
+                records = svc_csv.generate_csv(library_path, output_csv_path=None)
+                if not records:
+                    records = getattr(svc_csv, 'records', []) or []
+
+                sys.stdout, sys.stderr = _old_out, _old_err
+                _devnull.close()
+
+                compiler = FB2CompilerService()
+                groups = compiler.find_groups(records, library_path)
+
+                ok_cnt = 0
+                fail_cnt = 0
+                for g in groups:
+                    r = compiler.compile_group(g, None, delete_sources=True)
+                    if r.success:
+                        ok_cnt += 1
+                    else:
+                        fail_cnt += 1
+                    self.logger.log(f"[AUTO-COMPILE] {'OK' if r.success else 'ERR'}: {g.author} / {g.series}")
+
+                def done():
+                    if self._status_bar:
+                        self._status_bar.set('Автокомпиляция завершена', 'ok')
+                    messagebox.showinfo(
+                        'Автокомпиляция завершена',
+                        f'Скомпилировано групп: {ok_cnt}\n'
+                        f'Ошибок: {fail_cnt}\n'
+                        'Исходники удалены.'
+                    )
+                self.after(0, done)
+
+            except Exception as e:
+                self.logger.log(f"ОШИБКА автокомпиляции: {e}")
+                self.after(0, lambda: messagebox.showerror('Ошибка автокомпиляции', str(e)))
+                if self._status_bar:
+                    self.after(0, lambda: self._status_bar.set('ОШИБКА', 'error'))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _post_sync_open_compiler(self, library_path: str):
+        """Открыть CompilerDialog с предзаполненной папкой библиотеки и автозапуском сканирования."""
+        try:
+            import importlib
+            import gui_compiler
+            importlib.reload(gui_compiler)
+            from gui_compiler import CompilerDialog
+        except ImportError:
+            from .gui_compiler import CompilerDialog
+
+        dlg = CompilerDialog(self, initial_dir=library_path, auto_scan=True)
 
     def _open_database_viewer(self):
         """Открыть окно просмотра содержимого базы данных."""
