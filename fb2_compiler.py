@@ -1606,10 +1606,6 @@ class FB2CompilerService:
                 else:
                     # Обычная книга — берём целиком
                     title, body_xml = self._extract_body(book)
-                    if body_xml is None:
-                        raise RuntimeError(
-                            f"Не удалось извлечь <body> из: {book.abs_path.name}"
-                        )
                     bodies.append((title, body_xml))
                     sn = book.sort_key[1] if book.sort_key[0] == 0 else 0
                     if sn:
@@ -1681,8 +1677,19 @@ class FB2CompilerService:
             )
 
     def _read_file_text(self, path: Path) -> str:
-        """Прочитать файл с автоопределением кодировки."""
+        """Прочитать файл с автоопределением кодировки. Поддерживает zip-упакованные FB2."""
         raw = path.read_bytes()
+        # Zip-упакованный FB2 (сигнатура PK): распаковываем первый .fb2-файл внутри
+        if raw[:2] == b'PK':
+            import zipfile, io as _io
+            try:
+                with zipfile.ZipFile(_io.BytesIO(raw)) as zf:
+                    names = zf.namelist()
+                    fb2_name = next((n for n in names if n.lower().endswith('.fb2')), names[0] if names else None)
+                    if fb2_name:
+                        raw = zf.read(fb2_name)
+            except Exception:
+                pass
         # Определяем кодировку из XML-декларации
         declared = None
         m = re.search(
@@ -1703,21 +1710,19 @@ class FB2CompilerService:
         title = (book.record.file_title or '').strip() or book.abs_path.stem
 
         if not book.abs_path.exists():
-            self._log(f"  ⚠ Файл не найден: {book.abs_path}")
-            return title, None
+            raise RuntimeError(f"Файл не найден: {book.abs_path.name} (путь: {book.abs_path})")
 
         try:
             text = self._read_file_text(book.abs_path)
         except Exception as e:
-            self._log(f"  ⚠ Ошибка чтения {book.abs_path.name}: {e}")
-            return title, None
+            raise RuntimeError(f"Ошибка чтения {book.abs_path.name}: {e}") from e
 
         all_bodies = re.findall(
             r'<(?:fb:)?body(?:\s[^>]*)?>.*?</(?:fb:)?body>',
             text, re.DOTALL | re.IGNORECASE
         )
         if not all_bodies:
-            return title, None
+            raise RuntimeError(f"Тег <body> не найден в {book.abs_path.name}")
 
         # Берём только главные тела (без name="notes"/"footnotes").
         # <body name="notes"> — сноски; их включение создаёт вложенные <body> в итоговом файле.
