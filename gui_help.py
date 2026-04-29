@@ -338,7 +338,7 @@ NamesDialog:
   Запрос: SELECT ... WHERE author LIKE ? AND title LIKE ? ... LIMIT 2000.
   Сортировка по клику на заголовок столбца.
   Двойной клик / кнопка → открыть папку в Explorer.
-  Кнопка «Рейтинг (Fantlab)» → FantlabWindow для выбранной книги.
+
 """),
     ("Модули", "gui_series_gaps.py", """\
 Серии с пробелами (SeriesGapsWindow).
@@ -381,17 +381,6 @@ NamesDialog:
 
   Книги в сериях сортируются по series_number.
   Готовый каталог подключается в Marvin, PocketBook, Kybook и т.п.
-"""),
-    ("Модули", "fantlab_client.py", """\
-Клиент Fantlab.ru (FantlabWindow).
-
-  Поиск: GET https://api.fantlab.ru/search-works?q=QUERY
-  Детали: GET https://api.fantlab.ru/work/ID
-    → рейтинг, количество голосов, количество отзывов, описание, жанры.
-
-  Кэш в памяти (_search_cache, _rating_cache) исключает повторные запросы.
-  Кнопка «Открыть на Fantlab.ru» — запускает браузер.
-  Открывается из SearchWindow или самостоятельно.
 """),
     ("Модули", "gui_broken_files.py", """\
 Битые файлы (BrokenFilesWindow).

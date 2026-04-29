@@ -1,12 +1,16 @@
 {
   "library_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/EBook Library",
   "last_scan_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
-  "normalizer_folder": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test2",
+  "normalizer_folder": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
   "genre_association_method": "context_menu",
   "window_sizes": {
     "main": {
       "geometry": "1115x650+155+121",
+      "state": "normal"
+    },
+    "normalizer": {
+      "geometry": "1400x700+51+126",
       "state": "normal"
     }
   },

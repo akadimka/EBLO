@@ -103,8 +103,7 @@ class SearchWindow:
         btn_frame.pack(fill=tk.X, pady=(6, 0))
         ttk.Button(btn_frame, text="Открыть в проводнике",
                    command=self._open_in_explorer).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_frame, text="Рейтинг (Fantlab)",
-                   command=self._lookup_fantlab).pack(side=tk.LEFT, padx=4)
+
 
     # ------------------------------------------------------------------
     def _clear(self):
@@ -200,14 +199,3 @@ class SearchWindow:
         if folder.exists():
             subprocess.Popen(['explorer', str(folder)])
 
-    def _lookup_fantlab(self):
-        sel = self.tree.selection()
-        if not sel:
-            return
-        title  = self.tree.set(sel[0], 'title')
-        author = self.tree.set(sel[0], 'author')
-        try:
-            from fantlab_client import FantlabWindow
-        except ImportError:
-            from .fantlab_client import FantlabWindow
-        FantlabWindow(parent=self.window, title=title, author=author)
