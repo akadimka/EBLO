@@ -105,6 +105,8 @@ class SearchWindow:
                    command=self._open_in_explorer).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_frame, text="Рейтинг (Fantlab)",
                    command=self._lookup_fantlab).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="Рейтинг (Samlib)",
+                   command=self._lookup_samlib).pack(side=tk.LEFT, padx=4)
 
     # ------------------------------------------------------------------
     def _lookup_fantlab(self):
@@ -118,6 +120,18 @@ class SearchWindow:
         except ImportError:
             from .fantlab_client import FantlabWindow
         FantlabWindow(parent=self.window, title=title, author=author)
+
+    def _lookup_samlib(self):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        title  = self.tree.set(sel[0], 'title')
+        author = self.tree.set(sel[0], 'author')
+        try:
+            from samlib_client import SamlibWindow
+        except ImportError:
+            from .samlib_client import SamlibWindow
+        SamlibWindow(parent=self.window, title=title, author=author)
 
     def _clear(self):
         for var in (self._author_var, self._title_var,
