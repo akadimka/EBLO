@@ -382,6 +382,18 @@ NamesDialog:
   Книги в сериях сортируются по series_number.
   Готовый каталог подключается в Marvin, PocketBook, Kybook и т.п.
 """),
+    ("Модули", "fantlab_client.py", """\
+Рейтинги Fantlab.ru (FantlabWindow).
+
+  Поиск: GET https://api.fantlab.ru/search-works?q=QUERY&page=1&size=10
+    → matches[].work_id, rusname, autor_rusname, midmark[], markcount.
+  Детали: GET https://api.fantlab.ru/work/{id}
+    → rating{rating, true_rating, voters}, authors[], work_description.
+
+  Кэш в памяти исключает повторные запросы за сессию.
+  Кнопка «Рейтинг (Fantlab)» в SearchWindow открывает окно с авто-поиском.
+  Кнопка «Открыть на Fantlab.ru» запускает браузер.
+"""),
     ("Модули", "gui_broken_files.py", """\
 Битые файлы (BrokenFilesWindow).
 
