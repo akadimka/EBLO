@@ -42,7 +42,6 @@ venv.bak/
 proposed_series_report.csv
 summary_csv.csv
 *.csv
-!regen.csv
 
 # Test & Debug files (temporary, for development only)
 test_*.py
@@ -74,7 +73,15 @@ tmp/
 
 # Cache files
 .library_cache.db
+metadata_cache.db
 
+# Tool/extension service folders
+.neteragen/
+.claude/
+
+# Runtime-generated files
+regen.csv
+meta/
 
 images/
 Images/
