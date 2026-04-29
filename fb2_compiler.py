@@ -920,8 +920,10 @@ class FB2CompilerService:
                                        for p in [_cand_low.find(w)] if p >= 0), -1)
                     if _slink_pos >= 0:
                         _after = candidate[_slink_pos:]
-                        _dot = _after.find('.')
-                        _zone = _after[:_dot] if _dot >= 0 else _after
+                        # Ищем точку-разделитель предложений, но НЕ десятичную точку (как в "2.0").
+                        # Десятичная точка окружена цифрами с обеих сторон: (?<=\d)\.(?=\d).
+                        _dot_m = re.search(r'(?<!\d)\.(?!\d)', _after)
+                        _zone = _after[:_dot_m.start()] if _dot_m else _after
                         m = _RANGE_RE.search(_zone)
                     else:
                         m = _RANGE_RE.search(candidate)
