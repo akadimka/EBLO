@@ -75,18 +75,20 @@ class Pass4Consensus:
         import re
 
         text = series_candidate.strip()
-        
-        # Remove " N" or " N. " patterns (space + digits)
-        # "Охотник 1" → "Охотник"
-        # "Охотник 2. Something" → "Охотник"  
-        text = re.sub(r'\s+\d+[\s\.\:].*$', '', text).strip()
-        
+
+        # Remove " N" or " N. " patterns (space + digits).
+        # НЕ трогать если число — часть десятичной версии: "Цивилизация 2.0", "Metro 2.0".
+        # Признак версии: после числа сразу идёт точка и ещё цифра (lookahead (?!\.\d)).
+        # "Охотник 1"        → "Охотник"
+        # "Охотник 2. ..."   → "Охотник"
+        # "Цивилизация 2.0"  → "Цивилизация 2.0"  (не трогать)
+        text = re.sub(r'\s+\d+(?!\.\d)[\s\.]*$', '', text).strip()
+
         # Remove trailing digits after space
-        # "Охотник 1" → "Охотник"
-        text = re.sub(r'\s+\d+\s*$', '', text).strip()
-        
-        # Remove trailing digits after hyphen (but keep the base, e.g. "Фэндом-3" → "Фэндом")
-        text = re.sub(r'[-–—]\d+\s*$', '', text).strip()
+        text = re.sub(r'\s+\d+(?!\.\d)\s*$', '', text).strip()
+
+        # Remove trailing digits after hyphen ("Фэндом-3" → "Фэндом"), не трогать "Серия-2.0"
+        text = re.sub(r'[-–—]\d+(?!\.\d)\s*$', '', text).strip()
 
         result = text if text else series_candidate
         self._series_norm_cache[series_candidate] = result

@@ -166,7 +166,8 @@ class BlockLevelPatternMatcher:
         blocks = []
         # FIXED: Guillemets « » are NOT structural delimiters, they're formatting marks within text
         # Only treat actual parentheses () as structural delimiters, not guillemets
-        delimiter_pattern = r'\s+-\s+|\.\s*|[()]'  # Removed « and »
+        # '\.\s+' требует пробел после точки, чтобы "." в "2.0" не был разделителем.
+        delimiter_pattern = r'\s+-\s+|\.\s+|[()]'
         
         paren_depth = 0
         block_text_pos = 0
@@ -281,7 +282,8 @@ class BlockLevelPatternMatcher:
         
         # Split using same delimiter pattern as tokenize_filename
         # FIXED: Guillemets « » are NOT structural delimiters, they're formatting marks
-        delimiter_pattern = r'\s+-\s+|\.\s*|[()]'  # Removed « and »
+        # '\.\s+' требует пробел после точки, чтобы "." в "2.0" не был разделителем.
+        delimiter_pattern = r'\s+-\s+|\.\s+|[()]'
         
         paren_depth = 0
         block_text_pos = 0

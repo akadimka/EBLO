@@ -138,8 +138,10 @@ def convert_simple_pattern_to_regex(pattern_str: str) -> str:
             # " - " (пробел-дефис-пробел) требует хотя бы один пробел с каждой стороны,
             # чтобы НЕ совпадать с дефисом в составных словах типа "Марк-Уве".
             before_escaped = before_escaped.replace(r'\ \-\ ', r'\s+-\s+')
-            # Остальные пробелы — необязательные
-            before_escaped = before_escaped.replace(r'\ ', r'\s*')
+            # Пробелы в разделителях — обязательные (хотя бы один).
+            # "\s*" (ноль пробелов) позволяло "." в "2.0" быть разделителем,
+            # превращая "Цивилизация 2.0 1" в series="Цивилизация 2", title="0 1. ...".
+            before_escaped = before_escaped.replace(r'\ ', r'\s+')
             regex_parts.append(before_escaped)
         
         # Добавляем саму группу
