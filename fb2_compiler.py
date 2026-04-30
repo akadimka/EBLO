@@ -1213,6 +1213,14 @@ class FB2CompilerService:
                 text_b = opening[id(book_b)]
                 if not text_b:
                     continue
+                # Книги с разными однозначными позициями в серии не могут быть
+                # дубликатами — у них просто совпадает общий пролог/эпиграф.
+                # Пример: «Китамар 1» и «Китамар 2» оба начинаются одной фразой.
+                _pa, _pb = book_a.sort_key, book_b.sort_key
+                if (_pa[0] == 0 and _pb[0] == 0
+                        and _pa[1] != 0 and _pb[1] != 0
+                        and _pa[1] != _pb[1]):
+                    continue
                 # Хэш-фильтр: одинаковые хэши → ratio=1.0 без SequenceMatcher
                 if hashes[id(book_a)] == hashes[id(book_b)]:
                     ratio = 1.0
