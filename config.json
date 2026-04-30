@@ -8,10 +8,6 @@
     "main": {
       "geometry": "1115x650+155+121",
       "state": "normal"
-    },
-    "normalizer": {
-      "geometry": "1400x700+51+126",
-      "state": "normal"
     }
   },
   "generate_csv": true,
