@@ -224,7 +224,12 @@ class FB2CompilerService:
                 m = _RNG.match(vl)
                 n_volumes += int(m.group(2)) - int(m.group(1)) + 1 if m else 1
 
-        return top_lo, top_hi, n_volumes, has_subseries
+        # Для групп с подсериями (has_subseries=True) определяем число верхних дуг —
+        # различных значений sort_key[1]. Именно они определяют слово «Пенталогия» и т.п.,
+        # тогда как n_volumes остаётся общим числом книг (для «в N книгах»).
+        n_top_arcs = len({b.sort_key[1] for b in level0 if b.sort_key[1] != 0}) if has_subseries else None
+
+        return top_lo, top_hi, n_volumes, has_subseries, n_top_arcs
 
     @classmethod
     def _series_suffix(cls, n_volumes: int, lo: int, hi: int = None, part_count: int = 0) -> str:
@@ -1826,7 +1831,7 @@ class FB2CompilerService:
             safe_author = re.sub(r'[\\/:*?"<>|]', '_', group.author)
 
             part_count = getattr(group, 'part_count', 0)
-            top_lo, top_hi, n_volumes, has_subseries = self._run_stats(group.books)
+            top_lo, top_hi, n_volumes, has_subseries, n_top_arcs = self._run_stats(group.books)
 
             safe_series = re.sub(r'[/:*?"<>|]', '_', self._series_to_display(clean_series))
 
@@ -1835,7 +1840,12 @@ class FB2CompilerService:
 
             # --- Суффикс и XML ---
             # Позиция run'а идёт в суффикс: полная серия → слово, частичная → «т. N-M».
-            suffix = self._series_suffix(n_volumes, top_lo, top_hi, part_count)
+            # Если группа содержит подсерии, слово выбирается по числу верхних дуг (n_top_arcs),
+            # а не по общему числу книг, чтобы «Пенталогия» (5 дуг) + «в 9 книгах» (9 файлов).
+            if has_subseries and n_top_arcs and n_top_arcs >= 2:
+                suffix = self._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes)
+            else:
+                suffix = self._series_suffix(n_volumes, top_lo, top_hi, part_count)
             output_xml = self._build_fb2(
                 author=group.author,
                 series=clean_series,
