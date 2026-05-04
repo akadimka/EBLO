@@ -2048,6 +2048,10 @@ class Pass2SeriesFilename:
         if ' - ' in name_for_parsing:
             _name_after_dash = name_for_parsing.split(' - ', 1)[1]
         _meta_norm = lambda s: unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
+        def _word_overlap(a: str, b: str) -> int:
+            wa = {w for w in a.split() if len(w) >= 4}
+            wb = {w for w in b.split() if len(w) >= 4}
+            return len(wa & wb)
         _tl = _TWO_LEVEL_RE.match(_name_after_dash)
         if _tl and metadata_series:
             _root_name = _tl.group(1).strip()
@@ -2082,15 +2086,34 @@ class Pass2SeriesFilename:
             _sub_name  = _tlr.group(3).strip()
             _meta_low  = _meta_norm(metadata_series.strip())
             _sub_low   = _meta_norm(_sub_name)
-
-            def _word_overlap(a: str, b: str) -> int:
-                wa = {w for w in a.split() if len(w) >= 4}
-                wb = {w for w in b.split() if len(w) >= 4}
-                return len(wa & wb)
-
             _confirmed = (
                 _meta_low == _meta_norm(_root_name)
                 or _meta_low == _sub_low
+                or _word_overlap(_meta_low, _sub_low) >= 2
+            )
+            if _confirmed:
+                return f'{_root_name} {_root_num}\\{_sub_name}'
+
+        # Вариант Г: «Серия N. Подсерия (ServiceWord)» — скомпилированный файл.
+        # Пример: «Брия 1. Книга Длинного Солнца (Тетралогия)»
+        #   → proposed_series = «Брия 1\Книга Длинного Солнца»
+        _SERVICE_SUFFIX_RE = re.compile(
+            r'^(.+?)\s+(\d{1,4})\.\s+([А-ЯЁA-Z][^(]{2,}?)\s*\((?:Тетралогия|Трилогия|Дилогия|Пенталогия|Сага|Цикл|[Сс]борник|[Аа]нтология)\)\s*$',
+            re.UNICODE,
+        )
+        _tlg = _SERVICE_SUFFIX_RE.match(_name_after_dash)
+        if _tlg and metadata_series:
+            _root_name = _tlg.group(1).strip()
+            _root_num  = _tlg.group(2)
+            _sub_name  = _tlg.group(3).strip()
+            _meta_low  = _meta_norm(metadata_series.strip())
+            _sub_low   = _meta_norm(_sub_name)
+            _confirmed = (
+                _meta_low == _meta_norm(_root_name)
+                or _meta_low == _meta_norm(f'{_root_name} {_root_num}')
+                or _meta_low == _sub_low
+                or _meta_low == _meta_norm(f'{_root_name} {_root_num}\\{_sub_name}')
+                or (_meta_low.startswith(_meta_norm(_root_name)) and _meta_low.endswith(_sub_low))
                 or _word_overlap(_meta_low, _sub_low) >= 2
             )
             if _confirmed:
