@@ -1295,11 +1295,17 @@ class FB2CompilerService:
             text = f"{book.abs_path.stem} {book.record.file_title or ''}"
             kw_key = 0 if _FRESH_KEYWORDS.search(text) else 1
 
-            # 3. Год из имени файла (например "- 2022" → свежее 2018)
+            # 3. Одиночная книга имеет приоритет над многотомной предкомпиляцией.
+            # Файл с несколькими заголовками в file_title (≥2 ". CAPITAL") — компиляция
+            # нескольких книг; при коллизии позиций она уступает отдельному тому.
+            _ft = book.record.file_title or ''
+            multi_key = 1 if len(re.findall(r'\.\s+[А-ЯЁA-Z]', _ft)) >= 2 else 0
+
+            # 4. Год из имени файла (например "- 2022" → свежее 2018)
             year_m = re.search(r'[-–\s](\d{4})\b', book.abs_path.stem)
             year_key = -int(year_m.group(1)) if year_m else 0
 
-            return (date_key, kw_key, year_key, str(book.abs_path))
+            return (date_key, kw_key, multi_key, year_key, str(book.abs_path))
 
         sorted_books = sorted(books, key=_book_freshness)
         seen_positions: Dict[Tuple, CompilationBook] = {}
