@@ -1517,7 +1517,11 @@ class FB2CompilerService:
                         if _sc2 < 1900:
                             secondary = _sc2
                             _rest = _rest[_sec_m.end():]
-                tertiary = self._extract_inline_volume_number(_rest, stem) or 0
+                # Ищем tertiary только в остатке стема (_rest), не в полном стеме.
+                # Передача stem как fallback приводит к двойному счёту:
+                # "Цикл «Ермак». Том 1" → num=1 из " 1$", _rest="", но stem содержит
+                # "Том 1" → tertiary=1, итог sk=(0,1,0,1) вместо (0,1,0,0).
+                tertiary = self._extract_inline_volume_number(_rest, '') or 0
                 if secondary or tertiary:
                     return (0, num, secondary, tertiary), 'filename', False, volume_label
                 return (0, num, 0, 0), 'filename', False, str(num)
