@@ -706,10 +706,11 @@ class RegenCSVService:
                 'metadata_series',
                 'proposed_series',
                 'series_source',
+                'series_number',
                 'file_title',
                 'metadata_genre'
             ])
-            
+
             # Write data
             for record in self.records:
                 writer.writerow([
@@ -720,6 +721,7 @@ class RegenCSVService:
                     record.metadata_series,
                     record.proposed_series,
                     record.series_source,
+                    record.series_number,
                     record.file_title,
                     record.metadata_genre
                 ])

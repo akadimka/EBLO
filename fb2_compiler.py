@@ -318,15 +318,19 @@ class FB2CompilerService:
         def _series_group_key(series: str) -> str:
             if '\\' not in series:
                 return _punct_norm(series)
-            root = series.split('\\')[0].strip()
+            root, sub = series.split('\\', 1)
+            root = root.strip()
+            sub = sub.strip()
             root_no_num = re.sub(r'\s+\d{1,4}\s*$', '', root).strip()
-            # Сливаем подсерии в одну группу ТОЛЬКО если корень имел числовой суффикс
-            # (Серия 1\X + Серия 2\Y → общий ключ «Серия»).
-            # Если корень без числа (Отрок_Сотник\Отрок vs Отрок_Сотник\Сотник) —
-            # подсерии независимы, упорядочить их нельзя, держим каждую отдельно.
+            # Корень без числа — подсерии независимы (Отрок_Сотник\Отрок vs \Сотник).
             if root_no_num == root:
-                return _punct_norm(series)  # ключ включает имя подсерии
-            return _punct_norm(root_no_num) if root_no_num else _punct_norm(series)
+                return _punct_norm(series)
+            # Корень с числом (Серия 1\X, Серия 3\Y):
+            # ключ = «Серия|X» — объединяем только одноимённые подсерии,
+            # разные подсерии (X≠Y) остаются в разных бакетах.
+            sub_key = _punct_norm(sub) if sub else ''
+            base_key = _punct_norm(root_no_num) if root_no_num else _punct_norm(series)
+            return f'{base_key}|{sub_key}' if sub_key else base_key
 
         buckets: Dict[Tuple[str, str], List] = {}
         for rec in records:

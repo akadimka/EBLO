@@ -964,6 +964,46 @@ class Pass2SeriesFilename:
                 # Пример: "Мир Алекса Королева\" должно быть "Мир Алекса Королева"
                 record.proposed_series = record.proposed_series.rstrip('\\')
         
+        # ✅ ФИНАЛЬНОЕ: если файл имеет плоскую серию «Брия», а другие файлы того же
+        # автора уже имеют подсерии «Брия 1\...», «Брия 3\...» — значит «Брия» является
+        # корнем иерархии. Для такого файла ищем «Брия N.» в имени и обновляем
+        # proposed_series = «Брия N», чтобы позиция была видна в CSV и компиляторе.
+        # Условие безопасности: применяем только если у того же автора есть хотя бы один
+        # файл с подсерией, корень которой совпадает с proposed_series данного файла.
+        import unicodedata as _ud
+        _norm = lambda s: _ud.normalize('NFC', s).lower().replace('ё', 'е')
+
+        # Собираем корни подсерий по автору: {proposed_author: {root_norm: root_display}}
+        _author_roots: dict = {}
+        for rec in records:
+            if '\\' not in (rec.proposed_series or ''):
+                continue
+            root = rec.proposed_series.split('\\')[0].strip()
+            # Убираем число из корня, чтобы сравнивать «Брия» == «Брия» (без "1" или "3")
+            root_base = re.sub(r'\s+\d+\s*$', '', root).strip()
+            ak = _norm(rec.proposed_author or '')
+            _author_roots.setdefault(ak, {})[_norm(root_base)] = root_base
+
+        for record in records:
+            if '\\' in (record.proposed_series or ''):
+                continue  # уже подсерия
+            if not record.proposed_series:
+                continue
+            ak = _norm(record.proposed_author or '')
+            series_norm = _norm(record.proposed_series.strip())
+            # Только если этот же автор имеет подсерии с тем же корнем
+            if ak not in _author_roots or series_norm not in _author_roots[ak]:
+                continue
+            stem = Path(record.file_path).stem
+            stem_norm = _norm(stem)
+            _escaped = re.escape(series_norm)
+            _pat = re.compile(_escaped + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
+            _m = _pat.search(stem_norm)
+            if _m:
+                n = int(_m.group(1))
+                if n < 1900:
+                    record.proposed_series = f'{record.proposed_series.strip()} {n}'
+
         # Commented out: folder pattern consensus was also causing issues
         # self._apply_series_folder_pattern_consensus(records)
 
@@ -2024,6 +2064,36 @@ class Pass2SeriesFilename:
             _sub_name  = _tl2.group(3).strip()
             _meta_low  = _meta_norm(metadata_series.strip())
             if _meta_low == _meta_norm(_root_name) or _meta_low == _meta_norm(_sub_name):
+                return f'{_root_name} {_root_num}\\{_sub_name}'
+
+        # Вариант В: «Серия N. Подсерия N-M. Название» — диапазон томов внутри подсерии.
+        # Пример: «Брия 1. Книга Длинного Солнца 1-2. Литания Длинного Солнца»
+        #   → proposed_series = «Брия 1\Книга Длинного Солнца»
+        # Условие безопасности: metadata_series обязательно подтверждает
+        # либо root_name, либо sub_name (точно или по пересечению ≥2 слов длиной ≥4).
+        _TWO_LEVEL_RANGE_RE = re.compile(
+            r'^(.+?)\s+(\d{1,4})\.\s+([А-ЯЁA-Z][^.]{2,}?)\s+\d{1,4}\s*[-–—]\s*\d{1,4}\.\s+.+$',
+            re.UNICODE,
+        )
+        _tlr = _TWO_LEVEL_RANGE_RE.match(_name_after_dash)
+        if _tlr and metadata_series:
+            _root_name = _tlr.group(1).strip()
+            _root_num  = _tlr.group(2)
+            _sub_name  = _tlr.group(3).strip()
+            _meta_low  = _meta_norm(metadata_series.strip())
+            _sub_low   = _meta_norm(_sub_name)
+
+            def _word_overlap(a: str, b: str) -> int:
+                wa = {w for w in a.split() if len(w) >= 4}
+                wb = {w for w in b.split() if len(w) >= 4}
+                return len(wa & wb)
+
+            _confirmed = (
+                _meta_low == _meta_norm(_root_name)
+                or _meta_low == _sub_low
+                or _word_overlap(_meta_low, _sub_low) >= 2
+            )
+            if _confirmed:
                 return f'{_root_name} {_root_num}\\{_sub_name}'
 
         # ══════════════════════════════════════════════════════════════════
