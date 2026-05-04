@@ -303,9 +303,21 @@ class FB2CompilerService:
         # Нормализуем ё→е в ключах, чтобы "Тёмные звёзды" и "Темные звезды" попали в одну группу.
         # Для подсерий ("Серия N\Подсерия") ключ группировки — корневое название без номера,
         # чтобы файлы "Серия 04\Роман" и "Серия" попали в одну компиляцию.
+        def _punct_norm(s: str) -> str:
+            """Нормализовать знаки препинания для ключа группировки серий.
+
+            Заменяем : . , ; ! ? « » " ' — – - на пробел, схлопываем пробелы.
+            Это позволяет "Ревизор. Возвращение" и "Ревизор возвращение"
+            (а также "Ревизор: Возвращение") попасть в один бакет.
+            Применяем ТОЛЬКО к ключу группировки — само название серии не меняем.
+            """
+            normalized = _norm_key(s)
+            normalized = re.sub(r'[:.;,!?«»"\'—–\-]+', ' ', normalized)
+            return re.sub(r'\s+', ' ', normalized).strip()
+
         def _series_group_key(series: str) -> str:
             if '\\' not in series:
-                return _norm_key(series)
+                return _punct_norm(series)
             root = series.split('\\')[0].strip()
             root_no_num = re.sub(r'\s+\d{1,4}\s*$', '', root).strip()
             # Сливаем подсерии в одну группу ТОЛЬКО если корень имел числовой суффикс
@@ -313,8 +325,8 @@ class FB2CompilerService:
             # Если корень без числа (Отрок_Сотник\Отрок vs Отрок_Сотник\Сотник) —
             # подсерии независимы, упорядочить их нельзя, держим каждую отдельно.
             if root_no_num == root:
-                return _norm_key(series)  # ключ включает имя подсерии
-            return _norm_key(root_no_num) if root_no_num else _norm_key(series)
+                return _punct_norm(series)  # ключ включает имя подсерии
+            return _punct_norm(root_no_num) if root_no_num else _punct_norm(series)
 
         buckets: Dict[Tuple[str, str], List] = {}
         for rec in records:
