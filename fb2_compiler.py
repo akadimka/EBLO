@@ -325,6 +325,52 @@ class FB2CompilerService:
             key = (_norm_key(author), _series_group_key(series))
             buckets.setdefault(key, []).append(rec)
 
+        # Слияние бакетов одного автора, где одно название серии является
+        # суффиксной (хвостовой) последовательностью слов другого.
+        # Пример: "Чужие степи" + "Степи" → общая хвостовая seq = "степи" → один бакет.
+        # Условие безопасности: слияние только если в БОЛЕЕ ДЛИННОМ названии
+        # метаданные хотя бы частично подтверждают БОЛЕЕ КОРОТКОЕ (как задумано
+        # пользователем: «мета подтверждает или не делает ничего»).
+        def _word_suffix_key(short_sk: str, long_sk: str) -> bool:
+            """True если all words of short_sk are the trailing words of long_sk."""
+            ws = short_sk.split()
+            wl = long_sk.split()
+            return bool(ws) and len(ws) < len(wl) and wl[-len(ws):] == ws
+
+        author_keys: Dict[str, List[str]] = {}
+        for (ak, sk) in list(buckets.keys()):
+            author_keys.setdefault(ak, []).append(sk)
+
+        for ak, sks in author_keys.items():
+            if len(sks) < 2:
+                continue
+            # Сортируем по длине: короткие первыми — они кандидаты в canonical
+            sks_sorted = sorted(sks, key=lambda s: len(s))
+            remap: Dict[str, str] = {}
+            for i, short_sk in enumerate(sks_sorted):
+                for long_sk in sks_sorted[i + 1:]:
+                    if long_sk in remap:
+                        continue
+                    if not _word_suffix_key(short_sk, long_sk):
+                        continue
+                    # Метаподтверждение: хотя бы у одной записи из более длинного
+                    # бакета metadata_series точно совпадает с коротким ключом.
+                    # Точное совпадение исключает ложные слияния вида
+                    # "Мир" + "Другой мир" когда у "Другой мир" мета="Другой мир".
+                    long_recs = buckets.get((ak, long_sk), [])
+                    confirmed = any(
+                        _norm_key(r.metadata_series or '') == short_sk
+                        for r in long_recs
+                    )
+                    if confirmed:
+                        remap[long_sk] = short_sk
+
+            for long_sk, short_sk in remap.items():
+                long_key = (ak, long_sk)
+                short_key = (ak, short_sk)
+                if long_key in buckets:
+                    buckets.setdefault(short_key, []).extend(buckets.pop(long_key))
+
         groups: List[CompilationGroup] = []
         for (_, _), recs in buckets.items():
             if len(recs) < 2:
