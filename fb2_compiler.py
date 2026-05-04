@@ -486,6 +486,24 @@ class FB2CompilerService:
                         book.sort_source = 'filename_range'
                         book.order_ambiguous = False
 
+            # --- Групповая коррекция: если большинство книг группы используют
+            # series_number из метаданных, то книги где filename перебил метаданные
+            # исправляем обратно по мета. Это решает случай когда файлы пронумерованы
+            # "1. Книга 1", "2. Книга 2", "3. Книга 3" но book 3 на самом деле том 4.
+            _sn_meta_books = [b for b in books if b.sort_source == 'series_number'
+                              and b.sort_key[0] == 0 and b.sort_key[1] > 0]
+            _sn_file_books = [b for b in books if b.sort_source == 'filename'
+                              and b.sort_key[0] == 0 and b.record.series_number
+                              and re.match(r'^\d+$', b.record.series_number.strip())]
+            if len(_sn_meta_books) > len(_sn_file_books) and _sn_file_books:
+                for book in _sn_file_books:
+                    meta_n = int(book.record.series_number.strip())
+                    if meta_n < 1900 and meta_n != book.sort_key[1]:
+                        book.sort_key = (0, meta_n, 0, book.sort_key[3])
+                        book.sort_source = 'series_number'
+                        book.volume_label = str(meta_n)
+                        book.order_ambiguous = False
+
             duplicate_paths: List[Path] = []
 
             # --- Фильтр 1: обработка заранее скомпилированных файлов ----------
@@ -1428,27 +1446,42 @@ class FB2CompilerService:
             re.IGNORECASE | re.UNICODE,
         )
 
+        # Предвычисляем для каждой книги набор значимых слов stem (без ведущего числа)
+        def _stem_words(book: CompilationBook) -> set:
+            s = re.sub(r'^\d+\s*[.\-–—]\s*', '', book.abs_path.stem)
+            return {w.lower() for w in re.split(r'\W+', s) if len(w) >= 3}
+
+        _all_stem_words = [_stem_words(b) for b in books]
+
+        def _naming_fit(book: CompilationBook) -> int:
+            """Число других книг группы, разделяющих ≥2 значимых слова со stem этой книги."""
+            bw = _stem_words(book)
+            if not bw:
+                return 0
+            return sum(1 for ow in _all_stem_words if len(bw & ow) >= 2)
+
         def _book_freshness(book: CompilationBook):
-            """Ключ сортировки: чем свежее — тем меньше (идёт первым)."""
-            # 1. Дата из FB2 <date> — лексикографически сравниваем, инвертируем
+            """Ключ сортировки: чем свежее и ближе к паттерну группы — тем меньше (идёт первым)."""
+            # 1. Схожесть названия с другими книгами группы (больше = лучше = меньший ключ)
+            fit_key = -_naming_fit(book)
+
+            # 2. Дата из FB2 <date> — лексикографически сравниваем, инвертируем
             date_str = self._extract_date_from_fb2(book.abs_path) or ''
             date_key = tuple(-int(x) for x in date_str.split('-')) if date_str else (0,)
 
-            # 2. Ключевые слова в имени/названии
+            # 3. Ключевые слова в имени/названии
             text = f"{book.abs_path.stem} {book.record.file_title or ''}"
             kw_key = 0 if _FRESH_KEYWORDS.search(text) else 1
 
-            # 3. Одиночная книга имеет приоритет над многотомной предкомпиляцией.
-            # Файл с несколькими заголовками в file_title (≥2 ". CAPITAL") — компиляция
-            # нескольких книг; при коллизии позиций она уступает отдельному тому.
+            # 4. Одиночная книга имеет приоритет над многотомной предкомпиляцией.
             _ft = book.record.file_title or ''
             multi_key = 1 if len(re.findall(r'\.\s+[А-ЯЁA-Z]', _ft)) >= 2 else 0
 
-            # 4. Год из имени файла (например "- 2022" → свежее 2018)
+            # 5. Год из имени файла (например "- 2022" → свежее 2018)
             year_m = re.search(r'[-–\s](\d{4})\b', book.abs_path.stem)
             year_key = -int(year_m.group(1)) if year_m else 0
 
-            return (date_key, kw_key, multi_key, year_key, str(book.abs_path))
+            return (fit_key, date_key, kw_key, multi_key, year_key, str(book.abs_path))
 
         sorted_books = sorted(books, key=_book_freshness)
         seen_positions: Dict[Tuple, CompilationBook] = {}
