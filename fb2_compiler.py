@@ -383,6 +383,43 @@ class FB2CompilerService:
                 if long_key in buckets:
                     buckets.setdefault(short_key, []).extend(buckets.pop(long_key))
 
+        # Слияние бакетов с одинаковой серией, но разными авторами, где один автор
+        # является подмножеством слов другого.
+        # Пример: ("Винтеркей Серж", серия) + ("Шумилин Артём, Винтеркей Серж", серия)
+        # → {"винтеркей","серж"} ⊆ {"шумилин","артем","винтеркей","серж"} → один бакет.
+        # Канонический ключ — более полный автор (с большим числом слов).
+        def _author_words(ak: str) -> set:
+            return set(re.sub(r'[,;]', ' ', ak).split())
+
+        # Сгруппировать по series_key: {sk: [ak, ...]}
+        series_authors: Dict[str, list] = {}
+        for (ak, sk) in list(buckets.keys()):
+            series_authors.setdefault(sk, []).append(ak)
+
+        for sk, aks in series_authors.items():
+            if len(aks) < 2:
+                continue
+            # Сортируем по числу слов: меньше → сначала
+            aks_sorted = sorted(aks, key=lambda a: len(_author_words(a)))
+            author_remap: Dict[str, str] = {}
+            for i, short_ak in enumerate(aks_sorted):
+                short_words = _author_words(short_ak)
+                if not short_words:
+                    continue
+                for long_ak in aks_sorted[i + 1:]:
+                    if long_ak in author_remap:
+                        continue
+                    long_words = _author_words(long_ak)
+                    # Слияние только если короткий — строгое подмножество длинного
+                    if short_words < long_words:
+                        author_remap[short_ak] = long_ak  # short → long (полный)
+
+            for short_ak, long_ak in author_remap.items():
+                short_key = (short_ak, sk)
+                long_key  = (long_ak,  sk)
+                if short_key in buckets:
+                    buckets.setdefault(long_key, []).extend(buckets.pop(short_key))
+
         groups: List[CompilationGroup] = []
         for (_, _), recs in buckets.items():
             if len(recs) < 2:
