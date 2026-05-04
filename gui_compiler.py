@@ -710,7 +710,10 @@ class CompilerDialog:
             cleaned = sum(len(r.source_paths) for r in cleanup_ok)
             lines.append(f'\nУдалено устаревших файлов: {cleaned}')
             for r in cleanup_ok:
-                lines.append(f'  ♻ {r.group.author} / {r.group.series} ({r.group.volume_range})')
+                line = f'  ♻ {r.group.author} / {r.group.series} ({r.group.volume_range})'
+                if r.output_path:
+                    line += f' → {r.output_path.name}'
+                lines.append(line)
         if failed:
             lines.append(f'\nОшибок: {len(failed)}')
             for r in failed:

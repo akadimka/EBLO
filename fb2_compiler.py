@@ -1064,6 +1064,20 @@ class FB2CompilerService:
                     if hi > lo:
                         return lo, hi
 
+        # Критерий 1.6: паттерн "книги/томов N-M" — слово ПЕРЕД диапазоном.
+        # Пример: «Преисподняя. Компиляция. Книги 1-5» — слово "Книги" стоит до диапазона.
+        _BOOKS_BEFORE_RANGE_RE = re.compile(
+            r'(?:книги?|кн\.?|томов?|vols?\.?)\s+(\d{1,4})\s*[-–—]\s*(\d{1,4})\b',
+            re.IGNORECASE | re.UNICODE,
+        )
+        for candidate in (_stem_val, book.record.file_title or ''):
+            if _has_series_link(candidate):
+                bm = _BOOKS_BEFORE_RANGE_RE.search(candidate)
+                if bm:
+                    lo, hi = int(bm.group(1)), int(bm.group(2))
+                    if hi > lo:
+                        return lo, hi
+
         # Критерий 2.5: сервисное слово в имени ФАЙЛА (stem) — filename авторитетнее метаданных.
         # Пример: «Орел (Тетралогия)» → Тетралогия=4, хотя series_number может быть "1-2".
         # Проверяем stem ДО series_number, чтобы явное слово в имени файла не было перебито.
@@ -1910,13 +1924,41 @@ class FB2CompilerService:
         self._log(f"Компиляция: {group.author} / {group.series} ({len(group.books)} книг)")
 
         # Cleanup-only: новая компиляция не нужна, только удалить устаревшие файлы
+        # + переименовать файл-компиляцию по нашей схеме именования (если нужно).
         if getattr(group, 'cleanup_only', False):
             if group.duplicate_paths:
                 self._delete_sources(group.duplicate_paths)
                 self._log(f"   ♻ Удалено {len(group.duplicate_paths)} устаревших файлов")
+
+            renamed_path = None
+            if group.kept_paths:
+                old_path = group.kept_paths[0]
+                vol_m = re.match(r'^(\d+)-(\d+)$', group.volume_range or '')
+                if vol_m and old_path.exists():
+                    lo, hi = int(vol_m.group(1)), int(vol_m.group(2))
+                    n_volumes = hi - lo + 1
+                    suffix = self._series_suffix(
+                        n_volumes, lo, hi, 0,
+                        series_complete=getattr(group, 'series_complete', True),
+                    )
+                    clean_series = self._clean_series_name(group.series)
+                    safe_author = re.sub(r'[\\/:*?"<>|]', '_', group.author)
+                    safe_series = re.sub(r'[/:*?"<>|]', '_',
+                                        self._series_to_display(clean_series))
+                    new_name = f"{safe_author} - {safe_series} ({suffix}).fb2"
+                    new_path = old_path.parent / new_name
+                    if old_path != new_path:
+                        try:
+                            old_path.rename(new_path)
+                            group.kept_paths[0] = new_path
+                            renamed_path = new_path
+                            self._log(f"   ✎ Переименован: {old_path.name} → {new_name}")
+                        except OSError as e:
+                            self._log(f"   ✗ Не удалось переименовать {old_path.name}: {e}")
+
             return CompilationResult(
                 group=group,
-                output_path=None,
+                output_path=renamed_path,
                 books_compiled=0,
                 source_paths=list(group.duplicate_paths),
                 success=True,
