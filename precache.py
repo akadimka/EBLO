@@ -146,7 +146,10 @@ class Precache:
             has_fb2_files = False
             try:
                 for item in folder.iterdir():
-                    if item.is_file() and item.suffix.lower() == '.fb2':
+                    if item.is_file() and (
+                        item.suffix.lower() == '.fb2'
+                        or item.name.lower().endswith('.fb2.zip')
+                    ):
                         has_fb2_files = True
                         break
             except (PermissionError, OSError):

@@ -12,20 +12,24 @@ try:
 except ImportError:
     from window_persistence import setup_window_persistence
 
+try:
+    from fb2_utils import fb2_rglob, read_fb2_bytes
+except ImportError:
+    from .fb2_utils import fb2_rglob, read_fb2_bytes
+
 
 def _file_hash(path: Path, chunk_size: int = 65536) -> str:
-    """SHA-256 первых 256 КБ файла (быстро и достаточно точно)."""
+    """SHA-256 первых 256 КБ FB2-содержимого (прозрачно распаковывает fb2.zip)."""
     h = hashlib.sha256()
     try:
-        with open(path, 'rb') as f:
-            for _ in range(4):  # 4 × 64 КБ = 256 КБ
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                h.update(chunk)
-    except OSError:
+        # Для fb2.zip берём внутренние байты, чтобы дубли между .fb2 и .fb2.zip
+        # одного файла корректно обнаруживались как дубликаты.
+        raw = read_fb2_bytes(path)
+        data = raw[:chunk_size * 4]
+        h.update(data)
+        return h.hexdigest()
+    except Exception:
         return ''
-    return h.hexdigest()
 
 
 def _norm_str(s: str) -> str:
@@ -317,7 +321,7 @@ class DuplicateFinderWindow:
             # ── Фаза 2: поиск по хэшу (60–100%) ───────────────────────
             self.window.after(0, lambda: self.status_var.set('Фаза 2: поиск по хэшу…'))
 
-            files = list(Path(folder).rglob('*.fb2'))
+            files = fb2_rglob(Path(folder))
             total = len(files)
 
             hash_map: dict = {}

@@ -16,9 +16,11 @@ import tqdm
 try:
     from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
     from fb2_sax_extractor import FB2SAXExtractor
+    from fb2_utils import fb2_rglob
 except ImportError:
     from ..extraction_constants import FILE_EXTENSION_FOLDER_NAMES
     from ..fb2_sax_extractor import FB2SAXExtractor
+    from ..fb2_utils import fb2_rglob
 
 
 def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
@@ -211,7 +213,7 @@ class Pass1ReadFiles:
         """
         print("[PASS 1] Reading FB2 files...")
 
-        fb2_files = sorted(self.work_dir.rglob('*.fb2'))
+        fb2_files = fb2_rglob(self.work_dir)
         total = len(fb2_files)
         if total == 0:
             self.logger.log("[PASS 1] No FB2 files found")

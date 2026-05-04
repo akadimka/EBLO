@@ -8,8 +8,10 @@ from io import StringIO
 
 try:
     from regen_csv import RegenCSVService
+    from fb2_utils import fb2_count as _fb2_count
 except ImportError:
     from .regen_csv import RegenCSVService
+    from .fb2_utils import fb2_count as _fb2_count
 
 
 class _Tooltip:
@@ -886,7 +888,7 @@ class CSVNormalizerApp:
             return
 
         # Проверить наличие FB2-файлов до запуска потока
-        fb2_count = sum(1 for _ in Path(folder).rglob('*.fb2'))
+        fb2_count = _fb2_count(Path(folder))
         if fb2_count == 0:
             self._log("ОШИБКА: В указанной папке нет FB2-файлов")
             messagebox.showwarning(
@@ -1095,7 +1097,7 @@ class CSVNormalizerApp:
         if not folder or not os.path.isdir(folder):
             messagebox.showerror("Ошибка", "Укажите корректную папку")
             return
-        fb2_count = sum(1 for _ in Path(folder).rglob('*.fb2'))
+        fb2_count = _fb2_count(Path(folder))
         if fb2_count == 0:
             messagebox.showwarning("Папка пуста",
                 f"В папке нет FB2-файлов:\n{folder}",
@@ -1375,7 +1377,7 @@ class CSVNormalizerApp:
             thread.start()
             return
 
-        fb2_count = sum(1 for _ in Path(folder).rglob('*.fb2'))
+        fb2_count = _fb2_count(Path(folder))
         if fb2_count == 0:
             messagebox.showwarning("Папка пуста",
                 f"В папке нет FB2-файлов:\n{folder}",

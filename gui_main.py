@@ -67,7 +67,9 @@ try:
     import synchronization
     importlib.reload(synchronization)
     from synchronization import SynchronizationService
-    
+
+    from fb2_utils import fb2_rglob, fb2_count as _fb2_count
+
 except Exception as e:
     from .genres_manager import GenresManager
     from .settings_manager import SettingsManager
@@ -75,6 +77,7 @@ except Exception as e:
     from .gui_genres import GenresManagerWindow
     from .gui_normalizer import CSVNormalizerApp
     from .synchronization import SynchronizationService
+    from .fb2_utils import fb2_rglob, fb2_count as _fb2_count
 
 
 class MainWindow(tk.Tk):
@@ -607,8 +610,8 @@ class MainWindow(tk.Tk):
             messagebox.showwarning('Внимание', f'Папка не найдена:\n{folder}')
             return
 
-        fb2_count = sum(1 for _ in Path(folder).rglob('*.fb2'))
-        if fb2_count == 0:
+        _fc = _fb2_count(Path(folder))
+        if _fc == 0:
             messagebox.showwarning('Папка пуста', f'В папке нет FB2-файлов:\n{folder}')
             return
         if self._status_bar:
@@ -626,7 +629,7 @@ class MainWindow(tk.Tk):
                 results: Dict[str, list] = {}
                 errors: list = []
                 folder_path = Path(folder)
-                fb2_files = sorted(folder_path.rglob('*.fb2'))
+                fb2_files = fb2_rglob(folder_path)
                 total = len(fb2_files)
 
                 for idx, fb2_file in enumerate(fb2_files, 1):
@@ -702,7 +705,7 @@ class MainWindow(tk.Tk):
             return
 
         # Подсчитать файлы для подтверждения
-        fb2_files = list(Path(library_path).rglob('*.fb2'))
+        fb2_files = fb2_rglob(Path(library_path))
         if not fb2_files:
             messagebox.showinfo('Информация', 'FB2-файлы в папке библиотеки не найдены.')
             return

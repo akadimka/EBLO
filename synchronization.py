@@ -27,10 +27,12 @@ try:
     from settings_manager import SettingsManager
     from logger import Logger
     from regen_csv import RegenCSVService
+    from fb2_utils import read_fb2_bytes, write_fb2_bytes, fb2_rglob, has_fb2_files as _has_fb2_util
 except ImportError:
     from .settings_manager import SettingsManager
     from .logger import Logger
     from .regen_csv import RegenCSVService
+    from .fb2_utils import read_fb2_bytes, write_fb2_bytes, fb2_rglob, has_fb2_files as _has_fb2_util
 
 
 class SynchronizationService:
@@ -966,10 +968,8 @@ class SynchronizationService:
             self._log(f"Ошибка при очистке папок: {str(e)}")
 
     def _has_fb2_files(self, path: Path) -> bool:
-        """Return True if path contains any .fb2 files recursively."""
-        for f in path.rglob('*.fb2'):
-            return True
-        return False
+        """Return True if path contains any .fb2 or .fb2.zip files recursively."""
+        return _has_fb2_util(path)
 
     def _remove_dir_if_no_fb2(self, path: Path) -> None:
         """Remove directory tree if it contains no FB2 files.
@@ -1175,7 +1175,7 @@ class SynchronizationService:
             return
 
         try:
-            raw_bytes = fb2_path.read_bytes()
+            raw_bytes = read_fb2_bytes(fb2_path)  # прозрачно распаковывает fb2.zip
 
             # ---- detect encoding ----
             declared_enc = None
@@ -1339,7 +1339,7 @@ class SynchronizationService:
             except LookupError:
                 out_bytes = result.encode('utf-8', errors='replace')
 
-            fb2_path.write_bytes(out_bytes)
+            write_fb2_bytes(fb2_path, out_bytes)  # сохраняет zip-формат если нужно
             self._log(f"  ✓ Теги обновлены ({content_encoding}): {fb2_path.name}")
 
         except Exception as e:

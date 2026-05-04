@@ -16,9 +16,11 @@ from pathlib import Path
 try:
     from window_persistence import setup_window_persistence
     from settings_manager import SettingsManager
+    from fb2_utils import fb2_rglob, read_fb2_bytes
 except ImportError:
     from .window_persistence import setup_window_persistence
     from .settings_manager import SettingsManager
+    from .fb2_utils import fb2_rglob, read_fb2_bytes
 
 # Required FB2 structural elements (tag local-name)
 _REQUIRED_TAGS = [
@@ -32,7 +34,7 @@ def _check_fb2_file(path: Path) -> list[str]:
 
     # 1. Basic file readability
     try:
-        raw = path.read_bytes()
+        raw = read_fb2_bytes(path)  # прозрачно распаковывает fb2.zip
     except OSError as e:
         return [f"Не удаётся прочитать: {e}"]
 
@@ -203,7 +205,7 @@ class IntegrityCheckWindow:
         self._stop_flag.set()
 
     def _scan_thread(self, folder: str):
-        fb2_files = sorted(Path(folder).rglob('*.fb2'))
+        fb2_files = fb2_rglob(Path(folder))
         total = len(fb2_files)
         bad_count = 0
         for i, fp in enumerate(fb2_files):

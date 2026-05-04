@@ -40,8 +40,10 @@ def analyze_file_structure(filename: str, service_words: List[str] = None) -> Di
     """
     
     name = filename.strip()
-    if name.endswith('.fb2'):
-        name = name[:-4]  # Remove .fb2 extension
+    if name.lower().endswith('.fb2.zip'):
+        name = name[:-8]
+    elif name.lower().endswith('.fb2'):
+        name = name[:-4]
     
     # Find all parentheses
     paren_positions: List[Tuple[int, int, str]] = []
