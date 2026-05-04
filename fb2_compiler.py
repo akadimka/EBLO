@@ -337,88 +337,85 @@ class FB2CompilerService:
             key = (_norm_key(author), _series_group_key(series))
             buckets.setdefault(key, []).append(rec)
 
-        # Слияние бакетов одного автора, где одно название серии является
-        # суффиксной (хвостовой) последовательностью слов другого.
-        # Пример: "Чужие степи" + "Степи" → общая хвостовая seq = "степи" → один бакет.
-        # Условие безопасности: слияние только если в БОЛЕЕ ДЛИННОМ названии
-        # метаданные хотя бы частично подтверждают БОЛЕЕ КОРОТКОЕ (как задумано
-        # пользователем: «мета подтверждает или не делает ничего»).
+        # Комбинированное слияние бакетов: работает когда автор И/ИЛИ серия отличаются.
+        # Условия слияния пары бакетов (ak1,sk1) и (ak2,sk2):
+        #   • авторы: words(ak1) ⊆ words(ak2) или равны
+        #   • серии:  sk1 является хвостовым суффиксом sk2, или равны
+        #   • хотя бы одно из двух условий — строгое (не равенство)
+        #   • метаподтверждение: хотя бы у одной записи из бакета с ДЛИННОЙ серией
+        #     metadata_series (после _punct_norm) совпадает с КОРОТКОЙ серией.
+        # Канонический ключ: более длинный автор + более длинная серия.
         def _word_suffix_key(short_sk: str, long_sk: str) -> bool:
-            """True если all words of short_sk are the trailing words of long_sk."""
             ws = short_sk.split()
             wl = long_sk.split()
             return bool(ws) and len(ws) < len(wl) and wl[-len(ws):] == ws
 
-        author_keys: Dict[str, List[str]] = {}
-        for (ak, sk) in list(buckets.keys()):
-            author_keys.setdefault(ak, []).append(sk)
-
-        for ak, sks in author_keys.items():
-            if len(sks) < 2:
-                continue
-            # Сортируем по длине: короткие первыми — они кандидаты в canonical
-            sks_sorted = sorted(sks, key=lambda s: len(s))
-            remap: Dict[str, str] = {}
-            for i, short_sk in enumerate(sks_sorted):
-                for long_sk in sks_sorted[i + 1:]:
-                    if long_sk in remap:
-                        continue
-                    if not _word_suffix_key(short_sk, long_sk):
-                        continue
-                    # Метаподтверждение: хотя бы у одной записи из более длинного
-                    # бакета metadata_series точно совпадает с коротким ключом.
-                    # Точное совпадение исключает ложные слияния вида
-                    # "Мир" + "Другой мир" когда у "Другой мир" мета="Другой мир".
-                    long_recs = buckets.get((ak, long_sk), [])
-                    confirmed = any(
-                        _norm_key(r.metadata_series or '') == short_sk
-                        for r in long_recs
-                    )
-                    if confirmed:
-                        remap[long_sk] = short_sk
-
-            for long_sk, short_sk in remap.items():
-                long_key = (ak, long_sk)
-                short_key = (ak, short_sk)
-                if long_key in buckets:
-                    buckets.setdefault(short_key, []).extend(buckets.pop(long_key))
-
-        # Слияние бакетов с одинаковой серией, но разными авторами, где один автор
-        # является подмножеством слов другого.
-        # Пример: ("Винтеркей Серж", серия) + ("Шумилин Артём, Винтеркей Серж", серия)
-        # → {"винтеркей","серж"} ⊆ {"шумилин","артем","винтеркей","серж"} → один бакет.
-        # Канонический ключ — более полный автор (с большим числом слов).
         def _author_words(ak: str) -> set:
             return set(re.sub(r'[,;]', ' ', ak).split())
 
-        # Сгруппировать по series_key: {sk: [ak, ...]}
-        series_authors: Dict[str, list] = {}
-        for (ak, sk) in list(buckets.keys()):
-            series_authors.setdefault(sk, []).append(ak)
-
-        for sk, aks in series_authors.items():
-            if len(aks) < 2:
-                continue
-            # Сортируем по числу слов: меньше → сначала
-            aks_sorted = sorted(aks, key=lambda a: len(_author_words(a)))
-            author_remap: Dict[str, str] = {}
-            for i, short_ak in enumerate(aks_sorted):
-                short_words = _author_words(short_ak)
-                if not short_words:
+        all_keys = list(buckets.keys())
+        merged = True
+        while merged:
+            merged = False
+            all_keys = list(buckets.keys())
+            for i, (ak1, sk1) in enumerate(all_keys):
+                if (ak1, sk1) not in buckets:
                     continue
-                for long_ak in aks_sorted[i + 1:]:
-                    if long_ak in author_remap:
+                for (ak2, sk2) in all_keys[i + 1:]:
+                    if (ak2, sk2) not in buckets:
                         continue
-                    long_words = _author_words(long_ak)
-                    # Слияние только если короткий — строгое подмножество длинного
-                    if short_words < long_words:
-                        author_remap[short_ak] = long_ak  # short → long (полный)
+                    if (ak1, sk1) == (ak2, sk2):
+                        continue
 
-            for short_ak, long_ak in author_remap.items():
-                short_key = (short_ak, sk)
-                long_key  = (long_ak,  sk)
-                if short_key in buckets:
-                    buckets.setdefault(long_key, []).extend(buckets.pop(short_key))
+                    aw1 = _author_words(ak1)
+                    aw2 = _author_words(ak2)
+
+                    # Автор: определяем направление подмножества
+                    if aw1 == aw2:
+                        author_dir = 0        # равны
+                    elif aw1 < aw2:
+                        author_dir = 12       # ak1 короче, ak2 — канонический
+                    elif aw2 < aw1:
+                        author_dir = 21       # ak2 короче, ak1 — канонический
+                    else:
+                        continue              # пересекаются, но не подмножество
+
+                    # Серия: определяем направление суффикса
+                    if sk1 == sk2:
+                        series_dir = 0
+                    elif _word_suffix_key(sk1, sk2):
+                        series_dir = 12       # sk1 короче, sk2 — содержит
+                    elif _word_suffix_key(sk2, sk1):
+                        series_dir = 21       # sk2 короче, sk1 — содержит
+                    else:
+                        continue              # никакого суффиксного отношения
+
+                    # Хотя бы одно измерение должно быть строгим
+                    if author_dir == 0 and series_dir == 0:
+                        continue
+
+                    # Канонический: длинный автор + длинная серия
+                    canon_ak = ak2 if author_dir == 12 else ak1
+                    canon_sk = sk2 if series_dir == 12 else sk1
+                    short_sk  = sk1 if series_dir == 12 else sk2
+
+                    # Метаподтверждение для серийного суффикса
+                    if series_dir != 0:
+                        long_recs = buckets.get((ak1, sk1) if series_dir == 21 else (ak2, sk2), [])
+                        confirmed = any(
+                            _punct_norm(r.metadata_series or '') == short_sk
+                            or _word_suffix_key(short_sk, _punct_norm(r.metadata_series or ''))
+                            for r in long_recs
+                        )
+                        if not confirmed:
+                            continue
+
+                    canon_key = (canon_ak, canon_sk)
+                    # Поглощаем оба бакета в canonical (они могут быть разными от canon)
+                    for src_key in [(ak1, sk1), (ak2, sk2)]:
+                        if src_key != canon_key and src_key in buckets:
+                            buckets.setdefault(canon_key, []).extend(buckets.pop(src_key))
+                    merged = True
 
         groups: List[CompilationGroup] = []
         for (_, _), recs in buckets.items():
