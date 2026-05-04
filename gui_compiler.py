@@ -580,10 +580,13 @@ class CompilerDialog:
             part_count   = getattr(group, 'part_count', 0)
             top_lo, top_hi, n_volumes, has_subseries, n_top_arcs = self._service._run_stats(group.books)
             safe_series = _re.sub(r'[/:*?"<>|]', '_', self._service._series_to_display(clean_series))
+            sc = group.series_complete
             if has_subseries and n_top_arcs and n_top_arcs >= 2:
-                suffix = self._service._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes)
+                suffix = self._service._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes,
+                                                      series_complete=sc)
             else:
-                suffix  = self._service._series_suffix(n_volumes, top_lo, top_hi, part_count)
+                suffix  = self._service._series_suffix(n_volumes, top_lo, top_hi, part_count,
+                                                       series_complete=sc)
             fname       = f'{safe_author} - {safe_series} ({suffix}).fb2'
             self._fname_var.set(fname)
         except Exception:

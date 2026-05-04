@@ -70,6 +70,7 @@ class CompilationGroup:
     alphabetical_order: bool = False    # True — порядок не определён, отсортировано по названию
     cleanup_only: bool = False          # True — новая компиляция не нужна, только удалить дубликаты
     part_count: int = 0                 # > 0 если книги имеют паттерн N.M (том.часть): общее число частей
+    series_complete: bool = True        # False если за пределами run'а есть другие тома серии
 
     def __post_init__(self):
         if self.duplicate_paths is None:
@@ -232,30 +233,42 @@ class FB2CompilerService:
         return top_lo, top_hi, n_volumes, has_subseries, n_top_arcs
 
     @classmethod
-    def _series_suffix(cls, n_volumes: int, lo: int, hi: int = None, part_count: int = 0) -> str:
+    def _series_suffix(cls, n_volumes: int, lo: int, hi: int = None, part_count: int = 0,
+                       series_complete: bool = True) -> str:
         """Вернуть суффикс для имени файла компиляции.
 
-        n_volumes   — число логических томов в run'е
-        lo          — первая позиция run'а
-        hi          — последняя позиция run'а (если None — вычисляется как lo+n_volumes-1)
-        part_count  — для dot_part: число физических частей; если > n_volumes,
-                      добавляем «в N книгах» к служебному слову
+        n_volumes       — число логических томов в run'е
+        lo              — первая позиция run'а
+        hi              — последняя позиция run'а (если None — вычисляется как lo+n_volumes-1)
+        part_count      — для dot_part: число физических частей; если > n_volumes,
+                          добавляем «в N книгах» к служебному слову
+        series_complete — True если серия считается завершённой на этом run'е
+                          (нет других томов/блоков за его пределами). Если False —
+                          используем «книги N-M» вместо «Дилогия/Трилогия/…»,
+                          т.к. наличие пропущенных/будущих томов означает незаконченность.
 
         Правила:
-          • lo ∈ {0, 1} (серия с начала) → служебное слово (Дилогия, Трилогия…)
+          • lo ∈ {0, 1} И series_complete → служебное слово (Дилогия, Трилогия…)
             или «в N книгах» если слова нет.
+          • lo ∈ {0, 1} И NOT series_complete → «книги 1-N» (неполная серия).
           • lo > 1 (частичный run) → «т. N» или «т. N-M».
         """
         if hi is None:
             hi = lo + n_volumes - 1
         n_books = part_count if part_count > 0 else n_volumes
         if lo in (0, 1):
-            if 2 <= n_volumes < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n_volumes]:
-                word = cls._SERIES_WORDS[n_volumes]
-                if n_books > n_volumes:
-                    return f'{word} в {n_books} книгах'
-                return word
-            return f'в {n_books} книгах'
+            if series_complete:
+                if 2 <= n_volumes < len(cls._SERIES_WORDS) and cls._SERIES_WORDS[n_volumes]:
+                    word = cls._SERIES_WORDS[n_volumes]
+                    if n_books > n_volumes:
+                        return f'{word} в {n_books} книгах'
+                    return word
+                return f'в {n_books} книгах'
+            else:
+                # Серия незавершена — за пределами run'а есть другие тома
+                if lo == hi:
+                    return f'книга {lo}'
+                return f'книги {lo}-{hi}'
         # Частичный run — указываем диапазон томов
         if lo == hi:
             return f'т. {lo}'
@@ -666,6 +679,10 @@ class FB2CompilerService:
                 valid_runs = [r for r in self._split_into_consecutive_runs(numeric) if len(r) >= 2]
                 lone_numeric = [b for r in self._split_into_consecutive_runs(numeric) if len(r) < 2 for b in r]
 
+                # Серия считается завершённой только если этот run — единственный
+                # числовой блок и нет одиночных томов за его пределами.
+                # Пример: [1,2] + lone [4] → series_complete=False (есть том 4, серия продолжается).
+                _has_extra_numeric = bool(lone_numeric) or len(valid_runs) > 1
                 for run in valid_runs:
                     # Детектируем паттерн N.M (том.часть): если ВСЕ книги в run
                     # получили sort_source='dot_part', то volume_range = диапазон томов,
@@ -687,6 +704,7 @@ class FB2CompilerService:
                         duplicate_paths=duplicate_paths if first_group else [],
                         alphabetical_order=False,
                         part_count=run_part_count,
+                        series_complete=not _has_extra_numeric,
                     ))
                     first_group = False
 
