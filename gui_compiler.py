@@ -209,7 +209,7 @@ class CompilerDialog:
         bot_frm.rowconfigure(0, weight=1)
         bot_frm.columnconfigure(0, weight=1)
 
-        det_cols = ('num', 'title', 'file', 'sort_src', 'sn')
+        det_cols = ('num', 'title', 'file', 'sort_src', 'sn', 'size')
         self._det_tree = ttk.Treeview(
             bot_frm, columns=det_cols, show='headings',
         )
@@ -222,12 +222,14 @@ class CompilerDialog:
         self._det_tree.heading('file',     text='Файл')
         self._det_tree.heading('sort_src', text='Источник порядка')
         self._det_tree.heading('sn',       text='№ тома')
+        self._det_tree.heading('size',     text='Размер')
 
         self._det_tree.column('num',      width=30,  minwidth=25, anchor='center')
         self._det_tree.column('title',    width=260, minwidth=100)
         self._det_tree.column('file',     width=250, minwidth=100)
         self._det_tree.column('sort_src', width=180, minwidth=120)
         self._det_tree.column('sn',       width=60,  minwidth=40, anchor='center')
+        self._det_tree.column('size',     width=80,  minwidth=60, anchor='e')
 
         self._det_tree.tag_configure('to_delete', background='#FFE4E1', foreground='#CC0000')  # красный — к удалению
         self._det_tree.tag_configure('kept',      background='#E8F5E9', foreground='#2E7D32')  # зелёный — остаётся
@@ -538,6 +540,17 @@ class CompilerDialog:
             self._fname_var.set(kept_label)
             return
 
+        def _fmt_size(path) -> str:
+            try:
+                b = path.stat().st_size
+            except OSError:
+                return '—'
+            if b >= 1_048_576:
+                return f'{b / 1_048_576:.2f} МБ'
+            if b >= 1_024:
+                return f'{b / 1_024:.2f} КБ'
+            return f'{b} Б'
+
         for pos, book in enumerate(group.books, 1):
             title    = (book.record.file_title or '').strip() or book.abs_path.stem
             sort_lbl = _SORT_SOURCE_LABEL.get(book.sort_source, book.sort_source)
@@ -552,6 +565,7 @@ class CompilerDialog:
                     book.abs_path.name,
                     sort_lbl + warn,
                     sn,
+                    _fmt_size(book.abs_path),
                 ),
             )
             self._det_paths[_iid] = book.abs_path
@@ -567,6 +581,7 @@ class CompilerDialog:
                     dup_path.name,
                     '🗑 К удалению',
                     '—',
+                    _fmt_size(dup_path),
                 ),
                 tags=('to_delete',),
             )
