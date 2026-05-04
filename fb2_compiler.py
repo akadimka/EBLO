@@ -939,6 +939,21 @@ class FB2CompilerService:
                 if hi > lo:
                     return lo, hi
 
+        # Критерий 1.5: паттерн "Серия. N-M книги/томов" — диапазон после точки.
+        # Пример: «Император из стали. 1-2 книги» — зона до точки не содержит диапазона,
+        # но "книги/томов" после числа однозначно указывает на предкомпиляцию.
+        _BOOKS_RANGE_RE = re.compile(
+            r'[\.\s]\s*(\d{1,4})\s*[-–—]\s*(\d{1,4})\s*(?:книги?|кн\.?|томов?|vols?\.?)\b',
+            re.IGNORECASE | re.UNICODE,
+        )
+        for candidate in (_stem_val, book.record.file_title or ''):
+            if _has_series_link(candidate):
+                bm = _BOOKS_RANGE_RE.search(candidate)
+                if bm:
+                    lo, hi = int(bm.group(1)), int(bm.group(2))
+                    if hi > lo:
+                        return lo, hi
+
         # Критерий 2.5: сервисное слово в имени ФАЙЛА (stem) — filename авторитетнее метаданных.
         # Пример: «Орел (Тетралогия)» → Тетралогия=4, хотя series_number может быть "1-2".
         # Проверяем stem ДО series_number, чтобы явное слово в имени файла не было перебито.
