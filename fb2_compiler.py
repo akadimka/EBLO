@@ -1028,6 +1028,19 @@ class FB2CompilerService:
             tl = _ud2.normalize('NFC', txt).lower().replace('\u0451', '\u0435')
             return not series_words or any(w in tl for w in series_words)
 
+        # \u0411\u044b\u0441\u0442\u0440\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430: \u0435\u0441\u043b\u0438 \u0432 \u0441\u0442\u0435\u043c\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u043d\u043e\u0435 \u0441\u043b\u043e\u0432\u043e \u0441\u0442\u043e\u0438\u0442 \u043d\u0435\u043f\u043e\u0441\u0440\u0435\u0434\u0441\u0442\u0432\u0435\u043d\u043d\u043e
+        # \u043f\u0435\u0440\u0435\u0434 \u043d\u043e\u043c\u0435\u0440\u043e\u043c \u0442\u043e\u043c\u0430 (\u00ab\u0418\u0431\u0438\u0441\u043e\u0432\u0430\u044f \u0442\u0440\u0438\u043b\u043e\u0433\u0438\u044f 2. \u0414\u044b\u043c\u043d\u0430\u044f \u0440\u0435\u043a\u0430\u00bb), \u0444\u0430\u0439\u043b \u044f\u0432\u043b\u044f\u0435\u0442\u0441\u044f
+        # \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u044b\u043c \u0442\u043e\u043c\u043e\u043c \u0441\u0435\u0440\u0438\u0438, \u0430 \u043d\u0435 \u043a\u043e\u043c\u043f\u0438\u043b\u044f\u0446\u0438\u0435\u0439 \u2014 \u043d\u0435\u0437\u0430\u0432\u0438\u0441\u0438\u043c\u043e \u043e\u0442 \u043c\u0435\u0442\u0430\u0434\u0430\u043d\u043d\u044b\u0445.
+        _stem_lc = book.abs_path.stem.lower().replace('\u0451', '\u0435')
+        for _kw in self._SERIES_WORDS:
+            if not _kw:
+                continue
+            if re.search(
+                r'\b' + re.escape(_kw.lower().replace('\u0451', '\u0435')) + r'\s+\d{1,4}\s*[.\-\u2013\u2014]',
+                _stem_lc,
+            ):
+                return 0, 0
+
         # Regex для удаления пометок тома родительской серии вида «(т. 7-8)»
         _VOL_ANNOT_STRIP = re.compile(
             r'\((?:т|том|vol|book|ч|часть)\.?\s*\d+[-–—]\d+\)', re.IGNORECASE | re.UNICODE
@@ -1117,11 +1130,6 @@ class FB2CompilerService:
         _stem_lower = book.abs_path.stem.lower()
         for idx, kw in enumerate(self._SERIES_WORDS):
             if kw and kw.lower() in _stem_lower:
-                if re.search(
-                    r'\b' + re.escape(kw.lower()) + r'\s+\d{1,4}\s*[.\-–—]',
-                    _stem_lower,
-                ):
-                    continue  # «Серия N.» — это том серии, не компиляция
                 if _has_series_link(_stem_lower):
                     return 1, idx
 
@@ -1143,11 +1151,6 @@ class FB2CompilerService:
                 continue
             for idx, kw in enumerate(self._SERIES_WORDS):
                 if kw and kw.lower() in _kw_text:
-                    if re.search(
-                        r'\b' + re.escape(kw.lower()) + r'\s+\d{1,4}\s*[.\-–—]',
-                        _kw_text,
-                    ):
-                        continue  # том серии с названием, содержащим сервисное слово
                     if _has_series_link(_kw_text):
                         return 1, idx  # сервисное слово → предполагаем lo=1
 
