@@ -54,6 +54,7 @@ class CompilerDialog:
         self._settings = settings
         self._service  = FB2CompilerService(logger=logger)
         self._groups: List[CompilationGroup] = []
+        self._group_by_iid: dict = {}
         self._results: List[CompilationResult] = []
         self._scanning = False
         self._initial_dir = initial_dir
@@ -323,6 +324,7 @@ class CompilerDialog:
             self._det_tree.delete(iid)
         self._fname_var.set('—')
         self._groups = []
+        self._group_by_iid = {}
 
         threading.Thread(target=self._scan_worker, args=(folder,), daemon=True).start()
 
@@ -407,9 +409,19 @@ class CompilerDialog:
                 records = getattr(svc, 'records', []) or []
 
             self._set_status('Поиск групп для компиляции…')
-            groups = self._service.find_groups(records, work_dir)
 
-            self._win.after(0, lambda: self._populate_groups(groups))
+            _found_count = [0]
+
+            def _on_group(g):
+                _found_count[0] += 1
+                n = _found_count[0]
+                self._win.after(0, lambda g=g, n=n: (
+                    self._add_group_row(g),
+                    self._status_var.set(f'Найдено групп: {n}…'),
+                ))
+
+            groups = self._service.find_groups(records, work_dir, on_group=_on_group)
+            self._win.after(0, lambda: self._finalize_scan(groups))
 
         except Exception as exc:
             import traceback
@@ -433,7 +445,52 @@ class CompilerDialog:
         self._status_var.set(f'Ошибка: {err}')
         messagebox.showerror('Ошибка сканирования', err, parent=self._win)
 
-    def _populate_groups(self, groups: List[CompilationGroup]):
+    def _add_group_row(self, g: CompilationGroup):
+        """Добавить одну группу в таблицу (вызывается инкрементно из on_group callback)."""
+        iid = str(id(g))
+        if getattr(g, 'cleanup_only', False):
+            dup_count = len(g.duplicate_paths)
+            self._tree.insert(
+                '', tk.END,
+                iid=iid,
+                values=(
+                    g.author,
+                    g.series,
+                    f'0 (удалить: {dup_count})',
+                    '✓ Уже скомпилировано',
+                    g.volume_range or '—',
+                ),
+                tags=('cleanup',),
+            )
+            return
+
+        sources = {b.sort_source for b in g.books}
+        sources.discard('unknown')
+        if getattr(g, 'alphabetical_order', False):
+            order_txt = '📖 По названию (нет нумерации томов)'
+            tag = 'alpha'
+        elif g.order_determined:
+            order_txt = ', '.join(_SORT_SOURCE_LABEL.get(s, s) for s in sources)
+            tag = 'ok'
+        else:
+            order_txt = '⚠ Порядок частично не определён'
+            tag = 'warn'
+
+        self._tree.insert(
+            '', tk.END,
+            iid=iid,
+            values=(
+                g.author,
+                g.series,
+                len(g.books),
+                order_txt,
+                g.volume_range or '—',
+            ),
+            tags=(tag,),
+        )
+
+    def _finalize_scan(self, groups: List[CompilationGroup]):
+        """Вызывается после find_groups: пересортировать строки, обновить статус, включить кнопки."""
         self._scanning = False
         self._progressbar.pack_forget()
         folder = self._dir_var.get().strip()
@@ -442,6 +499,7 @@ class CompilerDialog:
         )
 
         self._groups = groups
+        self._group_by_iid = {str(id(g)): g for g in groups}
 
         if not groups:
             self._status_var.set('Групп для компиляции не найдено')
@@ -452,47 +510,14 @@ class CompilerDialog:
         total      = len(compilable_groups)
         compilable = total or len(cleanup_groups)
 
-        for idx, g in enumerate(groups):
-            if getattr(g, 'cleanup_only', False):
-                dup_count = len(g.duplicate_paths)
-                self._tree.insert(
-                    '', tk.END,
-                    iid=str(idx),
-                    values=(
-                        g.author,
-                        g.series,
-                        f'0 (удалить: {dup_count})',
-                        '✓ Уже скомпилировано',
-                        g.volume_range or '—',
-                    ),
-                    tags=('cleanup',),
-                )
-                continue
-
-            sources = {b.sort_source for b in g.books}
-            sources.discard('unknown')
-            if getattr(g, 'alphabetical_order', False):
-                order_txt = '📖 По названию (нет нумерации томов)'
-                tag = 'alpha'
-            elif g.order_determined:
-                order_txt = ', '.join(_SORT_SOURCE_LABEL.get(s, s) for s in sources)
-                tag = 'ok'
-            else:
-                order_txt = '⚠ Порядок частично не определён'
-                tag = 'warn'
-
-            self._tree.insert(
-                '', tk.END,
-                iid=str(idx),
-                values=(
-                    g.author,
-                    g.series,
-                    len(g.books),
-                    order_txt,
-                    g.volume_range or '—',
-                ),
-                tags=(tag,),
-            )
+        # Пересортировать строки дерева в соответствии с итоговым отсортированным порядком.
+        # find_groups вернул groups уже отсортированными; перемещаем строки в этот порядок.
+        for pos, g in enumerate(groups):
+            iid = str(id(g))
+            try:
+                self._tree.move(iid, '', pos)
+            except Exception:
+                pass  # строка могла не появиться (крайне редкий race condition)
 
         alpha = sum(1 for g in compilable_groups if getattr(g, 'alphabetical_order', False))
         warn  = sum(1 for g in compilable_groups if not g.order_determined
@@ -543,10 +568,9 @@ class CompilerDialog:
         if not sel:
             self._fname_var.set('—')
             return
-        idx = int(sel[0])
-        if idx >= len(self._groups):
+        group = self._group_by_iid.get(sel[0])
+        if group is None:
             return
-        group = self._groups[idx]
 
         for iid in self._det_tree.get_children():
             self._det_tree.delete(iid)
@@ -676,7 +700,7 @@ class CompilerDialog:
                                    parent=self._win)
             return
 
-        selected_groups = [self._groups[int(iid)] for iid in sel]
+        selected_groups = [self._group_by_iid[iid] for iid in sel if iid in self._group_by_iid]
         to_compile = selected_groups
         alpha_cnt  = sum(1 for g in to_compile if getattr(g, 'alphabetical_order', False))
 

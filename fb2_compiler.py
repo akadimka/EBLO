@@ -289,12 +289,15 @@ class FB2CompilerService:
         self,
         records: List,
         work_dir: Path,
+        on_group=None,
     ) -> List[CompilationGroup]:
         """Найти все группы (автор + серия) с ≥2 файлами.
 
         Args:
             records: Список BookRecord из pipeline.
             work_dir: Корневая папка (для построения абсолютных путей).
+            on_group: опциональный callback(CompilationGroup) — вызывается сразу
+                      при добавлении каждой группы (до финальной сортировки).
 
         Returns:
             Список CompilationGroup, отсортированный по (author, series).
@@ -422,6 +425,12 @@ class FB2CompilerService:
                     merged = True
 
         groups: List[CompilationGroup] = []
+
+        def _emit(g: CompilationGroup) -> None:
+            groups.append(g)
+            if on_group:
+                on_group(g)
+
         for (_, _), recs in buckets.items():
             if len(recs) < 2:
                 continue
@@ -599,7 +608,7 @@ class FB2CompilerService:
                         duplicate_paths.append(book.abs_path)
                     if duplicate_paths:
                         # Есть что удалить — сообщаем через cleanup_only группу
-                        groups.append(CompilationGroup(
+                        _emit(CompilationGroup(
                             author=author,
                             series=series,
                             books=[],
@@ -658,7 +667,7 @@ class FB2CompilerService:
                             # с неизвестной позицией → cleanup_only: предкомп остаётся,
                             # покрытые тома — на удаление; оставшиеся обрабатываются отдельно.
                             cov_dup_paths = list(duplicate_paths) + [r.abs_path for r in covered_individually]
-                            groups.append(CompilationGroup(
+                            _emit(CompilationGroup(
                                 author=author, series=series, books=[],
                                 order_determined=True,
                                 volume_range=(
@@ -739,7 +748,7 @@ class FB2CompilerService:
                 # Пример: два файла с одинаковым sort_key (01. vs 1.) — dedup оставляет один,
                 # другой попадает в duplicate_paths, но без группы они не удаляются.
                 if duplicate_paths and books:
-                    groups.append(CompilationGroup(
+                    _emit(CompilationGroup(
                         author=author,
                         series=series,
                         books=[],
@@ -755,7 +764,7 @@ class FB2CompilerService:
             if alphabetical_order:
                 # Порядок по названию — нет номеров томов, пропуски неприменимы
                 volume_range = ''
-                groups.append(CompilationGroup(
+                _emit(CompilationGroup(
                     author=author,
                     series=series,
                     books=books_sorted,
@@ -809,7 +818,7 @@ class FB2CompilerService:
                     else:
                         run_range = self._compute_volume_range(run)
                         run_part_count = 0
-                    groups.append(CompilationGroup(
+                    _emit(CompilationGroup(
                         author=author,
                         series=series,
                         books=run,
@@ -848,7 +857,7 @@ class FB2CompilerService:
                         continue
                     all_oth_ambig = all(b.order_ambiguous for b in all_others)
                     oth_sorted = sorted(all_others, key=lambda b: b.sort_key)
-                    groups.append(CompilationGroup(
+                    _emit(CompilationGroup(
                         author=author,
                         series=series,
                         books=oth_sorted,
