@@ -507,7 +507,7 @@ class FB2CompilerService:
             if len(_sn_meta_books) > len(_sn_file_books) and _sn_file_books:
                 for book in _sn_file_books:
                     meta_n = int(book.record.series_number.strip())
-                    if meta_n < 1900 and meta_n != book.sort_key[1]:
+                    if meta_n < 1900 and meta_n > 0 and meta_n != book.sort_key[1]:
                         book.sort_key = (0, meta_n, 0, book.sort_key[3])
                         book.sort_source = 'series_number'
                         book.volume_label = str(meta_n)
