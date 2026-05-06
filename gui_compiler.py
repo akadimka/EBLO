@@ -576,40 +576,6 @@ class CompilerDialog:
             self._det_tree.delete(iid)
         self._det_paths.clear()
 
-        if getattr(group, 'cleanup_only', False):
-            # Сначала — файлы, которые остаются (зелёные)
-            for pos, kept_path in enumerate(group.kept_paths or [], 1):
-                _iid = self._det_tree.insert(
-                    '', tk.END,
-                    values=(
-                        pos,
-                        kept_path.stem,
-                        kept_path.name,
-                        '✓ Остаётся',
-                        '—',
-                    ),
-                    tags=('kept',),
-                )
-                self._det_paths[_iid] = kept_path
-            # Затем — файлы к удалению (красные)
-            offset = len(group.kept_paths or [])
-            for pos, dup_path in enumerate(group.duplicate_paths, offset + 1):
-                _iid = self._det_tree.insert(
-                    '', tk.END,
-                    values=(
-                        pos,
-                        dup_path.stem,
-                        dup_path.name,
-                        '🗑 К удалению',
-                        '—',
-                    ),
-                    tags=('to_delete',),
-                )
-                self._det_paths[_iid] = dup_path
-            kept_label = f'Уже скомпилировано: {group.volume_range}' if group.volume_range else 'Уже скомпилировано'
-            self._fname_var.set(kept_label)
-            return
-
         def _fmt_size(path) -> str:
             try:
                 b = path.stat().st_size
@@ -620,6 +586,26 @@ class CompilerDialog:
             if b >= 1_024:
                 return f'{b / 1_024:.2f} КБ'
             return f'{b} Б'
+
+        if getattr(group, 'cleanup_only', False):
+            for pos, kept_path in enumerate(group.kept_paths or [], 1):
+                _iid = self._det_tree.insert(
+                    '', tk.END,
+                    values=(pos, kept_path.stem, kept_path.name, '✓ Остаётся', _fmt_size(kept_path)),
+                    tags=('kept',),
+                )
+                self._det_paths[_iid] = kept_path
+            offset = len(group.kept_paths or [])
+            for pos, dup_path in enumerate(group.duplicate_paths, offset + 1):
+                _iid = self._det_tree.insert(
+                    '', tk.END,
+                    values=(pos, dup_path.stem, dup_path.name, '🗑 К удалению', _fmt_size(dup_path)),
+                    tags=('to_delete',),
+                )
+                self._det_paths[_iid] = dup_path
+            kept_label = f'Уже скомпилировано: {group.volume_range}' if group.volume_range else 'Уже скомпилировано'
+            self._fname_var.set(kept_label)
+            return
 
         for pos, book in enumerate(group.books, 1):
             title    = (book.record.file_title or '').strip() or book.abs_path.stem
