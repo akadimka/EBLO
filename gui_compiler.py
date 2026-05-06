@@ -592,7 +592,7 @@ class CompilerDialog:
             for pos, kept_path in enumerate(group.kept_paths or [], 1):
                 _iid = self._det_tree.insert(
                     '', tk.END,
-                    values=(pos, kept_path.stem, kept_path.name, '✓ Остаётся', _fmt_size(kept_path)),
+                    values=(pos, kept_path.stem, kept_path.name, '✓ Остаётся', '—', _fmt_size(kept_path)),
                     tags=('kept',),
                 )
                 self._det_paths[_iid] = kept_path
@@ -600,7 +600,7 @@ class CompilerDialog:
             for pos, dup_path in enumerate(group.duplicate_paths, offset + 1):
                 _iid = self._det_tree.insert(
                     '', tk.END,
-                    values=(pos, dup_path.stem, dup_path.name, '🗑 К удалению', _fmt_size(dup_path)),
+                    values=(pos, dup_path.stem, dup_path.name, '🗑 К удалению', '—', _fmt_size(dup_path)),
                     tags=('to_delete',),
                 )
                 self._det_paths[_iid] = dup_path
