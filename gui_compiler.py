@@ -327,14 +327,60 @@ class CompilerDialog:
         threading.Thread(target=self._scan_worker, args=(folder,), daemon=True).start()
 
     def _scan_worker(self, folder: str):
-        import sys, os
+        import sys, os, re as _re, threading as _threading
         work_dir = Path(folder)
 
-        # tqdm пишет в stdout/stderr — перенаправляем в devnull чтобы не зависнуть.
         _devnull = open(os.devnull, 'w', encoding='utf-8')
         _old_stdout, _old_stderr = sys.stdout, sys.stderr
-        sys.stdout = _devnull
+        # stderr (tqdm-рендер полосы) — в devnull; stdout (print/tqdm text) — в статус.
         sys.stderr = _devnull
+
+        status_var = self._status_var
+        win = self._win
+
+        class _ScanRedirector:
+            """Перехватывает stdout пайплайна и показывает последнюю строку в статусной строке."""
+            _FLUSH_MS = 100
+
+            def __init__(self):
+                self._lock = _threading.Lock()
+                self._last = ''
+                self._active = False
+
+            def write(self, msg):
+                _old_stdout.write(msg)
+                parts = msg.replace('\r', '\n').split('\n')
+                for part in reversed(parts):
+                    clean = part.strip()
+                    if not clean or clean.startswith('='):
+                        continue
+                    compact = _re.sub(r'\|[^|]*\|', '', clean).strip()
+                    compact = _re.sub(r'  +', ' ', compact)
+                    text = compact if compact else clean
+                    with self._lock:
+                        self._last = text
+                        if not self._active:
+                            self._active = True
+                            try:
+                                win.after(self._FLUSH_MS, self._flush)
+                            except Exception:
+                                pass
+                    break
+
+            def _flush(self):
+                with self._lock:
+                    text = self._last
+                    self._active = False
+                if text:
+                    try:
+                        status_var.set(text)
+                    except Exception:
+                        pass
+
+            def flush(self):
+                _old_stdout.flush()
+
+        sys.stdout = _ScanRedirector()
 
         def _progress(current: int, total: int, status: str):
             pct = int(current / total * 100) if total else 0
