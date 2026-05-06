@@ -1112,9 +1112,16 @@ class FB2CompilerService:
         # Критерий 2.5: сервисное слово в имени ФАЙЛА (stem) — filename авторитетнее метаданных.
         # Пример: «Орел (Тетралогия)» → Тетралогия=4, хотя series_number может быть "1-2".
         # Проверяем stem ДО series_number, чтобы явное слово в имени файла не было перебито.
+        # Исключение: «Ибисовая трилогия 1. Маковое море» — слово является частью названия
+        # серии, за ним сразу идёт номер тома; такой файл — НЕ предкомпиляция.
         _stem_lower = book.abs_path.stem.lower()
         for idx, kw in enumerate(self._SERIES_WORDS):
             if kw and kw.lower() in _stem_lower:
+                if re.search(
+                    r'\b' + re.escape(kw.lower()) + r'\s+\d{1,4}\s*[.\-–—]',
+                    _stem_lower,
+                ):
+                    continue  # «Серия N.» — это том серии, не компиляция
                 if _has_series_link(_stem_lower):
                     return 1, idx
 
@@ -1136,6 +1143,11 @@ class FB2CompilerService:
                 continue
             for idx, kw in enumerate(self._SERIES_WORDS):
                 if kw and kw.lower() in _kw_text:
+                    if re.search(
+                        r'\b' + re.escape(kw.lower()) + r'\s+\d{1,4}\s*[.\-–—]',
+                        _kw_text,
+                    ):
+                        continue  # том серии с названием, содержащим сервисное слово
                     if _has_series_link(_kw_text):
                         return 1, idx  # сервисное слово → предполагаем lo=1
 
