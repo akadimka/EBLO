@@ -448,6 +448,7 @@ class CompilerDialog:
     def _add_group_row(self, g: CompilationGroup):
         """Добавить одну группу в таблицу (вызывается инкрементно из on_group callback)."""
         iid = str(id(g))
+        self._group_by_iid[iid] = g
         if getattr(g, 'cleanup_only', False):
             dup_count = len(g.duplicate_paths)
             self._tree.insert(
