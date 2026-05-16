@@ -528,19 +528,29 @@ class FB2CompilerService:
                 for book in books:
                     if self._RANGE_NUM_RE.match(book.volume_label or ''):
                         continue  # уже распознана как предкомпиляция
+                    # Пропускаем файлы с ведущим числом в стеме — это обычная книга с позицией,
+                    # а не внешняя компиляция. «4_Спартанец. Племя равных» — том 4, не сборник.
+                    _stem_chk = book.abs_path.stem
+                    if re.match(r'^\d', _stem_chk):
+                        continue
                     multi = (book.record.file_title or '').strip().lower().replace('ё', 'е')
                     if not multi or len(re.findall(r'\.\s+[а-яёa-z]', multi, re.IGNORECASE)) < 1:
                         continue
-                    matched = [pos for pos, t in _pos_to_title.items() if t and t in multi]
-                    if len(matched) >= 2:
-                        lo_m, hi_m = min(matched), max(matched)
-                        book.record.series_number = f'{lo_m}-{hi_m}'
-                        lo2, hi2 = self._precompiled_range(book, series)
-                        if hi2 > lo2:
-                            book.sort_key = (0, lo2, 0, 0)
-                            book.volume_label = f'{lo2}-{hi2}'
-                            book.sort_source = 'filename_range'
-                            book.order_ambiguous = False
+                    matched = sorted(pos for pos, t in _pos_to_title.items() if t and t in multi)
+                    if len(matched) < 2:
+                        continue
+                    lo_m, hi_m = matched[0], matched[-1]
+                    # Требуем непрерывный диапазон: все позиции от lo до hi должны присутствовать
+                    # среди совпавших. «1 и 4» без 2 и 3 — не трилогия.
+                    if set(matched) != set(range(lo_m, hi_m + 1)):
+                        continue
+                    book.record.series_number = f'{lo_m}-{hi_m}'
+                    lo2, hi2 = self._precompiled_range(book, series)
+                    if hi2 > lo2:
+                        book.sort_key = (0, lo2, 0, 0)
+                        book.volume_label = f'{lo2}-{hi2}'
+                        book.sort_source = 'filename_range'
+                        book.order_ambiguous = False
 
             duplicate_paths: List[Path] = []
 
