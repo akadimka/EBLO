@@ -738,8 +738,22 @@ class Pass2SeriesFilename:
                         if (record.metadata_series and
                                 record.metadata_series.strip().lower() == clean.lower()):
                             record.series_source = "filename+meta_confirmed"
+                        # Если иерархический root содержит trailing number, а metadata_series
+                        # совпадает с root БЕЗ числа — число является позицией книги, не частью
+                        # названия серии. Пример: «Север и Юг 01\Великая сага» + meta «Север и Юг»
+                        # → proposed_series = «Север и Юг» (иначе каждая книга в отдельной группе).
+                        if record.metadata_series and '\\' in (record.proposed_series or ''):
+                            _root_h, _sub_h = record.proposed_series.split('\\', 1)
+                            _root_h = _root_h.strip()
+                            _root_no_num = re.sub(r'\s+\d+\s*$', '', _root_h).strip()
+                            _meta_s = record.metadata_series.strip()
+                            if (_root_no_num and _root_no_num != _root_h and
+                                    _root_no_num.lower().replace('ё', 'е') ==
+                                    _meta_s.lower().replace('ё', 'е')):
+                                record.proposed_series = _meta_s
+                                record.series_source = "filename+meta_confirmed"
                         continue
-            
+
             # Fallback: metadata ТОЛЬКО если паттерны не дали
             if not series_candidate:
                 file_name = Path(record.file_path).stem  # Имя без расширения
@@ -844,6 +858,20 @@ class Pass2SeriesFilename:
                         if (record.metadata_series and
                                 record.metadata_series.strip().lower() == clean.lower()):
                             record.series_source = "filename+meta_confirmed"
+                        # Если иерархический root содержит trailing number, а metadata_series
+                        # совпадает с root БЕЗ числа — число является позицией книги, не частью
+                        # названия серии. Пример: «Север и Юг 01\Великая сага» + meta «Север и Юг»
+                        # → proposed_series = «Север и Юг» (иначе каждая книга в отдельной группе).
+                        if record.metadata_series and '\\' in (record.proposed_series or ''):
+                            _root_h, _sub_h = record.proposed_series.split('\\', 1)
+                            _root_h = _root_h.strip()
+                            _root_no_num = re.sub(r'\s+\d+\s*$', '', _root_h).strip()
+                            _meta_s = record.metadata_series.strip()
+                            if (_root_no_num and _root_no_num != _root_h and
+                                    _root_no_num.lower().replace('ё', 'е') ==
+                                    _meta_s.lower().replace('ё', 'е')):
+                                record.proposed_series = _meta_s
+                                record.series_source = "filename+meta_confirmed"
             elif record.metadata_series:
                 # ✅ ЗАЩИТА: Перед использованием metadata - проверяем наличие слов из blacklist
                 # ТРЕБОВАНИЕ: "если мета содержит слово или слова из BL, полностью ее игнорируем в качестве значения"
@@ -912,6 +940,7 @@ class Pass2SeriesFilename:
         # является авторитетом для всей папки. Все metadata_folder_confirmed файлы
         # в той же папке должны получить folder_hierarchy с той же серией.
         self._unify_folder_series_source(records)
+        self._split_umbrella_folder_series(records)
 
         # (автор из папки уже распространён в начале execute(), до основного цикла)
 
@@ -1011,11 +1040,89 @@ class Pass2SeriesFilename:
         # TODO: Review and fix consensus logic before re-enabling
         # self._apply_cross_file_consensus(records)
 
+        # Разбиваем «Серия N. Заголовок. Том M» на подсерии «Серия N»
+        self._split_numbered_subseries(records)
+
         # 🔑 ФИНАЛЬНЫЙ КОСТЫЛЬ: многоавторные папки "Серия (Фамилия и др)"
         # После всей обработки исправляем автора для ВСЕХ файлов под такими папками.
         # ВАЖНО: вызываем до _unify_folder_series_source повторно, потому что
         # при первом вызове авторы были разные → guard "len(authors)>1" пропустил папку.
         self._fix_multiauthor_folders(records)
+
+    def _split_numbered_subseries(self, records: List[BookRecord]) -> None:
+        """Обнаружить и разбить группы «Серия N. Заголовок. Том/Книга M» на подсерии.
+
+        Когда в группе (автор, proposed_series) несколько книг имеют одинаковый
+        series_number (коллизия), и у ВСЕХ коллизионных книг в имени файла есть
+        явный Том/Книга/Часть M — series_number N является идентификатором подсерии,
+        а не номером тома в общей серии.
+
+        Пример:
+          «Война великого бога 1. Седьмая казнь»          → sn=1, нет Том-слова
+          «Война великого бога 2. Внутренняя война. Том 1» → sn=2, есть «Том 1»
+          «Война великого бога 2. Внутренняя война. Том 2» → sn=2, есть «Том 2»
+
+        Коллизия: sn=2 у двух файлов, оба с Том-словом → sub-series pattern.
+
+        Исправление: proposed_series += f' {sn}' для ВСЕХ файлов группы,
+        чтобы компилятор создал отдельные серии «Война великого бога 1»
+        и «Война великого бога 2».
+
+        Условия безопасности:
+        - Применяется только при наличии коллизии (sn встречается ≥2 раз)
+        - ВСЕ файлы коллизионного sn должны иметь явный Том-keyword в stem
+        - Только плоские серии (без '\\')
+        - series_number должен быть целым числом
+        """
+        from collections import defaultdict
+
+        _TOM_RE = re.compile(
+            r'(?:том|книга|часть|выпуск|арка|book|vol\.?|part)\s+(\d{1,4})\b',
+            re.IGNORECASE | re.UNICODE,
+        )
+        _norm = lambda s: unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
+
+        # Группируем по (автор, proposed_series) — только плоские серии
+        groups: dict = defaultdict(list)
+        for rec in records:
+            if not rec.proposed_series or '\\' in rec.proposed_series:
+                continue
+            sn = (rec.series_number or '').strip()
+            if not sn or not re.match(r'^\d+$', sn):
+                continue
+            key = (_norm(rec.proposed_author or ''), _norm(rec.proposed_series))
+            groups[key].append(rec)
+
+        for (_author_k, _series_k), group in groups.items():
+            # Разбиваем по series_number
+            sn_buckets: dict = defaultdict(list)
+            for rec in group:
+                sn_buckets[(rec.series_number or '').strip()].append(rec)
+
+            # Ищем коллизию: sn встречается ≥2 раз, И у ВСЕХ коллизионных файлов
+            # есть явный Том/Книга-keyword в stem
+            has_collision = False
+            for sn, recs in sn_buckets.items():
+                if len(recs) < 2:
+                    continue
+                if all(_TOM_RE.search(Path(r.file_path).stem) for r in recs):
+                    has_collision = True
+                    break
+
+            if not has_collision:
+                continue
+
+            # Дописываем series_number к proposed_series для всех книг группы.
+            # Для коллизионных файлов (с Том-keyword) дополнительно обновляем
+            # series_number ← значение из «Том M» в имени файла, чтобы компилятор
+            # видел корректные позиции томов (1, 2, ...) внутри подсерии.
+            for sn, recs in sn_buckets.items():
+                for rec in recs:
+                    rec.proposed_series = f'{rec.proposed_series.strip()} {sn}'
+                    # Для файлов с Том-keyword: series_number ← M из «Том M»
+                    tm = _TOM_RE.search(Path(rec.file_path).stem)
+                    if tm:
+                        rec.series_number = tm.group(1)
 
     def _fix_multiauthor_folders(self, records: List[BookRecord]) -> None:
         """Финальный костыль: папки "Серия (Фамилия и др)" → автор всех файлов = "Фамилия Имя и другие".
@@ -1391,6 +1498,69 @@ class Pass2SeriesFilename:
                 if record.series_source not in STRONG_SOURCES:
                     record.proposed_series = canonical_series
                     record.series_source = "folder_hierarchy"
+
+    # Паттерн для извлечения имени серии из стема "Автор. Серия-N. Заголовок"
+    _UMBRELLA_SERIES_RE = re.compile(r'^.+?\.\s+(.+?)-\d+\b', re.UNICODE)
+
+    def _split_umbrella_folder_series(self, records: List[BookRecord]) -> None:
+        """
+        Обнаруживает umbrella-папки: одна папка содержит 2+ самостоятельных подсерии.
+
+        Пример: папка «Вторая дорога» содержит файлы «Вторая дорога-1,2,3» и
+        «Друзья офицера-1,2,3» — это две отдельные трилогии, не одна серия.
+
+        Условие срабатывания:
+          • Все записи в папке имеют series_source='folder_hierarchy' и одинаковый
+            proposed_series (имя папки).
+          • Стемы файлов раскрываются в ≥2 различных названий серий, каждое
+            встречается ≥2 раз.
+
+        Действие: переопределяем proposed_series каждой записи на название серии
+        из имени файла. series_source остаётся 'folder_hierarchy'.
+        """
+        from collections import defaultdict
+
+        folder_groups: dict = defaultdict(list)
+        for record in records:
+            folder_groups[str(Path(record.file_path).parent)].append(record)
+
+        for folder, group in folder_groups.items():
+            # Только если все записи из одной папки получили folder_hierarchy
+            if not all(r.series_source == "folder_hierarchy" for r in group):
+                continue
+
+            folder_series_values = {r.proposed_series for r in group if r.proposed_series}
+            if len(folder_series_values) != 1:
+                continue  # уже разные серии — не трогаем
+
+            # Извлекаем серию из стема каждого файла
+            stem_series: dict = {}  # id(record) → extracted series
+            for record in group:
+                stem = Path(record.file_path).stem
+                m = self._UMBRELLA_SERIES_RE.match(stem)
+                if m:
+                    stem_series[id(record)] = m.group(1).strip()
+
+            if not stem_series:
+                continue
+
+            # Группируем записи по извлечённому имени серии
+            by_series: dict = defaultdict(list)
+            for record in group:
+                s = stem_series.get(id(record))
+                if s:
+                    by_series[s].append(record)
+
+            # Срабатываем только если ≥2 различных серий, каждая с ≥2 книгами
+            qualified = {s: recs for s, recs in by_series.items() if len(recs) >= 2}
+            if len(qualified) < 2:
+                continue
+
+            # Переопределяем proposed_series из стема файла
+            for record in group:
+                extracted = stem_series.get(id(record))
+                if extracted and extracted in qualified:
+                    record.proposed_series = extracted
 
     def _apply_folder_consensus(self, records: List[BookRecord]) -> None:
         """

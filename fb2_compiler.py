@@ -1084,6 +1084,10 @@ class FB2CompilerService:
                         _dot_m = re.search(r'(?<!\d)\.(?!\d)', _after)
                         _zone = _after[:_dot_m.start()] if _dot_m else _after
                         m = _RANGE_RE.search(_zone)
+                        # Fallback: диапазон в самом конце стема, за пределами первой зоны.
+                        # Пример: «Старатель. Золотая лихорадка. Урал. 19 век 1-6» — "1-6" в конце.
+                        if m is None and candidate is _stem_val:
+                            m = re.search(r'(\d+)\s*[-–—]\s*(\d+)\s*$', candidate)
                     else:
                         m = _RANGE_RE.search(candidate)
                 else:
@@ -1616,6 +1620,23 @@ class FB2CompilerService:
                         # коллизия с книгой 2, хотя "7" есть прямо в имени файла.
                         if not re.search(r'\b' + str(meta_num) + r'\b', stem):
                             return (0, roman_inline, 0, 0), 'inline_title', False, str(roman_inline)
+                    # «Серия N. Подзаголовок. Том M» — meta_num = позиция в серии,
+                    # «Том/Книга M» стоит ПОСЛЕ серийного суффикса «N.» → M как secondary.
+                    # Пример: «Война великого бога 2. Внутренняя война. Том 1» → (0,2,1,0),
+                    #          «Война великого бога 2. Внутренняя война. Том 2» → (0,2,2,0).
+                    # Условие: fn_m нашёл meta_num, а TOM-ключевое слово идёт после него.
+                    if fn_m:
+                        _fn_num_chk = int(next(g for g in fn_m.groups() if g is not None))
+                        if _fn_num_chk == meta_num:
+                            _stem_nfc = unicodedata.normalize('NFKC', stem)
+                            _kw_after = self._VOLUME_KEYWORDS_RE.search(_stem_nfc, fn_m.end())
+                            if _kw_after:
+                                _kw_n = int(_kw_after.group(1))
+                                # Пропускаем если keyword-число совпадает с meta_num:
+                                # в этом случае pass2 уже обновил series_number ← Том M,
+                                # поэтому meta_num и _kw_n совпадают — secondary не нужен.
+                                if _kw_n != meta_num:
+                                    return (0, meta_num, _kw_n, 0), 'series_number', False, sn
                     return (0, meta_num, 0, 0), 'series_number', False, sn
 
         # Для подсерий: позиция (primary=родитель, secondary=подсерия, tertiary=том).
@@ -1717,6 +1738,16 @@ class FB2CompilerService:
                         if _sc2 < 1900:
                             secondary = _sc2
                             _rest = _rest[_sec_m.end():]
+                if not secondary:
+                    # Десятичный суффикс: «14.1 Название» → stem начинается с «N.M».
+                    # _STEM_NUM_RE поглотил «N.», оставив «M Название» в _rest без точки.
+                    # Проверяем прямо в стеме (не в _rest) чтобы не захватить «5. 10 лет».
+                    _stem_dec_m = re.match(r'^\d{1,4}\.(\d{1,2})\b', stem)
+                    if _stem_dec_m:
+                        _sc3 = int(_stem_dec_m.group(1))
+                        if 1 <= _sc3 <= 19:
+                            secondary = _sc3
+                            _rest = stem[_stem_dec_m.end():]
                 # Ищем tertiary только в остатке стема (_rest), не в полном стеме.
                 # Передача stem как fallback приводит к двойному счёту:
                 # "Цикл «Ермак». Том 1" → num=1 из " 1$", _rest="", но stem содержит
