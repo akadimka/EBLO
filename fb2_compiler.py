@@ -1570,10 +1570,23 @@ class FB2CompilerService:
             prop_words = {w for w in prop_s.split() if len(w) >= 3}
             # series_number применяем только если metadata_series не задана,
             # или совпадает с proposed_series, или содержит хотя бы одно ключевое слово
+            # НО: если meta_s содержит значимые слова, которых нет в prop_s,
+            # это БОЛЕЕ КОНКРЕТНАЯ серия (подсерия). Её sn — позиция внутри подсерии,
+            # а не в proposed_series (umbrella). Пример: proposed="Рубеж",
+            # metadata="Сирийский рубеж" → «сирийский» — лишнее слово → не совпадает.
+            # Допускаем только нейтральные (сервисные) слова: цикл, серия, сага и т.п.
+            _SERIES_NEUTRAL = {'цикл', 'серия', 'сага', 'the', 'series', 'cycle',
+                               'трилогия', 'дилогия', 'тетралогия'}
+            _meta_words = set(meta_s.split())
+            _prop_words_set = set(prop_s.split())
+            _extra = _meta_words - _prop_words_set - _SERIES_NEUTRAL
+            _meta_more_specific = bool(_extra)  # True: meta добавляет значимые слова
             _series_ok = (
                 not meta_s
                 or meta_s == prop_s
-                or bool(prop_words and any(w in meta_s for w in prop_words))
+                or bool(prop_words
+                        and any(w in meta_s for w in prop_words)
+                        and not _meta_more_specific)
             )
             if _series_ok:
                 meta_num: Optional[int] = None
@@ -1633,7 +1646,14 @@ class FB2CompilerService:
                         # Если meta_num явно присутствует в стеме — доверяем метаданным.
                         # Иначе "Аватар Х. Часть 2" с meta_num=7 даёт roman_inline=2 →
                         # коллизия с книгой 2, хотя "7" есть прямо в имени файла.
-                        if not re.search(r'\b' + str(meta_num) + r'\b', stem):
+                        # Дополнительно проверяем ведущий zero-padded префикс:
+                        # \b6\b не находит "6" в "06_" (нет word boundary внутри "06"),
+                        # но "06_..." с meta_num=6 должен считаться подтверждённым.
+                        _meta_in_stem = bool(
+                            re.search(r'\b' + str(meta_num) + r'\b', stem)
+                            or re.match(r'^0*' + str(meta_num) + r'(?:[^0-9]|$)', stem)
+                        )
+                        if not _meta_in_stem:
                             return (0, roman_inline, 0, 0), 'inline_title', False, str(roman_inline)
                     # «Серия N. Подзаголовок. Том M» — meta_num = позиция в серии,
                     # «Том/Книга M» стоит ПОСЛЕ серийного суффикса «N.» → M как secondary.
