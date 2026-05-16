@@ -638,7 +638,10 @@ class Pass2SeriesFilename:
                     _title_clean = _re.sub(r'\s*\[.*?\]\s*$', '', record.file_title.strip())
                     # Также убрать (ЛП), (альт. перевод) и т.п. скобочные суффиксы
                     _title_no_parens = _re.sub(r'\s*\([^)]*\)\s*$', '', _title_clean).strip()
-                    _cand_lower = series_candidate.lower()
+                    # Нормализуем кандидата: убираем ведущий пунктуационный мусор ("- Траун" → "Траун"),
+                    # чтобы title-collision guard правильно сравнивал с заголовком книги.
+                    _cand_for_guard = _re.sub(r'^[\-–—\s]+', '', series_candidate).strip()
+                    _cand_lower = _cand_for_guard.lower()
                     _title_lower = _title_clean.lower()
                     _title_np_lower = _title_no_parens.lower()
                     # Прямое совпадение ИЛИ кандидат является началом названия книги
@@ -713,7 +716,7 @@ class Pass2SeriesFilename:
                 # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)
                 if series_candidate:
                     record.extracted_series_candidate = series_candidate
-            
+
             # Если прошел базовые фильтры → валидация
             if series_candidate:
                 clean = self._clean_series_name(
