@@ -1099,13 +1099,17 @@ class Pass2SeriesFilename:
             for rec in group:
                 sn_buckets[(rec.series_number or '').strip()].append(rec)
 
-            # Ищем коллизию: sn встречается ≥2 раз, И у ВСЕХ коллизионных файлов
-            # есть явный Том/Книга-keyword в stem
+            # Ищем коллизию: sn встречается ≥2 раз, И как минимум 2 из коллизионных
+            # файлов имеют явный Том/Книга-keyword в stem.
+            # Используем sum() ≥ 2 вместо all(), чтобы скомпилированный файл
+            # (e.g. «Война Великого Бога 2 (Дилогия)» без Том-слова) не блокировал
+            # детекцию коллизии у соседних томов-оригиналов.
             has_collision = False
             for sn, recs in sn_buckets.items():
                 if len(recs) < 2:
                     continue
-                if all(_TOM_RE.search(Path(r.file_path).stem) for r in recs):
+                tom_count = sum(1 for r in recs if _TOM_RE.search(Path(r.file_path).stem))
+                if tom_count >= 2:
                     has_collision = True
                     break
 
