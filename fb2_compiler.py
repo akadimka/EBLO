@@ -1185,6 +1185,15 @@ class FB2CompilerService:
             for idx, kw in enumerate(self._SERIES_WORDS):
                 if kw and kw.lower() in _kw_text:
                     if _has_series_link(_kw_text):
+                        # Та же проверка «N (ServiceWord)» что и в Критерии 2.5:
+                        # если перед сервисным словом стоит число N и серия N не содержит,
+                        # это подсерия N — не считаем предкомпиляцией зонтичной серии.
+                        _kw_pos3 = _kw_text.find(kw.lower())
+                        _before3 = _kw_text[:_kw_pos3]
+                        _sub_n3 = re.search(r'(?<![–—\-\d])(\d{1,4})\s*\(\s*$', _before3)
+                        if _sub_n3:
+                            if not re.search(r'(?<!\d)' + re.escape(_sub_n3.group(1)) + r'(?!\d)', series_lower):
+                                return 0, 0
                         return 1, idx  # сервисное слово → предполагаем lo=1
 
         # Критерий 4: файл выглядит как компиляция (по имени/title) — читаем FB2-контент
