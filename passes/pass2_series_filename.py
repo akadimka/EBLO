@@ -1128,20 +1128,54 @@ class Pass2SeriesFilename:
                     has_collision = True
                     break
 
+            # Второй путь: квалификатор-коллизия — разные слова перед номером тома.
+            # Пример: «Траун. Доминация 2» vs «Траун. Приквелы 2» при sn=2.
+            # Том/Книга-keyword в именах отсутствует, но слова-квалификаторы различны.
+            _qualifier_collision = False
             if not has_collision:
+                for sn_val, recs in sn_buckets.items():
+                    if len(recs) < 2:
+                        continue
+                    _qual_re = re.compile(
+                        r'([А-ЯЁа-яёA-Za-z]+)\s+' + re.escape(sn_val) + r'(?=\b|\.|\s|$)',
+                        re.UNICODE,
+                    )
+                    _quals: set = set()
+                    for r in recs:
+                        _qm = _qual_re.search(Path(r.file_path).stem)
+                        if _qm:
+                            _quals.add(_norm(_qm.group(1)))
+                    if len(_quals) >= 2:
+                        _qualifier_collision = True
+                        break
+
+            if not has_collision and not _qualifier_collision:
                 continue
 
-            # Дописываем series_number к proposed_series для всех книг группы.
-            # Для коллизионных файлов (с Том-keyword) дополнительно обновляем
-            # series_number ← значение из «Том M» в имени файла, чтобы компилятор
-            # видел корректные позиции томов (1, 2, ...) внутри подсерии.
-            for sn, recs in sn_buckets.items():
-                for rec in recs:
-                    rec.proposed_series = f'{rec.proposed_series.strip()} {sn}'
-                    # Для файлов с Том-keyword: series_number ← M из «Том M»
-                    tm = _TOM_RE.search(Path(rec.file_path).stem)
-                    if tm:
-                        rec.series_number = tm.group(1)
+            if has_collision:
+                # Дописываем series_number к proposed_series для всех книг группы.
+                # Для коллизионных файлов (с Том-keyword) дополнительно обновляем
+                # series_number ← значение из «Том M» в имени файла, чтобы компилятор
+                # видел корректные позиции томов (1, 2, ...) внутри подсерии.
+                for sn, recs in sn_buckets.items():
+                    for rec in recs:
+                        rec.proposed_series = f'{rec.proposed_series.strip()} {sn}'
+                        # Для файлов с Том-keyword: series_number ← M из «Том M»
+                        tm = _TOM_RE.search(Path(rec.file_path).stem)
+                        if tm:
+                            rec.series_number = tm.group(1)
+            else:
+                # Квалификатор-коллизия: извлекаем слово перед номером из каждого файла
+                # и дописываем его к proposed_series (series_number не меняем).
+                for sn_val, recs in sn_buckets.items():
+                    _qual_re = re.compile(
+                        r'([А-ЯЁа-яёA-Za-z]+)\s+' + re.escape(sn_val) + r'(?=\b|\.|\s|$)',
+                        re.UNICODE,
+                    )
+                    for rec in recs:
+                        _qm = _qual_re.search(Path(rec.file_path).stem)
+                        if _qm:
+                            rec.proposed_series = f'{rec.proposed_series.strip()} {_qm.group(1)}'
 
     def _fix_multiauthor_folders(self, records: List[BookRecord]) -> None:
         """Финальный костыль: папки "Серия (Фамилия и др)" → автор всех файлов = "Фамилия Имя и другие".
