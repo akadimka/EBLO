@@ -1619,13 +1619,25 @@ class FB2CompilerService:
                 meta_num: Optional[int] = None
                 if re.match(r'^\d+$', sn):
                     meta_num = int(sn)
-                # Диапазон «N-M» в series_number означает предкомпиляцию нескольких томов.
-                # Первое число N — позиция ВНУТРИ подсерии, а не в родительской (umbrella)
-                # серии. Используем имя файла как более надёжный источник позиции.
-                # Пример: «Война великого бога 2 (Дилогия)» имеет sequence number="1-2"
-                # (тома 1-2 подсерии 2), но в зонтичной серии занимает позицию 2 — из
-                # имени файла. Если взять meta_num=1, sort_key=(0,1) совпадёт с позицией
-                # книги 1 → dedup удалит Дилогию как «дубликат».
+                else:
+                    rng = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', sn)
+                    if rng:
+                        # Диапазон «1-N» в series_number чаще всего означает предкомпиляцию.
+                        # Если stem содержит «P (СервисноеСлово)» — P есть позиция в
+                        # зонтичной серии, тогда как «1» — позиция внутри подсерии P.
+                        # Пример: «Война великого бога 2 (Дилогия)», sn="1-2" →
+                        #   P=2 (из имени файла) — правильная позиция в зонтичной серии.
+                        #   Если взять meta_num=1, sort_key=(0,1) совпадёт с книгой 1 →
+                        #   dedup удалит Дилогию как «дубликат».
+                        _sw_terms = '|'.join(
+                            re.escape((kw or '').lower())
+                            for kw in self._SERIES_WORDS if kw
+                        )
+                        _sub_cmp = re.search(
+                            r'(?<![–—\-\d])(\d{1,4})\s*\((?:' + _sw_terms + r')',
+                            stem.lower(),
+                        ) if _sw_terms else None
+                        meta_num = int(_sub_cmp.group(1)) if _sub_cmp else int(rng.group(1))
 
                 if meta_num is not None:
                     # Паттерн N.M (dot_part) имеет приоритет над series_number:
