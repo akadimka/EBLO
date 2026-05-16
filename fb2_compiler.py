@@ -993,11 +993,26 @@ class FB2CompilerService:
 
         Проверяет как file_title, так и stem файла.
         """
+        # «Книга N+M» / «Том N-M» — арифметическое выражение после ключевого слова.
+        # Пример: «Книга 12+1» → 13, «Том 11+2» → 13.
+        # Поддерживаем только «+» (прибавка) и «-» (вычитание) с малыми значениями.
+        _KW_EXPR_RE = re.compile(
+            r'(?:свиток|том|книга|часть|выпуск|арка|цикл|эпизод|volume|book|part|vol\.?)'
+            r'\s*[.:-]?\s*(\d{1,4})\s*([+\-])\s*(\d{1,2})\b',
+            re.IGNORECASE | re.UNICODE,
+        )
         for text in (title, stem):
             if not text:
                 continue
             # Нормализовать Unicode-символы римских цифр в ASCII: Ⅻ → XII, Ⅰ → I и т.п.
             text_norm = unicodedata.normalize('NFKC', text)
+            # Сначала пробуем арифметическое выражение: «Книга 12+1» → 13
+            m = _KW_EXPR_RE.search(text_norm)
+            if m:
+                base, op, delta = int(m.group(1)), m.group(2), int(m.group(3))
+                result = base + delta if op == '+' else base - delta
+                if 1 <= result <= 500:
+                    return result
             m = cls._VOLUME_KEYWORDS_RE.search(text_norm)
             if m:
                 return int(m.group(1))
@@ -1627,7 +1642,13 @@ class FB2CompilerService:
                     # Условие: fn_m нашёл meta_num, а TOM-ключевое слово идёт после него.
                     if fn_m:
                         _fn_num_chk = int(next(g for g in fn_m.groups() if g is not None))
-                        if _fn_num_chk == meta_num:
+                        # Не применяем secondary-check для ведущего числа-префикса
+                        # (e.g. «13_Авиатор. Книга 12+1»): там fn_m стоит в позиции 0,
+                        # а «Книга N» в остатке описывает тот же том другим способом.
+                        # Паттерн применяется только когда число вложено в имя серии
+                        # (e.g. «Война великого бога 2. Внутренняя война. Том 1»).
+                        _is_leading_prefix = fn_m.start() == 0 and stem[:1].isdigit()
+                        if _fn_num_chk == meta_num and not _is_leading_prefix:
                             _stem_nfc = unicodedata.normalize('NFKC', stem)
                             _kw_after = self._VOLUME_KEYWORDS_RE.search(_stem_nfc, fn_m.end())
                             if _kw_after:
