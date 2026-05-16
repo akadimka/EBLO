@@ -1207,11 +1207,18 @@ class FB2CompilerService:
                 return lo, hi
 
         # Критерий 5: несколько книжных заголовков в file_title → внешняя предкомпиляция
-        # Пример: "Ермак: Начало. Телохранитель. Личник" — 3 книги в одном файле.
-        # Пробуем определить диапазон из FB2-содержимого (sequence-теги или заголовки секций).
+        # Пример: "Спартанец: Спартанец. Великий царь. Удар в сердце" — Трилогия Империи.
+        # series_link НЕ требуем: компиляция может называть отдельные книги, не серию.
+        # Авторитет — содержимое файла: _precompiled_range_from_content вернёт (0,0)
+        # для одиночной книги с подзаголовками.
+        # Минимальный фильтр: ≥2 заглавных буквы после «. » ИЛИ «Серия: Книга1. Книга2»
+        # (двоеточие — классический маркер сборника).
         _multi_title = book.record.file_title or ''
-        if (len(re.findall(r'\.\s+[А-ЯЁA-Z]', _multi_title)) >= 2
-                and _has_series_link(_multi_title + ' ' + book.abs_path.stem)):
+        _is_multi = (
+            len(re.findall(r'\.\s+[А-ЯЁA-Z]', _multi_title)) >= 2
+            or (': ' in _multi_title and len(re.findall(r'\.\s+[А-ЯЁA-Z]', _multi_title)) >= 1)
+        )
+        if _is_multi:
             lo, hi = self._precompiled_range_from_content(book.abs_path, series)
             if hi > lo:
                 return lo, hi
