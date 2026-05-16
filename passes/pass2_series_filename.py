@@ -1040,6 +1040,9 @@ class Pass2SeriesFilename:
         # TODO: Review and fix consensus logic before re-enabling
         # self._apply_cross_file_consensus(records)
 
+        # Нормализуем рассогласование «Серия\Подсерия» vs «Серия» у одного автора
+        self._resolve_hierarchical_flat_mismatch(records)
+
         # Разбиваем «Серия N. Заголовок. Том M» на подсерии «Серия N»
         self._split_numbered_subseries(records)
 
@@ -1048,6 +1051,70 @@ class Pass2SeriesFilename:
         # ВАЖНО: вызываем до _unify_folder_series_source повторно, потому что
         # при первом вызове авторы были разные → guard "len(authors)>1" пропустил папку.
         self._fix_multiauthor_folders(records)
+
+    def _resolve_hierarchical_flat_mismatch(self, records: List[BookRecord]) -> None:
+        """Нормализует рассогласование «A\\B» и «A» у одного автора.
+
+        Когда одна книга извлеклась как «Траун\\Приквелы», а другие — как «Траун»,
+        но в именах файлов этих других книг есть «Приквелы N.» — все переименовываются
+        в «Траун Приквелы».
+
+        Условие безопасности: плоские записи включаются только если их стем содержит
+        имя подсерии непосредственно перед номером («Приквелы 2.»).
+        """
+        import unicodedata as _ud
+        _norm = lambda s: re.sub(r'\s+', ' ', _ud.normalize('NFC', s).lower()
+                                 .replace('ё', 'е')).strip()
+
+        # 1. Собираем иерархические записи: (author_norm, root_base_norm) → [(root_display, sub_display, rec)]
+        from collections import defaultdict
+        hier_map: dict = defaultdict(list)
+        for rec in records:
+            if '\\' not in (rec.proposed_series or ''):
+                continue
+            root, sub = rec.proposed_series.split('\\', 1)
+            root = root.strip()
+            sub = sub.strip()
+            if not sub:
+                continue
+            root_base = re.sub(r'\s+\d+\s*$', '', root).strip()
+            key = (_norm(rec.proposed_author or ''), _norm(root_base))
+            hier_map[key].append((root_base, sub, rec))
+
+        if not hier_map:
+            return
+
+        # 2. Для каждого ключа: если ровно одна подсерия — ищем плоские записи того же автора
+        for (author_k, root_k), entries in hier_map.items():
+            # Проверяем, что все иерархические записи имеют одну и ту же подсерию
+            subs = {_norm(e[1]) for e in entries}
+            if len(subs) != 1:
+                continue  # Несколько разных подсерий — не трогаем
+            sub_norm = next(iter(subs))
+            sub_display = entries[0][1]  # оригинальный регистр
+            root_display = entries[0][0]
+            flat_series_display = f'{root_display} {sub_display}'
+
+            # Ищем плоские записи: тот же автор, proposed_series == root_base
+            _sub_re = re.compile(
+                re.escape(sub_norm) + r'\s+\d',
+                re.UNICODE,
+            )
+            for rec in records:
+                if _norm(rec.proposed_author or '') != author_k:
+                    continue
+                if '\\' in (rec.proposed_series or ''):
+                    # Это иерархическая запись — нормализуем ниже
+                    continue
+                if _norm(rec.proposed_series or '') != root_k:
+                    continue
+                stem_norm = _norm(Path(rec.file_path).stem)
+                if _sub_re.search(stem_norm):
+                    rec.proposed_series = flat_series_display
+
+            # 3. Нормализуем сами иерархические записи
+            for root_b, sub_d, rec in entries:
+                rec.proposed_series = flat_series_display
 
     def _split_numbered_subseries(self, records: List[BookRecord]) -> None:
         """Обнаружить и разбить группы «Серия N. Заголовок. Том/Книга M» на подсерии.
