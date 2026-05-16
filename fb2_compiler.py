@@ -1619,10 +1619,13 @@ class FB2CompilerService:
                 meta_num: Optional[int] = None
                 if re.match(r'^\d+$', sn):
                     meta_num = int(sn)
-                else:
-                    rng = re.match(r'^(\d+)\s*[-–]\s*(\d+)$', sn)
-                    if rng:
-                        meta_num = int(rng.group(1))
+                # Диапазон «N-M» в series_number означает предкомпиляцию нескольких томов.
+                # Первое число N — позиция ВНУТРИ подсерии, а не в родительской (umbrella)
+                # серии. Используем имя файла как более надёжный источник позиции.
+                # Пример: «Война великого бога 2 (Дилогия)» имеет sequence number="1-2"
+                # (тома 1-2 подсерии 2), но в зонтичной серии занимает позицию 2 — из
+                # имени файла. Если взять meta_num=1, sort_key=(0,1) совпадёт с позицией
+                # книги 1 → dedup удалит Дилогию как «дубликат».
 
                 if meta_num is not None:
                     # Паттерн N.M (dot_part) имеет приоритет над series_number:
