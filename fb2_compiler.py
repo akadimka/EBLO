@@ -513,6 +513,35 @@ class FB2CompilerService:
                         book.volume_label = str(meta_n)
                         book.order_ambiguous = False
 
+            # --- Сопоставление многосоставных заголовков с книгами группы ----------
+            # Внешние компиляции (e.g. «Спартанец. Великий царь. Удар в сердце»)
+            # не имеют <sequence number> и «Том N» — только заголовки разделов.
+            # Сопоставляем части многосоставного file_title с file_title других книг
+            # в группе: если ≥2 совпадений → задаём series_number диапазоном позиций.
+            _pos_to_title: Dict[int, str] = {}
+            for b in books:
+                if b.sort_key[0] == 0 and b.sort_key[1] > 0 and not b.order_ambiguous:
+                    t = (b.record.file_title or '').strip()
+                    if t:
+                        _pos_to_title[b.sort_key[1]] = t.lower().replace('ё', 'е')
+            if _pos_to_title:
+                for book in books:
+                    if self._RANGE_NUM_RE.match(book.volume_label or ''):
+                        continue  # уже распознана как предкомпиляция
+                    multi = (book.record.file_title or '').strip().lower().replace('ё', 'е')
+                    if not multi or len(re.findall(r'\.\s+[а-яёa-z]', multi, re.IGNORECASE)) < 1:
+                        continue
+                    matched = [pos for pos, t in _pos_to_title.items() if t and t in multi]
+                    if len(matched) >= 2:
+                        lo_m, hi_m = min(matched), max(matched)
+                        book.record.series_number = f'{lo_m}-{hi_m}'
+                        lo2, hi2 = self._precompiled_range(book, series)
+                        if hi2 > lo2:
+                            book.sort_key = (0, lo2, 0, 0)
+                            book.volume_label = f'{lo2}-{hi2}'
+                            book.sort_source = 'filename_range'
+                            book.order_ambiguous = False
+
             duplicate_paths: List[Path] = []
 
             # --- Фильтр 1: обработка заранее скомпилированных файлов ----------
