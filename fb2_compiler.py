@@ -1594,6 +1594,10 @@ class FB2CompilerService:
             _meta_words = set(meta_s.split())
             _prop_words_set = set(prop_s.split())
             _extra = _meta_words - _prop_words_set - _SERIES_NEUTRAL
+            # Цифры — маркеры позиции, а не содержательные слова серии.
+            # «Война великого бога 2» vs «Война великого бога»: «2» не делает серию
+            # "более специфичной" в смысле другой подсерии.
+            _extra = {w for w in _extra if not w.isdigit()}
             _meta_more_specific = bool(_extra)  # True: meta добавляет значимые слова
             _series_ok = (
                 not meta_s
