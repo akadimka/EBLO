@@ -1150,6 +1150,20 @@ class FB2CompilerService:
         for idx, kw in enumerate(self._SERIES_WORDS):
             if kw and kw.lower() in _stem_lower:
                 if _has_series_link(_stem_lower):
+                    # «Серия N (Дилогия)» — N — номер подсерии, а не счётчик томов.
+                    # В контексте зонтичной серии этот файл занимает одну позицию N,
+                    # а не диапазон 1..N. Если имя серии не содержит N — мы в зонтичном
+                    # контексте → не считаем предкомпиляцией (вернём 0,0 ниже).
+                    # Пример: «Война Великого Бога 2 (Дилогия)» в серии «Война великого
+                    # бога» → N=2, «2» нет в имени серии → (0,0).
+                    # Если же серия «Война великого бога 2» → «2» есть → (1,2) ✓.
+                    _kw_pos = _stem_lower.find(kw.lower())
+                    _before_kw = _stem_lower[:_kw_pos]
+                    _sub_n_m = re.search(r'(?<![–—\-\d])(\d{1,4})\s*\(\s*$', _before_kw)
+                    if _sub_n_m:
+                        _n_val = _sub_n_m.group(1)
+                        if not re.search(r'(?<!\d)' + re.escape(_n_val) + r'(?!\d)', series_lower):
+                            return 0, 0
                     return 1, idx
 
         # Критерий 2: series_number — диапазон "N-M" из метаданных (запасной вариант)
