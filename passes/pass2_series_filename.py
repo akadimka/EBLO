@@ -1080,7 +1080,7 @@ class Pass2SeriesFilename:
             r'(?:том|книга|часть|выпуск|арка|book|vol\.?|part)\s+(\d{1,4})\b',
             re.IGNORECASE | re.UNICODE,
         )
-        _norm = lambda s: unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
+        _norm = lambda s: re.sub(r'\s+', ' ', re.sub(r'[.,:;!?]+', ' ', unicodedata.normalize('NFC', s).lower().replace('ё', 'е'))).strip()
 
         # Regex для извлечения числа из стема файла когда series_number пуст.
         # Ищем паттерн «СЛОВО N.» или «СЛОВО N » в имени файла.
