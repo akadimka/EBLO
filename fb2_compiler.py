@@ -536,7 +536,11 @@ class FB2CompilerService:
                     multi = (book.record.file_title or '').strip().lower().replace('ё', 'е')
                     if not multi or len(re.findall(r'\.\s+[а-яёa-z]', multi, re.IGNORECASE)) < 1:
                         continue
-                    matched = sorted(pos for pos, t in _pos_to_title.items() if t and t in multi)
+                    own_pos = book.sort_key[1] if book.sort_key[0] == 0 else None
+                    matched = sorted(
+                        pos for pos, t in _pos_to_title.items()
+                        if t and t in multi and pos != own_pos
+                    )
                     if len(matched) < 2:
                         continue
                     lo_m, hi_m = matched[0], matched[-1]

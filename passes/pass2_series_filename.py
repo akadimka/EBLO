@@ -1082,22 +1082,38 @@ class Pass2SeriesFilename:
         )
         _norm = lambda s: unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
 
+        # Regex для извлечения числа из стема файла когда series_number пуст.
+        # Ищем паттерн «СЛОВО N.» или «СЛОВО N » в имени файла.
+        _STEM_SN_RE = re.compile(
+            r'[А-ЯЁа-яёA-Za-z]+\s+(\d{1,4})(?:\.|(?=\s))',
+            re.UNICODE,
+        )
+
+        def _sn_from_stem(rec) -> str:
+            """Вернуть series_number из метаданных или из стема файла."""
+            sn = (rec.series_number or '').strip()
+            if sn and re.match(r'^\d+$', sn):
+                return sn
+            # Пробуем извлечь из имени файла: последнее вхождение «СЛОВО N.»
+            stem = Path(rec.file_path).stem
+            matches = _STEM_SN_RE.findall(stem)
+            return matches[-1] if matches else ''
+
         # Группируем по (автор, proposed_series) — только плоские серии
         groups: dict = defaultdict(list)
         for rec in records:
             if not rec.proposed_series or '\\' in rec.proposed_series:
                 continue
-            sn = (rec.series_number or '').strip()
-            if not sn or not re.match(r'^\d+$', sn):
+            if not _sn_from_stem(rec):
                 continue
             key = (_norm(rec.proposed_author or ''), _norm(rec.proposed_series))
             groups[key].append(rec)
 
         for (_author_k, _series_k), group in groups.items():
-            # Разбиваем по series_number
+            # Разбиваем по series_number (или числу из стема)
             sn_buckets: dict = defaultdict(list)
             for rec in group:
-                sn_buckets[(rec.series_number or '').strip()].append(rec)
+                sn_buckets[_sn_from_stem(rec)].append(rec)
 
             # Ищем коллизию: sn встречается ≥2 раз, И как минимум 2 из коллизионных
             # файлов имеют явный Том/Книга-keyword со ВСЕМИ РАЗЛИЧНЫМИ числами.
