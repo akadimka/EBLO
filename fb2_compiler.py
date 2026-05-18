@@ -1261,6 +1261,12 @@ class FB2CompilerService:
             len(re.findall(r'\.\s+[А-ЯЁA-Z]', _multi_title)) >= 2
             or (': ' in _multi_title and len(re.findall(r'\.\s+[А-ЯЁA-Z]', _multi_title)) >= 1)
         )
+        # «Серия: Название. Том N. Подзаголовок» — структурированный одиночный том, не компиляция.
+        # Маркер «. Том/Книга/Часть N» однозначно указывает на отдельную книгу серии.
+        if _is_multi and re.search(
+            r'\.\s+(?:Том|Книга|Часть|Vol\.?|Book)\s+\d+', _multi_title, re.IGNORECASE
+        ):
+            _is_multi = False
         if _is_multi:
             lo, hi = self._precompiled_range_from_content(book.abs_path, series)
             if hi > lo:
@@ -1321,12 +1327,8 @@ class FB2CompilerService:
                 if n and 1 <= n <= 100:
                     nums.append(n)
                 continue
-            # Просто арабская цифра в начале/конце заголовка (осторожно: только если одна)
-            dm = re.match(r'^(\d{1,2})[\s\.\-–]|[\s\.\-–](\d{1,2})$', title_text)
-            if dm:
-                n = int(next(g for g in dm.groups() if g is not None))
-                if 1 <= n <= 100:
-                    nums.append(n)
+            # Голые цифры в заголовке секции (без слов-маркеров) намеренно пропускаем:
+            # это почти всегда нумерация глав внутри книги, не томов компиляции.
 
         if not nums:
             return 0, 0
