@@ -1102,7 +1102,7 @@ class Pass2SeriesFilename:
             sub_norm = next(iter(subs))
             sub_display = entries[0][1]  # оригинальный регистр
             root_display = entries[0][0]
-            flat_series_display = f'{root_display} {sub_display}'
+            flat_series_display = f'{root_display}\\{sub_display}'
 
             # Ищем плоские записи: тот же автор, proposed_series == root_base
             _sub_re = re.compile(
@@ -2450,6 +2450,7 @@ class Pass2SeriesFilename:
                 # Примеры БЕЗ серии: "Title (Author)", "Author - Title", "Author. Title"
                 # Примеры С серией: "Title (Author. Series)", "Author - Title (Series)", "Author - Series. Title"
                 pattern_str = best_pattern.get('pattern', '') if isinstance(best_pattern, dict) else str(best_pattern or '')
+                pattern_has_subseries = 'subseries' in pattern_str.lower()
                 if 'Series' not in pattern_str:
                     # Паттерн не содержит Series - игнорируем результат BlockLevelPatternMatcher
                     pattern_found_without_series = True  # ← ЗАПОМНИТЬ что паттерн БЕЗ Series!
@@ -2495,9 +2496,12 @@ class Pass2SeriesFilename:
                                         return series_from_block_cleaned
                             elif best_score >= 0.85 and series_from_block_cleaned:
                                 # Высокий score, но metadata не подтвердила иерархию
-                                # Без подтверждения subseries опасно — возвращаем только root
-                                # Пример: metadata="Джони" (мусор), hierarchy="Флибер\Другая жизнь" → "Флибер"
                                 if '\\' in series_from_block_cleaned:
+                                    # Если паттерн явно описывает SubSeries — доверяем полной иерархии
+                                    # Пример: "Author - Series. Subseries. Title" → metadata="Звёздные Войны"
+                                    # (обёртка-серия) не должна отменять найденную подсерию
+                                    if pattern_has_subseries:
+                                        return series_from_block_cleaned
                                     root = series_from_block_cleaned.split('\\')[0].strip()
                                     if root:
                                         return root
@@ -2518,8 +2522,7 @@ class Pass2SeriesFilename:
                             # Без metadata нельзя подтвердить многоуровневую иерархию.
                             # Исключение: паттерн явно содержит SubSeries — иерархия описана
                             # намеренно, доверяем всей строке даже без подтверждения metadata.
-                            # Пример: "Author - Series. SubSeries (service_words)" при score=1.0
-                            pattern_has_subseries = 'SubSeries' in pattern_str
+                            # Пример: "Author - Series. Subseries. Title" при score=1.0
                             if '\\' in processed_series and not pattern_has_subseries:
                                 root = processed_series.split('\\')[0].strip()
                                 if root:

@@ -167,8 +167,10 @@ class BlockLevelPatternMatcher:
         # FIXED: Guillemets « » are NOT structural delimiters, they're formatting marks within text
         # Only treat actual parentheses () as structural delimiters, not guillemets
         # '\.\s+' требует пробел после точки, чтобы "." в "2.0" не был разделителем.
-        delimiter_pattern = r'\s+-\s+|\.\s+|[()]'
-        
+        # '(?!-)' — не сплитить по ". " когда следующий символ '-':
+        # "Зан Т. - Траун" → не сплитить на ". " (инициал+точка), взять " - " как разделитель
+        delimiter_pattern = r'\s+-\s+|\.\s+(?!-)|[()]'
+
         paren_depth = 0
         block_text_pos = 0
         prev_delimiter = None  # Track the delimiter before this block
@@ -483,6 +485,13 @@ class BlockLevelPatternMatcher:
             # If pattern expects Series/SubSeries at this position and block looks like Title → accept.
             if expected_type in ("Series", "SubSeries") and fname_type == "Title":
                 fname_type = expected_type
+            # Series names often look like Author names (proper nouns, e.g. "Траун").
+            # If past position 0 and pattern expects Series but guessed Author — accept.
+            if position > 0 and expected_type == "Series" and fname_type == "Author":
+                fname_type = "Series"
+            # SubSeries often contains a trailing number ("Доминация 1") → _guess returns "Series". Accept.
+            if expected_type == "SubSeries" and fname_type == "Series":
+                fname_type = "SubSeries"
             # Also: after service_words block, force Series (original logic kept as fallback)
             if (position > 0 and expected_type == "Series" and
                 pattern_blocks[position - 1]['type'] == "service_words" and
