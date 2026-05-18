@@ -690,9 +690,12 @@ class Pass2SeriesFilename:
                     )
                     _fn_stem_lower = Path(record.file_path).stem.lower()
                     _is_in_parens = bool(_re.search(r'\(\s*' + _re.escape(_cand_lower), _fn_stem_lower))
-                    # ИСКЛЮЧЕНИЕ 4: серия получена блок-матчером с score=1.0 — это структурное совпадение,
-                    # title в FB2 просто совпадает с названием серии (omnibus или 1-я книга)
-                    _is_block_matcher_confident = getattr(self, '_last_from_block_matcher', False)
+                    # ИСКЛЮЧЕНИЕ 4: серия получена блок-матчером с score=1.0 И подтверждена metadata_series.
+                    # Только с metadata-подтверждением: title совпадает с серией у omnibus или 1-й книги.
+                    # Без metadata — блок-матчер мог дать score=1.0 из-за Author→Series coercion,
+                    # а настоящий title книги случайно совпадает с кандидатом — гарду надо сработать.
+                    _is_block_matcher_confident = (getattr(self, '_last_from_block_matcher', False)
+                                                   and bool(record.metadata_series))
                     # Кандидат + номер в имени файла: "... - Серия N." или "... - Серия N "
                     _is_numbered_series = bool(_re.search(
                         _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.]+\d+[\s.]',
@@ -2440,7 +2443,7 @@ class Pass2SeriesFilename:
         try:
             series_from_block = None
             file_patterns = self.settings.get_author_series_patterns_in_files() or []
-            
+
             if file_patterns:
                 best_score, best_pattern, _, series_from_block = self.block_matcher.find_best_pattern_match(
                     name_for_parsing, file_patterns
