@@ -2547,10 +2547,20 @@ class Pass2SeriesFilename:
                         processed_series = self._extract_main_series_from_multi_level(series_from_block)
                         if processed_series:
                             # Без metadata нельзя подтвердить многоуровневую иерархию.
-                            # Исключение: паттерн явно содержит SubSeries — иерархия описана
+                            # Исключение 1: паттерн явно содержит SubSeries — иерархия описана
                             # намеренно, доверяем всей строке даже без подтверждения metadata.
                             # Пример: "Author - Series. Subseries. Title" при score=1.0
-                            if '\\' in processed_series and not pattern_has_subseries:
+                            # Исключение 2: series_from_block — многоуровневый контент скобок
+                            # с сервисным словом в конце: «Серия N. Подсерия. Тетралогия»
+                            # → подсерия значимая (это подцикл), не стираем.
+                            _raw_parts = series_from_block.split('. ')
+                            _last_raw_lc = _raw_parts[-1].strip().lower() if _raw_parts else ''
+                            _raw_has_service_end = (
+                                len(_raw_parts) >= 3 and
+                                any(_last_raw_lc.startswith(sw.lower())
+                                    for sw in self.service_words if sw)
+                            )
+                            if '\\' in processed_series and not pattern_has_subseries and not _raw_has_service_end:
                                 root = processed_series.split('\\')[0].strip()
                                 if root:
                                     processed_series = root
@@ -3225,9 +3235,18 @@ class Pass2SeriesFilename:
                 bool(re.search(r'\d', after_dot))
             )
             
-            if part0_has_trailing_num and after_dot_is_subseries:
+            # Доп. признак: последняя часть — служебное слово (Тетралогия, Трилогия…)
+            # «Мир Вечного 2. Вечный. Тетралогия» → parts[-1]="Тетралогия" → service word
+            all_check_words_lower = [w.lower() for w in self.service_words + self.filename_blacklist + self.collection_keywords]
+            last_part_is_service = (
+                len(parts) > 2 and
+                any(parts[-1].strip().lower().startswith(w) for w in all_check_words_lower)
+            )
+
+            if part0_has_trailing_num and (after_dot_is_subseries or last_part_is_service):
                 # Иерархическая серия: возвращаем главную серию С номером тома
                 # "Отрок 2. Сотник 1-3" → "Отрок 2"
+                # "Мир Вечного 2. Вечный. Тетралогия" → "Мир Вечного 2"
                 # Устанавливаем флаг чтобы _clean_series_name не убирала trailing number
                 self._last_was_hierarchical = True
                 return part0
