@@ -72,7 +72,7 @@ class Pass3SeriesNormalize:
             # оставляем только «Подсерия».
             # Пример: «Артефакт - детектив. Астра Ельцова»,
             #   папка «Артефакт & Детектив» → серия «Астра Ельцова»
-            if '. ' in normalized and record.file_path:
+            if '. ' in normalized and '\\' not in normalized and record.file_path:
                 import re as _re2
                 from pathlib import Path as _P
                 prefix, suffix = normalized.split('. ', 1)

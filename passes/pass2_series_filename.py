@@ -504,9 +504,16 @@ class Pass2SeriesFilename:
                                             record.proposed_author = f"{full_name} и другие"
                                             record.author_source = 'folder_multiauthor'
                                 else:
-                                    # Обычная папка автора → только подсерия (старое поведение)
-                                    subseries_name = self._extract_series_from_folder_name(series_folder)
-                                    record.proposed_series = subseries_name or series_folder
+                                    # Обычная папка автора → серия из папки i+1
+                                    # Если есть ещё папка i+2 (подсерия) — строим "Серия\Подсерия",
+                                    # сохраняя числовой префикс "N." в имени подсерии (порядок внутри серии).
+                                    if i + 2 < len(path_parts) - 1:
+                                        parent_series_name = self._extract_series_from_folder_name(series_folder)
+                                        subseries_folder = path_parts[i + 2]
+                                        record.proposed_series = f"{parent_series_name or series_folder}\\{subseries_folder}"
+                                    else:
+                                        subseries_name = self._extract_series_from_folder_name(series_folder)
+                                        record.proposed_series = subseries_name or series_folder
 
                                 record.series_source = "folder_hierarchy"
                     else:
@@ -931,7 +938,7 @@ class Pass2SeriesFilename:
         # Если папка содержит файлы с series_source = "folder_dataset",
         # то ВСЕ файлы в этой папке должны получить одинаковую серию из папки
         self._apply_folder_consensus(records)
-        
+
         # 🔑 УНИФИКАЦИЯ АВТОРА внутри папки
         # Если в папке есть файлы с folder_dataset — их автор применяется ко всем
         # файлам в папке с source='metadata_folder_confirmed' (исправляет файлы
@@ -1045,7 +1052,6 @@ class Pass2SeriesFilename:
 
         # Нормализуем рассогласование «Серия\Подсерия» vs «Серия» у одного автора
         self._resolve_hierarchical_flat_mismatch(records)
-
         # Разбиваем «Серия N. Заголовок. Том M» на подсерии «Серия N»
         self._split_numbered_subseries(records)
 
