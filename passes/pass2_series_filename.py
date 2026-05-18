@@ -1076,11 +1076,41 @@ class Pass2SeriesFilename:
         # Разбиваем «Серия N. Заголовок. Том M» на подсерии «Серия N»
         self._split_numbered_subseries(records)
 
+        # Коррекция series_number: числовой префикс имени файла перебивает metadata.
+        # «01_Якудза...» → series_number=1 даже если metadata ошибочно говорит 3.
+        self._correct_series_number_from_filename(records)
+
         # 🔑 ФИНАЛЬНЫЙ КОСТЫЛЬ: многоавторные папки "Серия (Фамилия и др)"
         # После всей обработки исправляем автора для ВСЕХ файлов под такими папками.
         # ВАЖНО: вызываем до _unify_folder_series_source повторно, потому что
         # при первом вызове авторы были разные → guard "len(authors)>1" пропустил папку.
         self._fix_multiauthor_folders(records)
+
+    def _correct_series_number_from_filename(self, records: List[BookRecord]) -> None:
+        """Переопределяет series_number числовым префиксом имени файла.
+
+        Правило: если имя файла начинается с «NN_» или «NN-» (1–3 цифры, не год),
+        то это число используется как series_number — оно достовернее, чем метаданные
+        FB2, которые автор/издатель нередко указывает ошибочно.
+
+        Примеры:
+          «01_Якудза из другого мира. Том I.fb2»  → series_number=1
+          «04_Якудза из другого мира. Том IV.fb2» → series_number=4 (а не 3 из meta)
+          «2024_SomeBook.fb2»                      → НЕ трогаем (год, не порядковый №)
+        """
+        _PREFIX_RE = re.compile(r'^(\d{1,3})[_\-]')
+        for record in records:
+            if not record.file_path:
+                continue
+            stem = Path(record.file_path).stem
+            m = _PREFIX_RE.match(stem)
+            if not m:
+                continue
+            fn_num = int(m.group(1))
+            # Не применяем если число похоже на год (1900–2099)
+            if 1900 <= fn_num <= 2099:
+                continue
+            record.series_number = str(fn_num)
 
     def _resolve_hierarchical_flat_mismatch(self, records: List[BookRecord]) -> None:
         """Нормализует рассогласование «A\\B» и «A» у одного автора.
