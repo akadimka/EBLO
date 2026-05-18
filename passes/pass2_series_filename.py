@@ -763,8 +763,17 @@ class Pass2SeriesFilename:
                             if (_root_no_num and _root_no_num != _root_h and
                                     _root_no_num.lower().replace('ё', 'е') ==
                                     _meta_s.lower().replace('ё', 'е')):
-                                record.proposed_series = _meta_s
-                                record.series_source = "filename+meta_confirmed"
+                                _sub_stripped = _sub_h.strip()
+                                _sub_is_num_only = bool(re.match(r'^\d+$', _sub_stripped))
+                                _sub_is_meta_dup = (_sub_stripped.lower().replace('ё', 'е') ==
+                                                    _meta_s.lower().replace('ё', 'е'))
+                                if _sub_is_num_only or _sub_is_meta_dup:
+                                    # Подсерия — чисто цифровая или дублирует metadata:
+                                    # «Север и Юг 01\12» или «Серия 1\Серия» → стираем до metadata
+                                    record.proposed_series = _meta_s
+                                    record.series_source = "filename+meta_confirmed"
+                                # else: подсерия — реальное название («Аспект-Император»);
+                                # оставляем proposed_series без изменений (с числом в root)
                         continue
 
             # Fallback: metadata ТОЛЬКО если паттерны не дали
@@ -883,8 +892,17 @@ class Pass2SeriesFilename:
                             if (_root_no_num and _root_no_num != _root_h and
                                     _root_no_num.lower().replace('ё', 'е') ==
                                     _meta_s.lower().replace('ё', 'е')):
-                                record.proposed_series = _meta_s
-                                record.series_source = "filename+meta_confirmed"
+                                _sub_stripped = _sub_h.strip()
+                                _sub_is_num_only = bool(re.match(r'^\d+$', _sub_stripped))
+                                _sub_is_meta_dup = (_sub_stripped.lower().replace('ё', 'е') ==
+                                                    _meta_s.lower().replace('ё', 'е'))
+                                if _sub_is_num_only or _sub_is_meta_dup:
+                                    # Подсерия — чисто цифровая или дублирует metadata:
+                                    # «Север и Юг 01\12» или «Серия 1\Серия» → стираем до metadata
+                                    record.proposed_series = _meta_s
+                                    record.series_source = "filename+meta_confirmed"
+                                # else: подсерия — реальное название («Аспект-Император»);
+                                # оставляем proposed_series без изменений (с числом в root)
             elif record.metadata_series:
                 # ✅ ЗАЩИТА: Перед использованием metadata - проверяем наличие слов из blacklist
                 # ТРЕБОВАНИЕ: "если мета содержит слово или слова из BL, полностью ее игнорируем в качестве значения"
@@ -2493,7 +2511,13 @@ class Pass2SeriesFilename:
                                 if series_from_block_cleaned:
                                     root_cmp = hierarchy_components[0] if hierarchy_components else ''
                                     if metadata_cleaned.lower() == root_cmp:
-                                        # Root совпадает → subseries не подтверждена, возвращаем только root
+                                        # Root подтверждён. Если паттерн явно описывает SubSeries —
+                                        # доверяем полной иерархии (паттерн знает о подсерии).
+                                        # Пример: metadata="Второй Апокалипсис", pattern has Subseries
+                                        #   → возвращаем "Второй Апокалипсис\Аспект-Император"
+                                        if pattern_has_subseries:
+                                            return series_from_block_cleaned
+                                        # Без Subseries в паттерне: subseries не подтверждена → только root
                                         return series_from_block_cleaned.split('\\')[0].strip()
                                     else:
                                         return series_from_block_cleaned
