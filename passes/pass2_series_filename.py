@@ -1098,7 +1098,7 @@ class Pass2SeriesFilename:
           «04_Якудза из другого мира. Том IV.fb2» → series_number=4 (а не 3 из meta)
           «2024_SomeBook.fb2»                      → НЕ трогаем (год, не порядковый №)
         """
-        _PREFIX_RE = re.compile(r'^(\d{1,3})[_\-]')
+        _PREFIX_RE = re.compile(r'^(\d{1,3})[_\-\.]')
         for record in records:
             if not record.file_path:
                 continue
