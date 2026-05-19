@@ -670,12 +670,9 @@ class CompilerDialog:
             return
         path = self._det_paths.get(sel[0])
         if path:
-            import subprocess
-            subprocess.Popen(
-                f'explorer /select,"{path}"',
-                shell=True,
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-            )
+            import subprocess, threading
+            proc = subprocess.Popen(f'explorer /select,"{path}"', shell=True)
+            threading.Thread(target=proc.wait, daemon=True).start()
 
     def _select_all(self):
         self._tree.selection_set(self._tree.get_children())
