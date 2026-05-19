@@ -3,7 +3,6 @@ import tkinter as tk
 from tkinter import ttk
 import sqlite3
 import threading
-import subprocess
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -147,4 +146,5 @@ class NewBooksWindow:
         full_path = Path(library_path) / file_path if library_path else Path(file_path)
         folder = full_path.parent
         if folder.exists():
-            subprocess.Popen(['explorer', str(folder)])
+            import os
+            os.startfile(str(folder))

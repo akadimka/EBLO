@@ -5,7 +5,6 @@ Double-clicking a result opens File Explorer at the book's folder.
 import tkinter as tk
 from tkinter import ttk
 import sqlite3
-import subprocess
 import threading
 from pathlib import Path
 
@@ -224,5 +223,6 @@ class SearchWindow:
         full = Path(library_path) / file_path if library_path else Path(file_path)
         folder = full.parent
         if folder.exists():
-            subprocess.Popen(['explorer', str(folder)])
+            import os
+            os.startfile(str(folder))
 

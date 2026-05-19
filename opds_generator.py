@@ -359,7 +359,7 @@ class OPDSGeneratorWindow:
             ))
 
     def _open_folder(self):
-        import subprocess
         folder = self._out_var.get()
         if Path(folder).exists():
-            subprocess.Popen(['explorer', folder])
+            import os
+            os.startfile(folder)

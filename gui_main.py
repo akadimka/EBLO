@@ -419,8 +419,8 @@ class MainWindow(tk.Tk):
         if tags:
             folder_path = tags[0]
             try:
-                import subprocess
-                subprocess.Popen(['explorer', folder_path])
+                import os
+                os.startfile(folder_path)
             except Exception as e:
                 self.logger.log(f'Ошибка при открытии папки: {e}')
 
