@@ -670,9 +670,10 @@ class CompilerDialog:
             return
         path = self._det_paths.get(sel[0])
         if path:
-            import subprocess, threading
-            proc = subprocess.Popen(f'explorer /select,"{path}"', shell=True)
-            threading.Thread(target=proc.wait, daemon=True).start()
+            import ctypes
+            ctypes.windll.shell32.ShellExecuteW(
+                None, "open", "explorer.exe", f'/select,"{path}"', None, 1
+            )
 
     def _select_all(self):
         self._tree.selection_set(self._tree.get_children())
