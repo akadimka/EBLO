@@ -1566,20 +1566,46 @@ class FB2CompilerService:
 
         # Предвычисляем для каждой книги набор значимых слов stem (без ведущего числа)
         def _stem_words(book: CompilationBook) -> set:
-            s = re.sub(r'^\d+\s*[.\-–—]\s*', '', book.abs_path.stem)
+            # Снимаем ведущий числовой префикс с любым разделителем: N. N- N_ N–
+            s = re.sub(r'^\d+\s*[.\-–—_]\s*', '', book.abs_path.stem)
             return {w.lower() for w in re.split(r'\W+', s) if len(w) >= 3}
 
         _all_stem_words = [_stem_words(b) for b in books]
 
         def _naming_fit(book: CompilationBook) -> int:
-            """Число других книг группы, разделяющих ≥2 значимых слова со stem этой книги."""
+            """Число других книг группы, разделяющих ≥1 значимое слово со stem этой книги."""
             bw = _stem_words(book)
             if not bw:
                 return 0
-            return sum(1 for ow in _all_stem_words if len(bw & ow) >= 2)
+            return sum(1 for ow in _all_stem_words if len(bw & ow) >= 1)
+
+        def _prefix_sep(stem: str) -> str:
+            """Символ-разделитель после ведущего числа: '1_' → '_', '1.' → '.', иначе ''."""
+            m = re.match(r'^\d+\s*([._\-])', stem)
+            return m.group(1) if m else ''
+
+        _all_seps = [_prefix_sep(b.abs_path.stem) for b in books]
+
+        def _naming_cohesion(book: CompilationBook) -> int:
+            """Число других книг группы с тем же разделителем ведущего числа.
+
+            «1_Спасатель» и «2_Спасатель» имеют sep='_' → cohesion=1.
+            «1. Спасатель (2018)» имеет sep='.' и уникален → cohesion=0.
+            Более высокое значение → файл из «когерентного набора» → предпочитаем.
+            """
+            sep = _prefix_sep(book.abs_path.stem)
+            if not sep:
+                return 0
+            return sum(1 for s in _all_seps if s == sep) - 1  # -1: не считаем саму книгу
 
         def _book_freshness(book: CompilationBook):
             """Ключ сортировки: чем свежее и ближе к паттерну группы — тем меньше (идёт первым)."""
+            # 0. Когерентность именного набора: файл из одной «партии» (тот же разделитель N_/N.)
+            #    предпочитается перед файлом из другой партии — даже если у второго год новее.
+            #    Пример: «1_Спасатель. Злой город.» и «2_Спасатель-2» оба с '_' → cohesion=1;
+            #             «1. Спасатель (2018)» с '.' → cohesion=0 → проигрывает.
+            cohesion_key = -_naming_cohesion(book)
+
             # 1. Схожесть названия с другими книгами группы (больше = лучше = меньший ключ)
             fit_key = -_naming_fit(book)
 
@@ -1599,7 +1625,7 @@ class FB2CompilerService:
             year_m = re.search(r'[-–\s](\d{4})\b', book.abs_path.stem)
             year_key = -int(year_m.group(1)) if year_m else 0
 
-            return (fit_key, date_key, kw_key, multi_key, year_key, str(book.abs_path))
+            return (cohesion_key, fit_key, date_key, kw_key, multi_key, year_key, str(book.abs_path))
 
         sorted_books = sorted(books, key=_book_freshness)
         seen_positions: Dict[Tuple, CompilationBook] = {}
