@@ -1579,24 +1579,39 @@ class FB2CompilerService:
                 return 0
             return sum(1 for ow in _all_stem_words if len(bw & ow) >= 1)
 
-        def _prefix_sep(stem: str) -> str:
-            """Символ-разделитель после ведущего числа: '1_' → '_', '1.' → '.', иначе ''."""
-            m = re.match(r'^\d+\s*([._\-])', stem)
-            return m.group(1) if m else ''
+        def _struct_prefix(book: CompilationBook) -> str:
+            """Структурный «подпись» файла для определения когерентного набора.
 
-        _all_seps = [_prefix_sep(b.abs_path.stem) for b in books]
+            Два файла когерентны, если их _struct_prefix совпадает:
+            - «1_Спасатель» и «2_Спасатель» → оба дают sep='_' (нормализуем цифру)
+            - «Шалашов, Ковальчук. Воля императора 1.» и «...2.» → оба дают
+              'Шалашов, Ковальчук. Воля императора'
+            - Файл без структуры → возвращаем уникальный stem, cohesion=0.
+            """
+            stem = book.abs_path.stem
+            # Случай 1: файл начинается с числа (NN_ или NN-) → нормализуем до разделителя
+            m = re.match(r'^\d+\s*([._\-])', stem)
+            if m:
+                return '\x00sep:' + m.group(1)  # уникальный тег, не путается с именами
+            # Случай 2: автор-префикс с номером серии внутри
+            series_root = ''
+            if book.record and book.record.proposed_series:
+                series_root = book.record.proposed_series.split('\\')[0].strip()
+            if series_root:
+                pat = re.escape(series_root) + r'\s+\d'
+                m2 = re.search(pat, stem, re.IGNORECASE)
+                if m2:
+                    return stem[:m2.start() + len(series_root)].rstrip()
+            return stem  # нет структуры — уникальная строка, cohesion=0
+
+        _all_prefixes = [_struct_prefix(b) for b in books]
 
         def _naming_cohesion(book: CompilationBook) -> int:
-            """Число других книг группы с тем же разделителем ведущего числа.
-
-            «1_Спасатель» и «2_Спасатель» имеют sep='_' → cohesion=1.
-            «1. Спасатель (2018)» имеет sep='.' и уникален → cohesion=0.
-            Более высокое значение → файл из «когерентного набора» → предпочитаем.
-            """
-            sep = _prefix_sep(book.abs_path.stem)
-            if not sep:
-                return 0
-            return sum(1 for s in _all_seps if s == sep) - 1  # -1: не считаем саму книгу
+            """Число других книг группы с тем же структурным префиксом."""
+            pfx = _struct_prefix(book)
+            if pfx == book.abs_path.stem:
+                return 0  # нет структуры
+            return sum(1 for p in _all_prefixes if p == pfx) - 1
 
         def _book_freshness(book: CompilationBook):
             """Ключ сортировки: чем свежее и ближе к паттерну группы — тем меньше (идёт первым)."""
