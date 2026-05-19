@@ -1104,13 +1104,32 @@ class Pass2SeriesFilename:
                 continue
             stem = Path(record.file_path).stem
             m = _PREFIX_RE.match(stem)
-            if not m:
+            if m:
+                fn_num = int(m.group(1))
+                if not (1900 <= fn_num <= 2099):
+                    record.series_number = str(fn_num)
                 continue
-            fn_num = int(m.group(1))
-            # Не применяем если число похоже на год (1900–2099)
-            if 1900 <= fn_num <= 2099:
+
+            # Правило 2: «SeriesRoot N. BookTitle» в середине стема
+            # Пример: «Автор. Серия 6. Название.fb2» → series_number=6
+            if not (record.proposed_series and record.series_source and
+                    'filename' in record.series_source):
                 continue
-            record.series_number = str(fn_num)
+            series_root = record.proposed_series.split('\\')[0].strip()
+            if not series_root:
+                continue
+            m2 = re.search(
+                r'(?i)' + re.escape(series_root) + r'\s+(\d{1,3})\s*\.',
+                stem
+            )
+            if not m2:
+                continue
+            fn_num2 = int(m2.group(1))
+            if 1900 <= fn_num2 <= 2099:
+                continue
+            if record.series_number and record.series_number == str(fn_num2):
+                continue  # уже верное значение
+            record.series_number = str(fn_num2)
 
     def _resolve_hierarchical_flat_mismatch(self, records: List[BookRecord]) -> None:
         """Нормализует рассогласование «A\\B» и «A» у одного автора.
