@@ -672,7 +672,8 @@ class CompilerDialog:
         if path:
             import subprocess
             subprocess.Popen(
-                ['explorer', f'/select,{path}'],
+                f'explorer /select,"{path}"',
+                shell=True,
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
             )
 
