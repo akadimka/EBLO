@@ -615,8 +615,10 @@ class FB2CompilerService:
                     #          Но если есть ещё [31-45], то [31-43] покрыт [31-45] → дубликат.
                     # Это корректнее чем проверять только против best_pre:
                     # [1-42]+[31-43]+[31-45] → [31-43] дублируется [31-45], [31-45] уникален.
+                    _book_sn = (book.record.series_number or '').strip()
                     covered_by_any = any(
                         (o_lo <= lo and hi <= o_hi)
+                        and (o_book.record.series_number or '').strip() == _book_sn
                         for (o_book, o_lo, o_hi) in precompiled
                         if o_book is not book
                     )
@@ -1189,18 +1191,6 @@ class FB2CompilerService:
         # Проверяем stem ДО series_number, чтобы явное слово в имени файла не было перебито.
         # Исключение: «Ибисовая трилогия 1. Маковое море» — слово является частью названия
         # серии, за ним сразу идёт номер тома; такой файл — НЕ предкомпиляция.
-        #
-        # Если series_number=N (целое, > 1), диапазон начинается с N, а не с 1.
-        # Пример: «Мир Вечного 2. Вечный. Тетралогия», series_number=2 → (2, 5), не (1, 4).
-        def _sw_lo(count: int) -> int:
-            """lo для сервисного слова с учётом series_number."""
-            _sn = (book.record.series_number or '').strip()
-            if re.match(r'^\d+$', _sn):
-                n = int(_sn)
-                if 1 < n < 1900:
-                    return n
-            return 1
-
         _stem_lower = book.abs_path.stem.lower()
         for idx, kw in enumerate(self._SERIES_WORDS):
             if kw and kw.lower() in _stem_lower:
@@ -1219,8 +1209,7 @@ class FB2CompilerService:
                         _n_val = _sub_n_m.group(1)
                         if not re.search(r'(?<!\d)' + re.escape(_n_val) + r'(?!\d)', series_lower):
                             return 0, 0
-                    _lo = _sw_lo(idx)
-                    return _lo, _lo + idx - 1
+                    return 1, idx
 
         # Критерий 2: series_number — диапазон "N-M" из метаданных (запасной вариант)
         # Для подсерий пропускаем: series_number ссылается на родительскую серию.
@@ -1250,8 +1239,7 @@ class FB2CompilerService:
                         if _sub_n3:
                             if not re.search(r'(?<!\d)' + re.escape(_sub_n3.group(1)) + r'(?!\d)', series_lower):
                                 return 0, 0
-                        _lo3 = _sw_lo(idx)
-                        return _lo3, _lo3 + idx - 1
+                        return 1, idx  # сервисное слово → предполагаем lo=1
 
         # Критерий 4: файл выглядит как компиляция (по имени/title) — читаем FB2-контент
         _COMPILATION_WORDS = re.compile(
