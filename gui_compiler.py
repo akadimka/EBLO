@@ -30,8 +30,9 @@ _SORT_SOURCE_LABEL = {
     'unknown':        '⚠ Не определён',
 }
 
-_ORDER_OK_COLOR   = '#DFF0D8'   # бледно-зелёный
-_ORDER_WARN_COLOR = '#FCF8E3'   # жёлтый
+_ORDER_OK_COLOR      = '#DFF0D8'   # бледно-зелёный
+_ORDER_WARN_COLOR    = '#FCF8E3'   # жёлтый
+_ORDER_OVERLAP_COLOR = '#FDE8C8'   # светло-оранжевый — пересечение диапазонов
 _ORDER_ERR_COLOR  = '#F2DEDE'   # розовый
 
 _SETTINGS_KEY_COMPILER_DIR = 'compiler_scan_dir'
@@ -196,6 +197,7 @@ class CompilerDialog:
 
         self._tree.tag_configure('ok',      background=_ORDER_OK_COLOR)
         self._tree.tag_configure('warn',    background=_ORDER_WARN_COLOR)
+        self._tree.tag_configure('overlap', background=_ORDER_OVERLAP_COLOR)  # светло-оранжевый — пересечение диапазонов
         self._tree.tag_configure('alpha',   background='#E8F4FD')  # бледно-голубой
         self._tree.tag_configure('cleanup', background='#F5F5F5', foreground='#888888')  # серый — уже скомпилировано
 
@@ -486,6 +488,19 @@ class CompilerDialog:
         else:
             order_txt = '⚠ Порядок частично не определён'
             tag = 'warn'
+
+        # Проверяем пересечение диапазонов — перекрашиваем в оранжевый
+        _range_books = []
+        for _b in g.books:
+            _m = re.match(r'^(\d+)-(\d+)$', _b.volume_label or '')
+            if _m:
+                _range_books.append((int(_m.group(1)), int(_m.group(2))))
+        if len(_range_books) >= 2:
+            for _i in range(len(_range_books)):
+                for _j in range(_i + 1, len(_range_books)):
+                    if _range_books[_i][0] <= _range_books[_j][1] and _range_books[_j][0] <= _range_books[_i][1]:
+                        tag = 'overlap'
+                        break
 
         self._tree.insert(
             '', tk.END,
