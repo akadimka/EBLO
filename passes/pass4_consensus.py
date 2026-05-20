@@ -524,6 +524,75 @@ class Pass4Consensus:
         self.logger.log(f"[PASS 4] Applied series author consensus to {series_author_consensus_count} records")
         
         # HIERARCHICAL SERIES UNIFICATION
+        # Валидация подсерий по именам файлов ДО консенсуса.
+        # Если proposed_series = "X\Y" (из filename), проверяем сколько файлов автора
+        # содержат Y как первый сегмент заголовка после "X N." в имени файла.
+        # Если < 2 → Y это название книги, не подсерия → схлопываем в "X".
+        # Запускаем ДО hierarchical unification, чтобы ложная подсерия не распространялась.
+        print("[PASS 4] Validating filename-based subseries before consensus...")
+        filename_subseries_fix_count = 0
+
+        # Группируем записи по автору
+        _author_recs: dict = {}
+        for r in records:
+            _author_recs.setdefault(r.proposed_author or '[unknown]', []).append(r)
+
+        for author, author_recs in _author_recs.items():
+            # Для каждой уникальной пары (base_series, subseries) из filename-источников
+            # считаем сколько файлов автора имеют subseries как первый сегмент заголовка
+            # после "base_series N." в stem файла.
+            subseries_file_count: dict = {}  # (base_lc, sub_lc) → set of file stems
+
+            for r in author_recs:
+                s = r.proposed_series or ''
+                if '\\' not in s:
+                    continue
+                if 'filename' not in (r.series_source or ''):
+                    continue
+                base = s.split('\\')[0].strip()
+                sub  = s.split('\\', 1)[1].strip()
+                if not base or not sub:
+                    continue
+                base_lc = base.lower().replace('ё', 'е')
+                sub_lc  = sub.lower().replace('ё', 'е')
+                key = (base_lc, sub_lc)
+
+                # Ищем sub в stem файла: паттерн "base N. sub" или "base N. sub."
+                stem = Path(r.file_path).stem.lower().replace('ё', 'е')
+                # Вырезаем зону после "base [N]." в стеме
+                _base_pos = stem.find(base_lc)
+                if _base_pos < 0:
+                    continue
+                _after = stem[_base_pos + len(base_lc):]
+                # Пропускаем номер тома и точку: " 05. " или " 5. "
+                _zone_m = re.match(r'[\s\-]*\d{1,4}[\.\s]+(.+)', _after)
+                if not _zone_m:
+                    continue
+                _title_part = _zone_m.group(1).strip()
+                # Первый сегмент заголовка (до следующей точки или конца)
+                _first_seg = re.split(r'[\.\(]', _title_part)[0].strip()
+                _first_seg_lc = _first_seg.lower().replace('ё', 'е')
+                # Считаем совпадение если sub начинается с first_seg или наоборот
+                if _first_seg_lc and (sub_lc.startswith(_first_seg_lc) or _first_seg_lc.startswith(sub_lc)):
+                    subseries_file_count.setdefault(key, set()).add(r.file_path)
+
+            # Схлопываем подсерии где только один файл подтверждён из filename
+            for r in author_recs:
+                s = r.proposed_series or ''
+                if '\\' not in s:
+                    continue
+                base = s.split('\\')[0].strip()
+                sub  = s.split('\\', 1)[1].strip()
+                base_lc = base.lower().replace('ё', 'е')
+                sub_lc  = sub.lower().replace('ё', 'е')
+                key = (base_lc, sub_lc)
+                confirmed = subseries_file_count.get(key, set())
+                if len(confirmed) < 2:
+                    r.proposed_series = base
+                    filename_subseries_fix_count += 1
+
+        self.logger.log(f"[PASS 4] Collapsed {filename_subseries_fix_count} unconfirmed filename subseries")
+
         # Если у одного автора есть серии "А" и "А. Б" (с точкой), вторая — подсерия первой.
         # Конвертируем "А. Б" → "А\Б" по конвенции backslash.
         # Пример: "Рожденные в СССР" + "Рожденные в СССР. Личности"
