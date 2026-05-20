@@ -1099,10 +1099,27 @@ class Pass2SeriesFilename:
           «2024_SomeBook.fb2»                      → НЕ трогаем (год, не порядковый №)
         """
         _PREFIX_RE = re.compile(r'^(\d{1,3})[_\-\.]')
+        # Правило 3: диапазон томов в скобках имени файла
+        # «Автор - Серия (т. 4-7).fb2» → series_number='4-7'
+        # Перекрывает metadata-диапазон «1-4» (относительные номера глав внутри файла)
+        _BRACKET_RANGE_RE = re.compile(
+            r'\(\s*(?:тт?\.?|tt?\.?|vol\.?s?|книг[аи]?|кн\.?)\s*'
+            r'(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*\)',
+            re.IGNORECASE | re.UNICODE,
+        )
         for record in records:
             if not record.file_path:
                 continue
             stem = Path(record.file_path).stem
+
+            # Правило 3 — проверяем первым: явный диапазон в скобках
+            m3 = _BRACKET_RANGE_RE.search(stem)
+            if m3:
+                lo3, hi3 = int(m3.group(1)), int(m3.group(2))
+                if lo3 < hi3 and not (1900 <= lo3 <= 2099):
+                    record.series_number = f'{lo3}-{hi3}'
+                    continue
+
             m = _PREFIX_RE.match(stem)
             if m:
                 fn_num = int(m.group(1))
