@@ -1138,7 +1138,7 @@ class Pass2SeriesFilename:
             if not series_root:
                 continue
             m2 = re.search(
-                r'(?i)' + re.escape(series_root) + r'[\s\-]+(\d{1,3})\s*\.',
+                r'(?i)' + re.escape(series_root) + r'[\s\-]+(\d{1,3})\s*[\.\s]',
                 stem
             )
             if not m2:
