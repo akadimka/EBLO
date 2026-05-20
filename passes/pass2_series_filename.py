@@ -1129,8 +1129,10 @@ class Pass2SeriesFilename:
 
             # Правило 2: «SeriesRoot N. BookTitle» в середине стема
             # Пример: «Автор. Серия 6. Название.fb2» → series_number=6
-            if not (record.proposed_series and record.series_source and
-                    'filename' in record.series_source):
+            # Применяем для любого series_source: если серия видна в имени файла с числом,
+            # это надёжнее метаданных (пример: series_source="author-consensus", meta-number=6,
+            # но имя файла говорит "Небо в кармане! 1." → правильный номер 1).
+            if not record.proposed_series:
                 continue
             series_root = record.proposed_series.split('\\')[0].strip()
             if not series_root:
