@@ -2604,7 +2604,20 @@ class Pass2SeriesFilename:
                                         return series_from_block_cleaned.split('\\')[0].strip()
                                     else:
                                         return series_from_block_cleaned
-                            elif best_score >= 0.85 and series_from_block_cleaned:
+                            # Спец-случай: metadata — префикс block-серии, разница = одно сервисное слово.
+                            # Пример: metadata="Дублинская", block="Дублинская серия"
+                            # → "серия" — сервисное слово, но является частью названия.
+                            # Файловое имя точнее → возвращаем полное название из filename.
+                            elif not hierarchy_components or metadata_cleaned.lower() not in hierarchy_components:
+                                _blk_lc = series_from_block_cleaned.lower()
+                                _met_lc = metadata_cleaned.lower()
+                                if _blk_lc.startswith(_met_lc + ' '):
+                                    _suffix = _blk_lc[len(_met_lc):].strip()
+                                    if any(_suffix == sw.lower() for sw in self.service_words if sw):
+                                        processed_series = self._extract_main_series_from_multi_level(series_from_block)
+                                        if processed_series:
+                                            return processed_series
+                            if best_score >= 0.85 and series_from_block_cleaned:
                                 # Высокий score, но metadata не подтвердила иерархию
                                 if '\\' in series_from_block_cleaned:
                                     # Если паттерн явно описывает SubSeries — доверяем полной иерархии
