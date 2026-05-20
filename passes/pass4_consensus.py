@@ -615,6 +615,29 @@ class Pass4Consensus:
 
         self.logger.log(f"[PASS 4] Fixed {subseries_num_fix_count} trailing-number series into subseries")
 
+        # Подсерия "X\Y" считается настоящей только если Y встречается у ≥2 книг одного автора.
+        # Если Y уникален — это название книги, попавшее в иерархию ошибочно. Сбрасываем в "X".
+        singleton_subseries_fix_count = 0
+        for author, author_records in author_groups.items():
+            # Считаем сколько книг у каждой подсерии (author, full_subseries)
+            from collections import Counter
+            subseries_counts = Counter(
+                r.proposed_series for r in author_records
+                if r.proposed_series and '\\' in r.proposed_series
+            )
+            for record in author_records:
+                s = record.proposed_series or ''
+                if '\\' not in s:
+                    continue
+                if subseries_counts[s] >= 2:
+                    continue
+                # Уникальная подсерия — сбрасываем в базовую серию
+                base = s.split('\\')[0].strip()
+                record.proposed_series = base
+                singleton_subseries_fix_count += 1
+
+        self.logger.log(f"[PASS 4] Collapsed {singleton_subseries_fix_count} singleton subseries to base series")
+
         # FOLDER_HIERARCHY CLEANUP
         # Fall back to metadata_series if available, otherwise clear.
         print("[PASS 4] Cleaning up folder_hierarchy series with embedded author names...")
