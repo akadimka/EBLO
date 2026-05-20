@@ -638,6 +638,30 @@ class Pass4Consensus:
 
         self.logger.log(f"[PASS 4] Collapsed {singleton_subseries_fix_count} singleton subseries to base series")
 
+        # Если proposed_series = "X N" (хвостовое число ≤ 3 цифр, не год), а series_number
+        # совпадает с N или пустой — стрипим N из названия серии и фиксируем series_number.
+        # Пример: proposed_series="Путь 2", series_number="2" → proposed_series="Путь"
+        trailing_num_strip_count = 0
+        for record in records:
+            s = record.proposed_series or ''
+            if '\\' in s:
+                continue
+            m = re.match(r'^(.+?)\s+(\d{1,3})\s*$', s)
+            if not m:
+                continue
+            num = m.group(2)
+            if int(num) >= 1900:  # год — не трогаем
+                continue
+            sn = (record.series_number or '').strip()
+            if sn and sn != num:  # series_number уже задан и не совпадает — не трогаем
+                continue
+            record.proposed_series = m.group(1).strip()
+            if not sn:
+                record.series_number = num
+            trailing_num_strip_count += 1
+
+        self.logger.log(f"[PASS 4] Stripped trailing number from {trailing_num_strip_count} series names")
+
         # FOLDER_HIERARCHY CLEANUP
         # Fall back to metadata_series if available, otherwise clear.
         print("[PASS 4] Cleaning up folder_hierarchy series with embedded author names...")
