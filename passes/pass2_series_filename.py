@@ -3374,7 +3374,22 @@ class Pass2SeriesFilename:
                 # Возьмём все слова кроме последнего
                 series_candidate = ' '.join(words[:-1]).strip()
                 if series_candidate:
-                    return series_candidate
+                    # Защита: не стрипаем сервисное слово если оно часть названия.
+                    # «Дублинская серия» → без «серия» остаётся «Дублинская» (1 слово) → сохраняем.
+                    # «Я иду искать! Тетралогия» → без «Тетралогия» остаётся 3 слова → стрипаем.
+                    # Применяем только к сервисным словам-дескрипторам (не к числовым диапазонам).
+                    if is_last_service_word and not is_numeric_range:
+                        _sig_remaining = sum(
+                            1 for w in series_candidate.split()
+                            if sum(c.isalpha() for c in w) >= 4
+                        )
+                        if _sig_remaining < 2:
+                            # Слишком мало значимых слов — «серия» часть названия, сохраняем
+                            pass  # не возвращаем, падаем дальше
+                        else:
+                            return series_candidate
+                    else:
+                        return series_candidate
         
         # Если есть числовой диапазон (1-3, 4-6), берем до него
         series_candidate = re.sub(r'\s*[\d\-]+\s*$', '', content).strip()
