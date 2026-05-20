@@ -1815,6 +1815,15 @@ class FB2CompilerService:
                                     return (0, meta_num, _kw_n, 0), 'series_number', False, sn
                     return (0, meta_num, 0, 0), 'series_number', False, sn
 
+        # When _series_ok is False but series_number was already set by Rule 2 (pass2),
+        # trust that value instead of falling through to Source B which can't handle
+        # non-digit-prefixed filenames like "Марков-Бабкин. Новый Михаил-8. ...".
+        _series_ok_val = _series_ok if (sn and not is_subseries) else True
+        if not _series_ok_val and sn and re.match(r'^\d+$', sn):
+            fn_num_from_sn = int(sn)
+            if fn_num_from_sn < 1900:
+                return (0, fn_num_from_sn, 0, 0), 'series_number', False, sn
+
         # Для подсерий: позиция (primary=родитель, secondary=подсерия, tertiary=том).
         # Порядок: сначала sub_ordinal (номер подсерии в группе родителя), потом том.
         # Пример: "Остен Ард 3. Последний 1. Корона. Том 1" → (0, 3, 1, 1).

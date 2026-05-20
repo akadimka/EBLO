@@ -7,6 +7,7 @@
 Затем можно выбрать группы и запустить компиляцию.
 """
 
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
@@ -250,6 +251,15 @@ class CompilerDialog:
             foreground='#0067C0', font=('Segoe UI', 9, 'italic'),
             anchor='w',
         ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # ── Строка предупреждения о пересечении диапазонов ───────────────
+        self._overlap_var = tk.StringVar(value='')
+        self._overlap_lbl = ttk.Label(
+            bot_frm, textvariable=self._overlap_var,
+            foreground='#CC6600', font=('Segoe UI', 9),
+            anchor='w', wraplength=600,
+        )
+        self._overlap_lbl.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(2, 0))
 
         paned.add(bot_frm, weight=1)
 
@@ -568,6 +578,7 @@ class CompilerDialog:
         sel = self._tree.selection()
         if not sel:
             self._fname_var.set('—')
+            self._overlap_var.set('')
             return
         group = self._group_by_iid.get(sel[0])
         if group is None:
@@ -643,6 +654,27 @@ class CompilerDialog:
                 tags=('to_delete',),
             )
             self._det_paths[_iid] = dup_path
+
+        # Проверка пересечения диапазонов
+        self._overlap_var.set('')
+        range_books = []
+        for book in group.books:
+            m = re.match(r'^(\d+)-(\d+)$', book.volume_label or '')
+            if m:
+                range_books.append((int(m.group(1)), int(m.group(2)), book.abs_path.name))
+        if len(range_books) >= 2:
+            overlaps = []
+            for i in range(len(range_books)):
+                for j in range(i + 1, len(range_books)):
+                    lo1, hi1, n1 = range_books[i]
+                    lo2, hi2, n2 = range_books[j]
+                    shared = set(range(lo1, hi1 + 1)) & set(range(lo2, hi2 + 1))
+                    if shared:
+                        nums = ', '.join(str(x) for x in sorted(shared))
+                        overlaps.append(f'«{n1}» и «{n2}» — общие тома: {nums}')
+            if overlaps:
+                self._overlap_var.set('⚠ Пересечение диапазонов: ' + '; '.join(overlaps)
+                                      + '. Возможно дублирование содержимого.')
 
         # Предпросмотр имени файла компиляции
         try:

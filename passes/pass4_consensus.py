@@ -576,6 +576,42 @@ class Pass4Consensus:
 
         self.logger.log(f"[PASS 4] Unified {hierarchical_unification_count} hierarchical series variants")
 
+        # Если у автора есть подсерия "X\Y" и запись с proposed_series="X N" (пробел+число),
+        # конвертируем "X N" → "X\Y", а series_number устанавливаем в N.
+        # Пример: "Фортуна Эрика Минца 1" + подсерия "Фортуна Эрика Минца\Пилот ракетоносца"
+        #          → книга 1 получает "Фортуна Эрика Минца\Пилот ракетоносца", series_number="1"
+        subseries_num_fix_count = 0
+        for author, author_records in author_groups.items():
+            # Собираем все подсерии автора: "X\Y" → base = "X"
+            subseries_map: dict = {}  # base_lower → proposed_series (с backslash)
+            for r in author_records:
+                s = r.proposed_series or ''
+                if '\\' in s:
+                    base = s.split('\\')[0].strip().lower().replace('ё', 'е')
+                    if base not in subseries_map:
+                        subseries_map[base] = s
+            if not subseries_map:
+                continue
+            for record in author_records:
+                s = record.proposed_series or ''
+                if '\\' in s:
+                    continue
+                m = re.match(r'^(.+?)\s+(\d{1,4})\s*$', s)
+                if not m:
+                    continue
+                base_lc = m.group(1).strip().lower().replace('ё', 'е')
+                num = m.group(2)
+                if base_lc not in subseries_map:
+                    continue
+                # Убедимся что series_number не противоречит
+                if record.series_number and record.series_number != num:
+                    continue
+                record.proposed_series = subseries_map[base_lc]
+                record.series_number = num
+                subseries_num_fix_count += 1
+
+        self.logger.log(f"[PASS 4] Fixed {subseries_num_fix_count} trailing-number series into subseries")
+
         # FOLDER_HIERARCHY CLEANUP
         # Fall back to metadata_series if available, otherwise clear.
         print("[PASS 4] Cleaning up folder_hierarchy series with embedded author names...")
