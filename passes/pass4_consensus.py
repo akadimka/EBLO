@@ -737,20 +737,20 @@ class Pass4Consensus:
         # Применяем только для filename-источников.
         fn_sn_refix_count = 0
         for record in records:
-            if 'filename' not in (record.series_source or ''):
-                continue
             series = (record.proposed_series or '').split('\\')[0].strip()
             if not series:
                 continue
             series_lc = series.lower().replace('ё', 'е')
             stem = Path(record.file_path).stem
             stem_lc = stem.lower().replace('ё', 'е')
+            # Серия должна присутствовать в стеме — только тогда стем авторитетен
             pos = stem_lc.find(series_lc)
             if pos < 0:
                 continue
             after = stem[pos + len(series):]
             m = re.match(r'[\s\-]*0*(\d{1,4})\s*[\.\s\-]', after)
             if not m:
+                # Номера в стеме нет — не перебиваем series_number (остаётся из меты)
                 continue
             fn_num = m.group(1)
             if int(fn_num) >= 1900:
