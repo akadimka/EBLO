@@ -155,7 +155,9 @@
     "issue",
     "вып.",
     "книга",
+    "книги",
     "book",
+    "books",
     "кн.",
     "сборник",
     "collection",
@@ -251,6 +253,10 @@
     {
       "pattern": "Author - Series. Title (Series service_words)",
       "example": "Красницкий Евгений - Отрок. Ближний круг (Отрок 4-6).fb2"
+    },
+    {
+      "pattern": "Author - Series. Subseries. Title",
+      "example": "Зан Т. - Траун.  Доминация 1. Грядущий хаос.fb2"
     },
     {
       "pattern": "Author - service_words. Series. Title (Series service_words)",

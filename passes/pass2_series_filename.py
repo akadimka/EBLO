@@ -1148,6 +1148,23 @@ class Pass2SeriesFilename:
                 continue  # уже верное значение
             record.series_number = str(fn_num2)
 
+        # Правило 4: голый диапазон в конце стема без скобок
+        # «Варяг 1-3.fb2» → series_number='1-3'
+        _BARE_RANGE_RE = re.compile(r'\s+(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*$')
+        for record in records:
+            if record.series_number:
+                continue  # уже есть — не трогаем
+            if not record.file_path:
+                continue
+            stem = Path(record.file_path).stem
+            mb = _BARE_RANGE_RE.search(stem)
+            if not mb:
+                continue
+            lo_b, hi_b = int(mb.group(1)), int(mb.group(2))
+            if lo_b >= hi_b or 1900 <= lo_b <= 2099:
+                continue
+            record.series_number = f'{lo_b}-{hi_b}'
+
     def _resolve_hierarchical_flat_mismatch(self, records: List[BookRecord]) -> None:
         """Нормализует рассогласование «A\\B» и «A» у одного автора.
 
@@ -2920,7 +2937,20 @@ class Pass2SeriesFilename:
                     len(first_part) < 60 and
                     not first_part_no_parens[:1].isdigit()  # Не начинается с цифры
                 )
-                
+
+                # Если первая часть начинается со служебного слова («Цикл», «Серия» и т.п.),
+                # это НЕ автор, а «ServiceWord SeriesName».
+                # Пример: «Цикл Варяг. Книги 1-5» → first_part=«Цикл Варяг» → series=«Варяг».
+                if looks_like_author:
+                    _fp_lower = first_part_no_parens.lower()
+                    for _sw in self.service_words:
+                        if _sw and ' ' not in _sw and _fp_lower.startswith(_sw.lower() + ' '):
+                            _series_from_sw = first_part[len(_sw):].strip()
+                            if _series_from_sw and (not validate or self._is_valid_series(_series_from_sw)):
+                                return _series_from_sw
+                            looks_like_author = False
+                            break
+
                 if looks_like_author:
                     # Проверяем диапазоны: "Совок 1-5", "Попаданец в Дракона 1-8" → True
                     series_match = re.match(r'^(.+?)\s+\d+[-–—]\d+\s*$', second_part)
@@ -2930,7 +2960,7 @@ class Pass2SeriesFilename:
                     # Если нет арабских, проверяем римские цифры: "Бесноватый Цесаревич I" → True
                     if not series_match:
                         series_match = re.match(r'^(.+?)\s+[IVX]+\s*$', second_part)
-                    
+
                     if series_match:
                         potential_series = series_match.group(1).strip()
                         if not validate or self._is_valid_series(potential_series):
