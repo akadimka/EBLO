@@ -582,14 +582,13 @@ class Pass4Consensus:
         #          → книга 1 получает "Фортуна Эрика Минца\Пилот ракетоносца", series_number="1"
         subseries_num_fix_count = 0
         for author, author_records in author_groups.items():
-            # Собираем все подсерии автора: "X\Y" → base = "X"
-            subseries_map: dict = {}  # base_lower → proposed_series (с backslash)
+            # Собираем все подсерии автора: base_lower → set of proposed_series (с backslash)
+            subseries_map: dict = {}  # base_lower → set
             for r in author_records:
                 s = r.proposed_series or ''
                 if '\\' in s:
                     base = s.split('\\')[0].strip().lower().replace('ё', 'е')
-                    if base not in subseries_map:
-                        subseries_map[base] = s
+                    subseries_map.setdefault(base, set()).add(s)
             if not subseries_map:
                 continue
             for record in author_records:
@@ -603,10 +602,14 @@ class Pass4Consensus:
                 num = m.group(2)
                 if base_lc not in subseries_map:
                     continue
+                candidates = subseries_map[base_lc]
+                # Применяем только если подсерия ровно одна — иначе нельзя угадать
+                if len(candidates) != 1:
+                    continue
                 # Убедимся что series_number не противоречит
                 if record.series_number and record.series_number != num:
                     continue
-                record.proposed_series = subseries_map[base_lc]
+                record.proposed_series = next(iter(candidates))
                 record.series_number = num
                 subseries_num_fix_count += 1
 
