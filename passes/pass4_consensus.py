@@ -730,6 +730,37 @@ class Pass4Consensus:
 
         self.logger.log(f"[PASS 4] Stripped trailing number from {trailing_num_strip_count} series names")
 
+        # Финальный шаг: перечитываем series_number из имени файла по текущему proposed_series.
+        # После всей нормализации серия могла измениться (схлопывание подсерий и т.п.),
+        # а series_number мог остаться от старого контекста (подсерии или другой серии).
+        # Ищем "proposed_series N" в стеме — это позиция в итоговой серии.
+        # Применяем только для filename-источников.
+        fn_sn_refix_count = 0
+        for record in records:
+            if 'filename' not in (record.series_source or ''):
+                continue
+            series = (record.proposed_series or '').split('\\')[0].strip()
+            if not series:
+                continue
+            series_lc = series.lower().replace('ё', 'е')
+            stem = Path(record.file_path).stem
+            stem_lc = stem.lower().replace('ё', 'е')
+            pos = stem_lc.find(series_lc)
+            if pos < 0:
+                continue
+            after = stem[pos + len(series):]
+            m = re.match(r'[\s\-]*0*(\d{1,4})\s*[\.\s\-]', after)
+            if not m:
+                continue
+            fn_num = m.group(1)
+            if int(fn_num) >= 1900:
+                continue
+            if (record.series_number or '').strip() != fn_num:
+                record.series_number = fn_num
+                fn_sn_refix_count += 1
+
+        self.logger.log(f"[PASS 4] Re-fixed series_number from filename for {fn_sn_refix_count} records")
+
         # FOLDER_HIERARCHY CLEANUP
         # Fall back to metadata_series if available, otherwise clear.
         print("[PASS 4] Cleaning up folder_hierarchy series with embedded author names...")
