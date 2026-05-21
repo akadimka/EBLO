@@ -322,8 +322,10 @@ class Pass3Normalize:
                 import re as _re_dot
                 fixed = []
                 for w in auth.split():
-                    if _re_dot.match(r'^[А-ЯЁA-Z]\.?$', w):
-                        fixed.append(w[0] + '.')
+                    # Matches single-letter or two-letter abbreviations like А, Дж, Эд, Эл
+                    # First char uppercase, optional second char (any case), optional trailing period.
+                    if _re_dot.match(r'^[А-ЯЁA-Z][а-яёa-zA-Z]?\.?$', w):
+                        fixed.append(w.rstrip('.') + '.')
                     else:
                         fixed.append(w)
                 trimmed.append(' '.join(fixed))

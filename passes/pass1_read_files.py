@@ -102,6 +102,11 @@ def _get_author_for_file_worker(fb2_file: Path, work_dir: Path,
 
     while parse_levels < folder_parse_limit:
         if current_dir == work_dir:
+            # Also check if work_dir itself is cached as an author folder
+            cache_key = str(current_dir)
+            if cache_key in author_folder_cache:
+                author_name, confidence = author_folder_cache[cache_key]
+                last_hit = author_name
             break
 
         # Skip extension folders

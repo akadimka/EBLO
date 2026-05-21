@@ -350,6 +350,9 @@ class AuthorNormalizer:
                 if len(parts) >= 2:
                     # Проверяем первая часть - фамилия
                     if parts[0].lower() == surname_lower and parts[1][0].upper() == initial:
+                        # If map entry is the same as input minus trailing period, preserve input
+                        if full_name.rstrip('.') == author.rstrip('.') and author.endswith('.'):
+                            return author
                         return full_name
         
         # Второй попыт: найти в авторах где имя - первое слово (обратный порядок)

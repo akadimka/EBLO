@@ -596,7 +596,7 @@ class RegenCSVService:
                 author = record.proposed_author or ''
 
                 series, source = _compute_folder_series(author, parent_parts)
-                if source:
+                if source and series != author:
                     record.proposed_series = series
                     record.series_source = source
 
@@ -664,6 +664,201 @@ class RegenCSVService:
             print(f"[PASS 6] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] PASS 6: Abbreviations expanded")
             
+            # ===== Post-check: series must never equal author =====
+            # Normalize both sides for comparison: strip trailing periods, lowercase.
+            def _norm_for_cmp(s: str) -> str:
+                return s.rstrip('. ').strip().lower().replace('ё', 'е')
+
+            _series_eq_author_cleared = 0
+            for record in self.records:
+                if not record.proposed_series or not record.proposed_author:
+                    continue
+                a_norm = _norm_for_cmp(record.proposed_author)
+                s_norm = _norm_for_cmp(record.proposed_series)
+
+                is_conflict = (
+                    # Exact match: series == author (e.g. "Фонд А" == "Фонд А.")
+                    s_norm == a_norm
+                    # Series starts with full author + space: "Фонд А Конторщица"
+                    or s_norm.startswith(a_norm + ' ')
+                    # Series starts with full author + period: "Берг Ираклий. Крепостной Пушкина"
+                    or s_norm.startswith(a_norm + '.')
+                )
+
+                # Тип А: folder_dataset series looks like a person name and shares
+                # surname with the author — folder-author was not in name dicts so became series.
+                # E.g. series="Буров Егор" (folder name), author="Буров Дмитрий" (from filename).
+                if not is_conflict and record.series_source == 'folder_dataset':
+                    a_parts = a_norm.split()
+                    s_parts = s_norm.split()
+                    if (len(s_parts) <= 3 and len(a_parts) >= 1
+                            and len(a_parts[0]) > 3
+                            and s_parts and s_parts[0] == a_parts[0]):
+                        is_conflict = True
+
+                # Тип Б: co-author folder — series words are a permutation of author words.
+                # E.g. author="Винтеркей Серж, Шумилин Артем", series="Шумилин Артем, Винтеркей Серж".
+                if not is_conflict and record.series_source == 'folder_dataset':
+                    _strip_punct = re.compile(r'[.,;()]')
+                    s_words = set(_strip_punct.sub('', s_norm).split())
+                    a_words = set(_strip_punct.sub('', a_norm).split())
+                    if s_words and len(s_words) >= 2 and s_words == a_words:
+                        is_conflict = True
+
+                # Тип В: publisher subfolder contains author name mixed with series label.
+                # E.g. author="Аберкромби Джо", series="Фэнтези Джо Аберкромби" (folder_dataset).
+                # Rule: if all meaningful author words (len>2) appear in series (prefix-match),
+                # then:
+                #   - if metadata is available and does NOT contain author words → use metadata
+                #   - if metadata is empty → clear series entirely
+                # Protection: if metadata ALSO contains author words → do not replace (e.g. "Лето Элин").
+                if not is_conflict and record.series_source == 'folder_dataset':
+                    _sp2 = re.compile(r'[.,;()\-]')
+                    a_meaningful = [w for w in _sp2.sub('', a_norm).split() if len(w) > 2]
+                    s_str = _sp2.sub('', s_norm)
+
+                    def _word_in_str(word, text):
+                        """Match word in text allowing 1-2 char Russian inflection suffix."""
+                        prefix = word[:max(3, len(word) - 1)]
+                        return re.search(r'\b' + re.escape(prefix), text) is not None
+
+                    if (len(a_meaningful) >= 2
+                            and all(_word_in_str(w, s_str) for w in a_meaningful)):
+                        if record.metadata_series:
+                            # Check that metadata does NOT also contain author words
+                            meta_norm2 = _norm_for_cmp(record.metadata_series)
+                            meta_str = _sp2.sub('', meta_norm2)
+                            meta_has_author = all(_word_in_str(w, meta_str) for w in a_meaningful)
+                            if not meta_has_author:
+                                is_conflict = True
+                        else:
+                            # No metadata fallback — series is pure "label+author", clear it
+                            is_conflict = True
+
+                # Тип Г: series contains only the author's surname as a folder label.
+                # E.g. author="Скальци Джон", series="Пространство Скальци" (publisher subfolder).
+                # Also handles plural surname family folders: "Войлошниковы" for "Войлошников Владимир, Войлошникова Ольга".
+                # Requires: metadata available and metadata does NOT contain the surname.
+                if not is_conflict and record.series_source == 'folder_dataset' and record.metadata_series:
+                    _sp2_g = re.compile(r'[.,;()\-]')
+                    a_norm_g = _norm_for_cmp(record.proposed_author)
+                    a_surname_g = _sp2_g.sub('', a_norm_g).split()[0] if a_norm_g.strip() else ''
+                    if len(a_surname_g) > 3:
+                        s_str_g = _sp2_g.sub('', s_norm)
+                        # Use prefix match allowing 1-2 char Russian inflection
+                        surname_prefix_g = a_surname_g[:max(4, len(a_surname_g) - 1)]
+                        if re.search(r'\b' + re.escape(surname_prefix_g), s_str_g):
+                            meta_norm_g = _norm_for_cmp(record.metadata_series)
+                            meta_str_g = _sp2_g.sub('', meta_norm_g)
+                            if not re.search(r'\b' + re.escape(surname_prefix_g), meta_str_g):
+                                is_conflict = True
+
+                # Тип Д: publisher attribution prefix ("от автора X", "от авторов X").
+                # E.g. folder "Fanzon. От автора Киллербота" → series="От автора Киллербота",
+                # but metadata has the real series name.
+                if not is_conflict and record.series_source == 'folder_dataset' and record.metadata_series:
+                    if s_norm.startswith('от автор'):
+                        is_conflict = True
+
+                if is_conflict:
+                    record.proposed_series = record.metadata_series or ''
+                    record.series_source = 'metadata' if record.metadata_series else ''
+                    _series_eq_author_cleared += 1
+
+            if _series_eq_author_cleared:
+                print(f"[POST-CHECK] Cleared {_series_eq_author_cleared} records where series == author")
+                self.logger.log(f"[OK] POST-CHECK: Cleared {_series_eq_author_cleared} series==author conflicts")
+
+            # ===== Post-check: strip leading "N. " number prefix from series (filename artifact) =====
+            # E.g. "3. Шмыг" → "Шмыг", "4. Городская Стража" → "Городская Стража"
+            _digit_prefix_re = re.compile(r'^\d+\.\s+', re.UNICODE)
+            _digit_prefix_count = 0
+            for record in self.records:
+                if not record.proposed_series:
+                    continue
+                cleaned = _digit_prefix_re.sub('', record.proposed_series)
+                if cleaned != record.proposed_series:
+                    # Prefer metadata if available and matches
+                    record.proposed_series = record.metadata_series or cleaned
+                    record.series_source = 'metadata' if record.metadata_series else record.series_source
+                    _digit_prefix_count += 1
+            if _digit_prefix_count:
+                print(f"[POST-CHECK] Stripped digit prefix from {_digit_prefix_count} series values")
+                self.logger.log(f"[OK] POST-CHECK: Stripped digit prefix from {_digit_prefix_count} series")
+
+            # ===== Post-check: trim series to metadata prefix when filename added extra words =====
+            # E.g. proposed="1917 год министр" (filename), meta="1917 год" → use meta.
+            # Only when meta is a proper prefix (word boundary) and len(meta) >= 6.
+            _meta_prefix_count = 0
+            for record in self.records:
+                if not record.proposed_series or not record.metadata_series:
+                    continue
+                if 'filename' not in record.series_source:
+                    continue
+                ps_l = record.proposed_series.lower().replace('ё', 'е')
+                ms_l = record.metadata_series.lower().replace('ё', 'е').strip()
+                if (len(ms_l) >= 6
+                        and ps_l.startswith(ms_l)
+                        and len(record.proposed_series) > len(ms_l)
+                        and not record.proposed_series[len(ms_l)].isalpha()):
+                    record.proposed_series = record.metadata_series.strip()
+                    record.series_source = 'metadata'
+                    _meta_prefix_count += 1
+            if _meta_prefix_count:
+                print(f"[POST-CHECK] Trimmed filename series to metadata prefix in {_meta_prefix_count} records")
+                self.logger.log(f"[OK] POST-CHECK: Trimmed series to metadata prefix in {_meta_prefix_count} records")
+
+            # ===== Post-check: strip trailing service words (Книга, Том, Часть, Book) =====
+            _service_tail_re = re.compile(
+                r'\s+(?:книга|том|часть|book|vol|volume)\.?\s*$',
+                re.IGNORECASE | re.UNICODE,
+            )
+            _service_count = 0
+            for record in self.records:
+                if not record.proposed_series:
+                    continue
+                cleaned = _service_tail_re.sub('', record.proposed_series).strip()
+                if cleaned and cleaned != record.proposed_series:
+                    record.proposed_series = cleaned
+                    _service_count += 1
+            if _service_count:
+                print(f"[POST-CHECK] Stripped trailing service words from {_service_count} series values")
+                self.logger.log(f"[OK] POST-CHECK: Stripped service words from {_service_count} series")
+
+            # ===== Post-check: deduplicate backslash hierarchy where both parts are identical =====
+            # E.g. "Боец\Боец" → "Боец"  (filename parsed "Боец 1. Боец." as two identical parts)
+            _bs_dedup_count = 0
+            for record in self.records:
+                ps = record.proposed_series
+                if ps and '\\' in ps:
+                    parts = ps.split('\\')
+                    # If first and last parts are the same (case+ё→е insensitive), keep only first
+                    p0 = parts[0].strip().lower().replace('ё', 'е')
+                    pl = parts[-1].strip().lower().replace('ё', 'е')
+                    if p0 and p0 == pl:
+                        record.proposed_series = parts[0].strip()
+                        _bs_dedup_count += 1
+            if _bs_dedup_count:
+                print(f"[POST-CHECK] Deduplicated identical backslash series in {_bs_dedup_count} records")
+                self.logger.log(f"[OK] POST-CHECK: Deduplicated backslash series in {_bs_dedup_count} records")
+
+            # ===== Post-check: remove consecutive duplicate words in series =====
+            _dedup_word_re = re.compile(
+                r'\b(\w+)\b(\s+\1)+\b',
+                re.IGNORECASE | re.UNICODE,
+            )
+            _dedup_count = 0
+            for record in self.records:
+                if not record.proposed_series:
+                    continue
+                cleaned = _dedup_word_re.sub(r'\1', record.proposed_series)
+                if cleaned != record.proposed_series:
+                    record.proposed_series = cleaned.strip()
+                    _dedup_count += 1
+            if _dedup_count:
+                print(f"[POST-CHECK] Deduplicated words in {_dedup_count} series values")
+                self.logger.log(f"[OK] POST-CHECK: Deduplicated words in {_dedup_count} series")
+
             # ===== Clear series for collections/compilations =====
             if progress_callback:
                 progress_callback(90, 100, "Финальная обработка")
@@ -689,9 +884,16 @@ class RegenCSVService:
                 result = re.sub(r':\s*([^\s]?)', lambda m: '. ' + m.group(1).upper() if m.group(1) else '.', s)
                 return result
 
+            _abbr_re = re.compile(r'\b[А-ЯЁA-Z][а-яёa-zA-Z]?\.$')
+
             def _strip_trailing_dot(s: str) -> str:
-                """Strip trailing punctuation (dots, commas, ellipsis, etc.) but keep '!'."""
-                return s.rstrip('.,…;: \t').rstrip('.')
+                """Strip trailing punctuation except a period that belongs to an abbreviation."""
+                stripped = s.rstrip('.,…;: \t').rstrip('.')
+                # If the original ended with an abbreviated initial (e.g. "Таннер А." or "Бреннан Дж."),
+                # restore the trailing period.
+                if s.endswith('.') and _abbr_re.search(s):
+                    stripped = stripped.rstrip() + '.'
+                return stripped
 
             for rec in self.records:
                 if rec.proposed_series:
