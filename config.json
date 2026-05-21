@@ -1217,6 +1217,18 @@
       "FB2_METADATA": 1
     }
   },
+  "publisher_prefixes": [
+    "Серия - «",
+    "Серия «",
+    "Серия - \"",
+    "Серия - ",
+    "Серия. "
+  ],
+  "system_folder_names": [
+    "fb2", "epub", "pdf", "mobi", "djvu",
+    "tmp", "temp", "covers", "cover",
+    "images", "img", "_backup", "backup", "cache"
+  ],
   "no_series_folder_names": [
     "Вне серий",
     "Вне серии",

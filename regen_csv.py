@@ -31,6 +31,7 @@ from passes.pass3_series_normalize import Pass3SeriesNormalize
 from passes.folder_series_parser import parse_series_from_folder_name
 from extraction_constants import FILE_EXTENSION_FOLDER_NAMES, is_no_series_folder
 from pattern_converter import compile_patterns
+from folder_classifier import FolderClassifier, FolderType
 import re
 
 
@@ -55,6 +56,9 @@ class RegenCSVService:
         # Load folder patterns for series extraction
         folder_patterns_raw = self.settings.get_author_series_patterns_in_folders()
         self.folder_patterns = compile_patterns(folder_patterns_raw) if folder_patterns_raw else []
+
+        # Folder type classifier — uses config BL lists + name dictionaries
+        self.folder_classifier = FolderClassifier(self.settings)
         
         # Working directory (where FB2 files are scanned from)
         self.work_dir = Path(self.settings.get_last_scan_path())
@@ -485,30 +489,89 @@ class RegenCSVService:
             _series_folder_cache: dict = {}  # (author, parent_parts) → (series, source)
 
             def _compute_folder_series(author: str, parent_parts: tuple) -> tuple:
-                """Вернуть (proposed_series, series_source) из структуры папок."""
+                """Вернуть (proposed_series, series_source) из структуры папок.
+
+                Логика зависит от типа корневой папки (FolderType):
+
+                AUTHOR:
+                    Ищем папку автора в пути → всё что глубже = серия/подсерия.
+                    Это основной случай: Волков Тим/Дуэлянт/1. Книга.fb2
+
+                PUBLISHER / COLLECTION:
+                    Корневая папка НЕ является серией (это издательский каталог).
+                    Если файл лежит в подпапке — подпапка = серия, независимо от автора.
+                    Если файл лежит прямо в корневой папке — серии из папки нет.
+                    Пример: Серия - «Боевая фантастика»/ИмяСерии/1. Книга.fb2
+
+                UNKNOWN:
+                    Пробуем найти автора в пути (как AUTHOR).
+                    Если автор не найден, но есть подпапки — берём подпапки как серию.
+                    Это покрывает случай, когда корневая папка сама является серией.
+
+                VARIANT / NO_SERIES / SKIP:
+                    Серию из папки не извлекаем.
+                """
                 key = (author, parent_parts)
                 if key in _series_folder_cache:
                     return _series_folder_cache[key]
 
-                author_folder_index = -1
-                if author:
-                    for idx, part in enumerate(parent_parts):
-                        if self._surnames_match_folder(author, part):
-                            author_folder_index = idx
-                            break
-
                 result = ('', '')
-                if author_folder_index >= 0:
-                    series_folders = parent_parts[author_folder_index + 1:]
-                    if len(series_folders) == 0:
-                        pass  # файл прямо в папке автора — серия из filename/metadata
-                    elif any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
-                        result = ('', 'no_series_folder')
-                    else:
-                        series_names = [self._extract_series_from_folder_name(f) for f in series_folders]
-                        series_combined = '\\'.join(series_names)
-                        if series_combined:
-                            result = (series_combined, 'folder_dataset')
+
+                if not parent_parts:
+                    _series_folder_cache[key] = result
+                    return result
+
+                root_type = self.folder_classifier.classify(parent_parts[0])
+
+                if root_type in (FolderType.SKIP, FolderType.VARIANT, FolderType.NO_SERIES):
+                    # Не используем папку как источник серии
+                    pass
+
+                elif root_type in (FolderType.PUBLISHER, FolderType.COLLECTION):
+                    # Корневая папка = издательский каталог.
+                    # Серия = подпапки начиная с уровня 2 (index 1+).
+                    series_folders = parent_parts[1:]
+                    if series_folders:
+                        if any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
+                            result = ('', 'no_series_folder')
+                        else:
+                            series_names = [self._extract_series_from_folder_name(f) for f in series_folders]
+                            series_combined = '\\'.join(s for s in series_names if s)
+                            if series_combined:
+                                result = (series_combined, 'folder_dataset')
+
+                else:
+                    # AUTHOR или UNKNOWN — ищем папку автора в пути
+                    author_folder_index = -1
+                    if author:
+                        for idx, part in enumerate(parent_parts):
+                            if self._surnames_match_folder(author, part):
+                                author_folder_index = idx
+                                break
+
+                    if author_folder_index >= 0:
+                        # Нашли папку автора → всё глубже = серия
+                        series_folders = parent_parts[author_folder_index + 1:]
+                        if series_folders:
+                            if any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
+                                result = ('', 'no_series_folder')
+                            else:
+                                series_names = [self._extract_series_from_folder_name(f) for f in series_folders]
+                                series_combined = '\\'.join(s for s in series_names if s)
+                                if series_combined:
+                                    result = (series_combined, 'folder_dataset')
+
+                    elif root_type == FolderType.UNKNOWN and len(parent_parts) > 1:
+                        # Автор не найден, но есть подпапки в UNKNOWN-папке.
+                        # Берём все подпапки (начиная с index 1) как серию.
+                        series_folders = parent_parts[1:]
+                        if any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
+                            result = ('', 'no_series_folder')
+                        else:
+                            series_names = [self._extract_series_from_folder_name(f) for f in series_folders]
+                            series_combined = '\\'.join(s for s in series_names if s)
+                            if series_combined:
+                                result = (series_combined, 'folder_dataset')
 
                 _series_folder_cache[key] = result
                 return result
