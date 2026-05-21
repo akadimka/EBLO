@@ -69,6 +69,7 @@ test_*.csv
 .temp/
 temp/
 tmp/
+Test3/
 *.tmp
 
 # Cache files

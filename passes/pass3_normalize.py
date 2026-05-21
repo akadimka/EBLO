@@ -313,18 +313,42 @@ class Pass3Normalize:
             authors = [a.strip() for a in raw.split(', ') if a.strip()]
             # Каждый автор — не более 2 слов (Фамилия Имя), отчество отбрасываем.
             # Одиночная буква (инициал) всегда заканчивается точкой: "А" → "А."
+            # Многобуквенное слово получает точку ТОЛЬКО если это аббревиатура:
+            #   - Все символы — согласные («Дж», «Мл», «Ст») — паттерн сокращения
+            #   - Или слово есть в списке known_initials_and_suffixes из конфига
+            # Слова с гласными («Оз», «Ли», «Ян») — это имена/фамилии, точка не нужна.
+            _RU_VOWELS = frozenset('аеёиоуыэюяАЕЁИОУЫЭЮЯ')
+            _LAT_VOWELS = frozenset('aeiouAEIOU')
+            _ALL_VOWELS = _RU_VOWELS | _LAT_VOWELS
+            import re as _re_dot
+            _known_abbr = {w.lower() for w in (self.settings.get_list('author_initials_and_suffixes') or [])} \
+                if self.settings else set()
+
+            def _is_abbreviation(word: str) -> bool:
+                """True если слово — инициал или аббревиатура (должна заканчиваться точкой)."""
+                w = word.rstrip('.')
+                if not w:
+                    return False
+                # 1 буква — однозначно инициал
+                if len(w) == 1 and w[0].isupper():
+                    return True
+                # В списке — однозначно аббревиатура (Мл, Ст, Дж и т.д.)
+                if w.lower() in _known_abbr:
+                    return True
+                # Все символы — согласные (нет гласных) — типичный паттерн аббревиатуры
+                if (len(w) >= 2 and w[0].isupper()
+                        and not any(c in _ALL_VOWELS for c in w)):
+                    return True
+                return False
+
             trimmed = []
             for auth in authors:
                 words = auth.split()
                 if len(words) > 2:
                     auth = ' '.join(words[:2])
-                # Гарантируем точку после инициалов (одиночная кириллическая/латинская буква)
-                import re as _re_dot
                 fixed = []
                 for w in auth.split():
-                    # Matches single-letter or two-letter abbreviations like А, Дж, Эд, Эл
-                    # First char uppercase, optional second char (any case), optional trailing period.
-                    if _re_dot.match(r'^[А-ЯЁA-Z][а-яёa-zA-Z]?\.?$', w):
+                    if _re_dot.match(r'^[А-ЯЁA-Z][а-яёa-zA-Z]?\.?$', w) and _is_abbreviation(w):
                         fixed.append(w.rstrip('.') + '.')
                     else:
                         fixed.append(w)

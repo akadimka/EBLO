@@ -107,10 +107,10 @@ class Precache:
                     not attempt to parse them as author names.
             """
 
-            # Never process work_dir itself
+            # Never process work_dir itself — but cache it as author if it qualifies.
+            # This ensures that when scanning e.g. "Волков Тим/" directly, ALL files
+            # inside get folder_dataset = "Волков Тим" with no exceptions.
             if folder == self.work_dir:
-                # If work_dir itself looks like an author folder, all its direct
-                # subfolders are series — scan them with inside_author_folder=True.
                 wd_name = folder.name
                 wd_name_for_parse = conversions.get(wd_name, wd_name)
                 wd_author = parse_author_from_folder_name(
@@ -119,6 +119,10 @@ class Precache:
                     female_names=self.female_names,
                 )
                 wd_is_author = bool(wd_author and self._contains_valid_name(wd_author))
+                if wd_is_author:
+                    # Cache work_dir as author so Pass1 assigns folder_dataset to ALL files
+                    self.author_folder_cache[folder] = (wd_author, "high")
+                    print(f"[CACHE] Work_dir is AUTHOR: {wd_name} → '{wd_author}'")
                 try:
                     for subdir in folder.iterdir():
                         if subdir.is_dir() and not subdir.name.startswith('.'):
