@@ -9,6 +9,20 @@ from settings_manager import SettingsManager
 from logger import Logger
 
 
+_APOSTROPHE_VARIANTS = str.maketrans({
+    '‘': "'",  # LEFT SINGLE QUOTATION MARK
+    '’': "'",  # RIGHT SINGLE QUOTATION MARK
+    'ʼ': "'",  # MODIFIER LETTER APOSTROPHE
+    '´': "'",  # ACUTE ACCENT
+    '`': "'",  # GRAVE ACCENT / BACKTICK
+    'ʹ': "'",  # MODIFIER LETTER PRIME
+})
+
+def _norm_apos(s: str) -> str:
+    """Normalize all apostrophe/quote variants to straight apostrophe for key comparison."""
+    return s.translate(_APOSTROPHE_VARIANTS)
+
+
 class Pass6Abbreviations:
     """PASS 6: Expand author abbreviations to full names.
     
@@ -51,18 +65,59 @@ class Pass6Abbreviations:
             records: List of BookRecord objects to process
         """
         print("[PASS 6] Expanding abbreviations and incomplete names...")
-        
+
+        # PRE-PASS: Expand single-word surnames using the record's OWN metadata_authors.
+        # Handles cases like «О'Рейлли» (filename) + metadata «Брайан О'Рейлли» → «О'Рейлли Брайан».
+        # Must run per-record (not via global authors_map) because different books can have
+        # authors with the same surname but different first names (e.g. Джон vs Мэгги О'Фаррелл).
+        meta_expand_count = 0
+        for record in records:
+            if not record.proposed_author or record.proposed_author == "Сборник":
+                continue
+            if not record.metadata_authors:
+                continue
+            # Only for single-word names from filename source
+            if ' ' in record.proposed_author:
+                continue
+            if 'filename' not in record.author_source:
+                continue
+            proposed_norm = _norm_apos(record.proposed_author.lower())
+            # Parse metadata_authors: may be comma/semicolon separated
+            sep = '; ' if '; ' in record.metadata_authors else (', ' if ', ' in record.metadata_authors else None)
+            meta_parts = record.metadata_authors.split(sep) if sep else [record.metadata_authors]
+            for meta_name in meta_parts:
+                meta_name = meta_name.strip()
+                if not meta_name:
+                    continue
+                # Normalize and check if the surname word matches proposed_author
+                meta_normalized = self.normalizer.normalize_format(meta_name)
+                if not meta_normalized:
+                    continue
+                meta_words = meta_normalized.split()
+                if not meta_words:
+                    continue
+                # After normalize_format the surname is the first word
+                if _norm_apos(meta_words[0].lower()) == proposed_norm and len(meta_words) > 1:
+                    # Normalize apostrophe variants in the result to straight apostrophe
+                    record.proposed_author = _norm_apos(meta_normalized)
+                    record.author_source = record.author_source + '+meta_expanded'
+                    meta_expand_count += 1
+                    break
+        if meta_expand_count:
+            print(f"[PASS 6] Expanded {meta_expand_count} single-word surnames using record metadata")
+            self.logger.log(f"[PASS 6] Expanded {meta_expand_count} single-word surnames via metadata")
+
         # PASS 1: Build complete authors map from ALL records
         print("[PASS 6]   Building author cache from all records...")
         authors_map = self._build_authors_map(records)
-        
+
         # PASS 2: Expand abbreviations and incomplete names
         expanded_count = 0
-        
+
         for record in records:
             if record.proposed_author == "Сборник":
                 continue
-            
+
             original = record.proposed_author
             
             # Check for multi-author case with both separators ('; ' from folder, ', ' from filename)
@@ -145,7 +200,8 @@ class Pass6Abbreviations:
         words = author.split()
         if len(words) == 1:
             # Single word - try to expand using authors_map
-            surname_lower = words[0].lower()
+            # Normalize apostrophe variants so О'Фаррелл (U+2019) matches О`Фаррелл (backtick)
+            surname_lower = _norm_apos(words[0].lower())
             if surname_lower in authors_map:
                 # Found matching surnames - pick the FULLEST name (most words)
                 full_names = authors_map[surname_lower]
@@ -182,7 +238,8 @@ class Pass6Abbreviations:
             parts = normalized.split()
             if not parts:
                 return
-            key = parts[0].lower()
+            # Normalize apostrophe variants → straight apostrophe for consistent key lookup
+            key = _norm_apos(parts[0].lower())
             if key:
                 authors_map.setdefault(key, []).append(normalized)
                 seen.add(normalized)
