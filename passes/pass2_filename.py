@@ -204,29 +204,24 @@ class Pass2Filename:
         print("[PASS 2] Pre-building author cache from FB2 metadata...")
         cached_count = 0
 
-        for record in records:
-            fb2_authors_str = getattr(record, 'metadata_authors', '') or ''
+        # Two-pass caching: regular metadata first, then folder_dataset authors last.
+        # folder_dataset comes from the folder name (highest-priority source) and must
+        # NOT be overwritten by anthology/multi-author metadata that may contain
+        # longer but unrelated "Волков Вадим Викторович" style names.
+        regular_records = [r for r in records if getattr(r, 'author_source', '') != 'folder_dataset']
+        folder_records  = [r for r in records if getattr(r, 'author_source', '') == 'folder_dataset']
 
+        def _cache_author_str(fb2_authors_str: str, is_folder_source: bool) -> None:
+            nonlocal cached_count
             if not fb2_authors_str:
-                continue
-
+                return
             try:
                 fb2_authors = [a.strip() for a in fb2_authors_str.split(';') if a.strip()]
-
                 for author in fb2_authors:
-                    if not author:
-                        continue
-                    # Пропускаем малформированные записи с запятой внутри имени автора
-                    # (запятая — разделитель соавторов, не часть имени)
-                    if ',' in author:
+                    if not author or ',' in author:
                         continue
                     author_lower = author.lower().strip()
-                    # Cache full name
                     self.author_cache[author_lower] = author
-                    # Cache each word (surname, firstname) separately.
-                    # Always store the word-keyed entry with THAT WORD FIRST (ФИ convention):
-                    # "Хуан Франсиско Феррандис" → cache["феррандис"] = "Феррандис Хуан Франсиско"
-                    # so that single-surname lookups get the canonical ФИ form.
                     author_words = author.split()
                     for idx, part in enumerate(author_words):
                         if len(part) > 2:
@@ -237,12 +232,33 @@ class Pass2Filename:
                                 rest = [w for i, w in enumerate(author_words) if i != idx]
                                 candidate = part + ' ' + ' '.join(rest)
                             existing = self.author_cache.get(part_lower)
-                            if not existing or len(candidate.split()) > len(existing.split()):
+                            if is_folder_source:
+                                # folder_dataset always wins — overwrite unconditionally
+                                self.author_cache[part_lower] = candidate
+                            elif not existing or len(candidate.split()) > len(existing.split()):
                                 self.author_cache[part_lower] = candidate
                     cached_count += 1
-
             except Exception:
                 pass
+
+        # Pass 1: regular metadata (longer name wins among equals).
+        # Skip anthology/multi-author files: if a file has > 2 authors in metadata
+        # it is likely an anthology and caching its authors would pollute surname lookups.
+        _ANTHOLOGY_THRESHOLD = 2
+        for record in regular_records:
+            fb2_str = getattr(record, 'metadata_authors', '') or ''
+            if not fb2_str:
+                continue
+            author_count = len([a for a in fb2_str.split(';') if a.strip()])
+            if author_count > _ANTHOLOGY_THRESHOLD:
+                continue  # skip anthologies
+            _cache_author_str(fb2_str, is_folder_source=False)
+
+        # Pass 2: folder_dataset proposed_author — always overwrites (highest priority)
+        for record in folder_records:
+            author = getattr(record, 'proposed_author', '') or ''
+            if author:
+                _cache_author_str(author, is_folder_source=True)
 
         print(f"[PASS 2] Pre-cache built: {len(self.author_cache)} entries from {cached_count} authors")
 

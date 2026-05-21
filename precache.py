@@ -97,22 +97,40 @@ class Precache:
         
         conversions = self.settings.get_author_surname_conversions()
         
-        def scan_folder_hierarchy(folder: Path, depth: int = 0) -> Optional[Tuple[str, str]]:
-            """Recursively scan folders and cache authors."""
-            
+        def scan_folder_hierarchy(folder: Path, depth: int = 0,
+                                   inside_author_folder: bool = False) -> Optional[Tuple[str, str]]:
+            """Recursively scan folders and cache authors.
+
+            Args:
+                inside_author_folder: True when we are already inside a confirmed author
+                    folder. In this case subfolders are SERIES, not authors — we must
+                    not attempt to parse them as author names.
+            """
+
             # Never process work_dir itself
             if folder == self.work_dir:
+                # If work_dir itself looks like an author folder, all its direct
+                # subfolders are series — scan them with inside_author_folder=True.
+                wd_name = folder.name
+                wd_name_for_parse = conversions.get(wd_name, wd_name)
+                wd_author = parse_author_from_folder_name(
+                    wd_name_for_parse,
+                    male_names=self.male_names,
+                    female_names=self.female_names,
+                )
+                wd_is_author = bool(wd_author and self._contains_valid_name(wd_author))
                 try:
                     for subdir in folder.iterdir():
                         if subdir.is_dir() and not subdir.name.startswith('.'):
-                            scan_folder_hierarchy(subdir, depth + 1)
+                            scan_folder_hierarchy(subdir, depth + 1,
+                                                  inside_author_folder=wd_is_author)
                 except (PermissionError, OSError):
                     pass
                 return None
-            
+
             if depth > self.folder_parse_limit:
                 return None
-            
+
             folder_name = folder.name
             if not folder_name or folder_name.startswith('.'):
                 return None
@@ -123,25 +141,31 @@ class Precache:
                 try:
                     for subdir in folder.iterdir():
                         if subdir.is_dir() and not subdir.name.startswith('.'):
-                            scan_folder_hierarchy(subdir, depth)  # depth не увеличивается!
+                            # depth не увеличивается, inside_author_folder наследуется
+                            scan_folder_hierarchy(subdir, depth, inside_author_folder)
                 except (PermissionError, OSError):
                     pass
                 return None
-            
+
+            # Если мы уже внутри авторской папки — эта папка является серией, не автором.
+            # Не пытаемся её парсить и не рекурсируем глубже в поисках авторов.
+            if inside_author_folder:
+                return None
+
             # Check cache
             if folder in self.author_folder_cache:
                 return self.author_folder_cache[folder]
-            
+
             # Apply conversions to folder name
             folder_name_to_parse = conversions.get(folder_name, folder_name)
-            
+
             # Apply PASS0+PASS1+PASS2 structural analysis
             author_name = parse_author_from_folder_name(
                 folder_name_to_parse,
                 male_names=self.male_names,
                 female_names=self.female_names,
             )
-            
+
             # Check if folder contains FB2 files
             has_fb2_files = False
             try:
@@ -154,38 +178,43 @@ class Precache:
                         break
             except (PermissionError, OSError):
                 pass
-            
+
             # If author folder with FB2 files AND name parses as author AND contains valid names
             if author_name and has_fb2_files and self._contains_valid_name(author_name):
                 if depth > 0:
                     result = (author_name, "high")
                     self.author_folder_cache[folder] = result
                     print(f"[CACHE] Added HIGH: {folder.name} → '{author_name}'")
+                # Рекурсируем внутрь, но уже с флагом inside_author_folder=True —
+                # подпапки являются сериями, а не авторами.
+                try:
+                    for subdir in folder.iterdir():
+                        if subdir.is_dir() and not subdir.name.startswith('.'):
+                            scan_folder_hierarchy(subdir, depth + 1,
+                                                  inside_author_folder=True)
+                except (PermissionError, OSError):
+                    pass
                 return result
-            
+
             # If name parses as author but fails validation → skip caching
-            # This prevents series folder names from blocking parent author inheritance
             elif author_name and has_fb2_files and not self._contains_valid_name(author_name):
                 if depth > 0:
                     print(f"[CACHE] Skipped (no valid names): {folder.name} → '{author_name}'")
                 # Don't cache, allow parent inheritance to work
-                # Continue to subfolder scanning without caching this folder
-            
+
             # If folder is not author but name parses → cache for inheritance (no FB2 files).
-            # Require valid person name so genre/category folders (e.g. "по авторам и циклам")
-            # don't pollute the cache and interfere with the walk-up author search.
             elif author_name and depth > 0 and self._contains_valid_name(author_name):
                 result = (author_name, "low")
                 self.author_folder_cache[folder] = result
-            
-            # Recursively scan subfolders
+
+            # Recursively scan subfolders (не авторская папка — ищем глубже)
             try:
                 for subdir in folder.iterdir():
                     if subdir.is_dir() and not subdir.name.startswith('.'):
                         scan_folder_hierarchy(subdir, depth + 1)
             except (PermissionError, OSError):
                 pass
-            
+
             return None
         
         # Start scanning
