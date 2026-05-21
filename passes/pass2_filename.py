@@ -1084,7 +1084,11 @@ class Pass2Filename:
         cleaned = re.sub(r'\s*\(пер\.\s*[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*\(перевод[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*\(пер\)\s*$', '', cleaned, flags=re.IGNORECASE)
-        
+
+        # Normalize guillemet quotes «...» → "..." so block scorer handles them correctly.
+        # «Z» scores 0.0 in block matcher; "Z" scores correctly.
+        cleaned = cleaned.replace('«', '"').replace('»', '"')
+
         return cleaned.strip()
     
     def _extract_author_from_filename(self, filename: str, file_title: Optional[str] = None,
