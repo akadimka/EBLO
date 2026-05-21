@@ -859,6 +859,62 @@ class RegenCSVService:
                 print(f"[POST-CHECK] Deduplicated words in {_dedup_count} series values")
                 self.logger.log(f"[OK] POST-CHECK: Deduplicated words in {_dedup_count} series")
 
+            # POST-CHECK Тип Е: folder_hierarchy series enrichment.
+            # If a folder_hierarchy record's series "B" is the SUFFIX of a same-author
+            # filename-based series "A. B" (≥2 records), enrich the folder record with "A. B".
+            # Example: folder series "Шоу должно продолжаться!" + filename series
+            # "90-е. Шоу должно продолжаться" → folder records get "90-е. Шоу должно продолжаться".
+            def _norm_series_suffix(s: str) -> str:
+                """Normalize for suffix matching: strip trailing punctuation & lowercase."""
+                return re.sub(r'[!?.]+$', '', s).strip().lower().replace('ё', 'е')
+
+            # Build: author → {norm_series_suffix: canonical_filename_series}
+            _fn_series_by_author: dict = {}
+            _fn_series_count: dict = {}
+            for record in self.records:
+                if not record.proposed_series or 'filename' not in record.series_source:
+                    continue
+                author = record.proposed_author or ''
+                norm = _norm_series_suffix(record.proposed_series)
+                _fn_series_count[(author, norm)] = _fn_series_count.get((author, norm), 0) + 1
+                _fn_series_by_author.setdefault(author, {})[norm] = record.proposed_series
+
+            _folder_enrich_count = 0
+            for record in self.records:
+                if not record.proposed_series:
+                    continue
+                if record.series_source not in ('folder_hierarchy', 'folder_meta_consensus'):
+                    continue
+                author = record.proposed_author or ''
+                fn_map = _fn_series_by_author.get(author, {})
+                if not fn_map:
+                    continue
+                folder_norm = _norm_series_suffix(record.proposed_series)
+                # Find a filename-series whose suffix (after ". ") matches the folder series
+                best = None
+                for fn_norm, fn_canonical in fn_map.items():
+                    # fn_norm must end with folder_norm
+                    if fn_norm == folder_norm:
+                        continue  # same name, no enrichment needed
+                    if not fn_norm.endswith(folder_norm):
+                        continue
+                    # The prefix before ". " must exist and be non-empty
+                    prefix_part = fn_norm[: len(fn_norm) - len(folder_norm)].rstrip('. ')
+                    if not prefix_part:
+                        continue
+                    # Require ≥2 filename records for this series to avoid false positives
+                    if _fn_series_count.get((author, fn_norm), 0) < 2:
+                        continue
+                    best = fn_canonical
+                    break
+                if best and best != record.proposed_series:
+                    record.proposed_series = best
+                    record.series_source = record.series_source + '+filename_enriched'
+                    _folder_enrich_count += 1
+            if _folder_enrich_count:
+                print(f"[POST-CHECK] Enriched {_folder_enrich_count} folder_hierarchy series with filename prefix")
+                self.logger.log(f"[OK] POST-CHECK: Enriched {_folder_enrich_count} folder_hierarchy series")
+
             # ===== Clear series for collections/compilations =====
             if progress_callback:
                 progress_callback(90, 100, "Финальная обработка")
