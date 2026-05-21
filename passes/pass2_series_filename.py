@@ -1329,17 +1329,20 @@ class Pass2SeriesFilename:
             # Второй путь: квалификатор-коллизия — разные слова перед номером тома.
             # Пример: «Траун. Доминация 2» vs «Траун. Приквелы 2» при sn=2.
             # Том/Книга-keyword в именах отсутствует, но слова-квалификаторы различны.
+            # ВАЖНО: folder_hierarchy-записи не участвуют — их серия из папки, не из имени файла.
             _qualifier_collision = False
             if not has_collision:
                 for sn_val, recs in sn_buckets.items():
-                    if len(recs) < 2:
+                    # Берём только записи с filename-источником серии
+                    fn_recs = [r for r in recs if 'filename' in r.series_source]
+                    if len(fn_recs) < 2:
                         continue
                     _qual_re = re.compile(
                         r'([А-ЯЁа-яёA-Za-z]+)\s+' + re.escape(sn_val) + r'(?=\b|\.|\s|$)',
                         re.UNICODE,
                     )
                     _quals: set = set()
-                    for r in recs:
+                    for r in fn_recs:
                         _qm = _qual_re.search(Path(r.file_path).stem)
                         if _qm:
                             _quals.add(_norm(_qm.group(1)))
@@ -1363,14 +1366,16 @@ class Pass2SeriesFilename:
                         if tm:
                             rec.series_number = tm.group(1)
             else:
-                # Квалификатор-коллизия: извлекаем слово перед номером из каждого файла
-                # и дописываем его к proposed_series (series_number не меняем).
+                # Квалификатор-коллизия: извлекаем слово перед номером только у filename-записей.
+                # folder_hierarchy-записи пропускаем — их серия уже корректна из папки.
                 for sn_val, recs in sn_buckets.items():
                     _qual_re = re.compile(
                         r'([А-ЯЁа-яёA-Za-z]+)\s+' + re.escape(sn_val) + r'(?=\b|\.|\s|$)',
                         re.UNICODE,
                     )
                     for rec in recs:
+                        if 'filename' not in rec.series_source:
+                            continue
                         _qm = _qual_re.search(Path(rec.file_path).stem)
                         if _qm:
                             rec.proposed_series = f'{rec.proposed_series.strip()} {_qm.group(1)}'
