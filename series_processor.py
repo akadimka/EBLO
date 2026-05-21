@@ -370,6 +370,14 @@ class SeriesProcessor:
 
             consensus_author = max(author_counts, key=author_counts.get)
 
+            # Требуем строгое большинство: консенсус-автор должен занимать ≥50% high-priority записей.
+            # Это блокирует сборники, где десятки авторов и нет доминирующего.
+            total_hp = len(high_priority) if high_priority else len(all_sourced)
+            if total_hp > 0:
+                consensus_share = author_counts[consensus_author] / total_hp
+                if consensus_share < 0.5:
+                    continue  # нет большинства — не применяем
+
             # Применить ко всем файлам с низкоприоритетным или пустым источником
             for record in group_records:
                 if record.author_source in _HIGH_PRIORITY:
@@ -378,6 +386,12 @@ class SeriesProcessor:
                     continue  # уже правильно
                 if record.proposed_author and record.proposed_author != 'Сборник' and not high_priority:
                     continue  # без filename-донора не перезаписываем metadata
+                # Защита: полное имя из metadata (≥2 слова) не перезаписываем консенсусом папки.
+                # В сборнике у каждой книги свой автор — FB2-метаданные авторитетны.
+                if (record.author_source == 'metadata'
+                        and record.proposed_author
+                        and len(record.proposed_author.split()) >= 2):
+                    continue
                 record.proposed_author = consensus_author
                 record.author_source = 'consensus'
                 consensus_count += 1
