@@ -824,7 +824,18 @@ class Pass2SeriesFilename:
 
                 # ✅ НОВОЕ: Удалить слова из blacklist вместо полного отвергания
                 clean = self._remove_blacklist_words(clean)
-        
+
+                # Guard: если _clean_series_name отстрипала служебное слово (напр. "трилогия"),
+                # а metadata_series подтверждает полное название — восстанавливаем из metadata.
+                # Условие: clean является префиксом metadata_series И кандидат начинался с metadata_series.
+                if clean and record.metadata_series:
+                    import unicodedata as _ud2
+                    def _nyo(s): return _ud2.normalize('NFC', s).lower().replace('ё', 'е')
+                    _meta = record.metadata_series.strip()
+                    if (_nyo(_meta).startswith(_nyo(clean) + ' ')
+                            and _nyo(series_candidate).startswith(_nyo(_meta))):
+                        clean = _meta
+
                 if clean:  # Проверяем что что-то осталось после очистки
                     author_for_validation = record.proposed_author or None
 

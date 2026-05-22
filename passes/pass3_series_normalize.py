@@ -60,12 +60,23 @@ class Pass3SeriesNormalize:
         - Привести к стандартному capitalizations
         - Применить преобразования из config.json
         """
+        def _nfc_lower_yo(s: str) -> str:
+            import unicodedata
+            return unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
+
         for record in records:
             if not record.proposed_series:
                 continue
-            
-            normalized = self._normalize_series_name(record.proposed_series)
+
+            original = record.proposed_series
+            normalized = self._normalize_series_name(original)
             normalized = self._sanitize_for_folder(normalized)
+
+            # Если нормализация укоротила серию (напр. убрала "трилогия"),
+            # но metadata_series подтверждает полное название — оставляем оригинал.
+            if normalized != original and record.metadata_series:
+                if _nfc_lower_yo(record.metadata_series.strip()) == _nfc_lower_yo(original):
+                    normalized = original
 
             # FOLDER-PREFIX GUARD: если серия вида «Коллекция. Подсерия»,
             # а «Коллекция» совпадает с именем одной из родительских папок —
