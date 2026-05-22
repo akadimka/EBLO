@@ -275,10 +275,16 @@ class DuplicateFinderWindow:
         self._update_delete_btn()
 
     def _check_all(self):
-        for iid in self.dup_tree.get_children():
+        children = self.dup_tree.get_children()
+        # Toggle: если хоть одна не отмечена — отмечаем все; иначе снимаем все
+        any_unchecked = any(
+            self.dup_tree.item(iid, 'values')[0] != '✓' for iid in children)
+        mark = '✓' if any_unchecked else ''
+        tag  = 'checked' if any_unchecked else 'unchecked'
+        for iid in children:
             vals = list(self.dup_tree.item(iid, 'values'))
-            vals[0] = '✓'
-            self.dup_tree.item(iid, values=vals, tags=('checked',))
+            vals[0] = mark
+            self.dup_tree.item(iid, values=vals, tags=(tag,))
         self._update_delete_btn()
 
     def _update_delete_btn(self):
@@ -501,6 +507,7 @@ class DuplicateFinderWindow:
         for iid in self.dup_tree.get_children():
             self.dup_tree.delete(iid)
 
+        first_load = not checked  # первая загрузка — отмечаем всё
         dup_size_total = 0
         for dup_path in sorted(dups):
             info = dups[dup_path]
@@ -510,10 +517,10 @@ class DuplicateFinderWindow:
                       else f'{sz / 1_048_576:.1f} МБ')
             reason = '+'.join(sorted(info['reasons']))
             path_str = str(dup_path)
-            is_checked = path_str in checked or path_str not in checked  # по умолчанию все отмечены
-            tag = 'checked'
+            is_checked = first_load or path_str in checked
+            tag = 'checked' if is_checked else 'unchecked'
             self.dup_tree.insert('', tk.END,
-                values=('✓' if is_checked else '☐', path_str, reason, info['series'], sz_str),
+                values=('✓' if is_checked else '', path_str, reason, info['series'], sz_str),
                 tags=(tag,))
 
         total = getattr(self, '_total_files', 0)
