@@ -324,11 +324,13 @@ class Pass2SeriesFilename:
         # Получить паттерны из конфига
         self.file_patterns = self.settings.get_list('author_series_patterns_in_files') or []
         self.metadata_patterns = self.settings.get_list('series_patterns_in_metadata') or []
-        
+        self.folder_patterns_raw = self.settings.get_author_series_patterns_in_folders() or []
+
         # Скомпилировать паттерны в regex (один раз при инициализации)
         # Включает как file_patterns, так и metadata_patterns
         self.compiled_file_patterns = compile_patterns(self.file_patterns)
         self.compiled_metadata_patterns = compile_patterns(self.metadata_patterns)
+        self.compiled_folder_patterns = compile_patterns(self.folder_patterns_raw)
         
         # Флаг: последний вызов _extract_series_from_brackets вернул иерархическую серию
         # (MainSeries N из "MainSeries N. SubSeries M-K") — не убирать trailing number
@@ -394,6 +396,52 @@ class Pass2SeriesFilename:
         # Это необходимо чтобы основной цикл мог корректно сопоставить папку автора
         # даже для файлов у которых proposed_author был "Соавторство"/"Сборник".
         self._propagate_ancestor_folder_authors(records)
+
+        # PRE-PASS: Применяем паттерны папок (author_series_patterns_in_folders).
+        # Исправляет случаи "Серия (Автор)" где папка классифицирована как авторская,
+        # но на самом деле является серией с автором в скобках.
+        # Пример: "Князь Игорь (Аксеничев Олег)" → author="Аксеничев Олег", series="Князь Игорь"
+        if self.compiled_folder_patterns:
+            _folder_pattern_count = 0
+            for record in records:
+                if record.author_source != 'folder_dataset':
+                    continue
+                path_parts = Path(record.file_path).parts
+                for part in path_parts[:-1]:  # все папки, не файл
+                    for _p_str, _p_re, _p_groups in self.compiled_folder_patterns:
+                        if 'series' not in _p_groups or 'author' not in _p_groups:
+                            continue
+                        m = _p_re.match(part)
+                        if not m:
+                            continue
+                        extracted_series = m.group('series').strip()
+                        extracted_author = m.group('author').strip()
+                        if not extracted_series or not extracted_author:
+                            continue
+                        # Проверяем что extracted_author совпадает с metadata_authors
+                        # или просто содержит слово длиннее 3 букв (похоже на фамилию)
+                        if len(extracted_author.replace(' ', '')) < 3:
+                            continue
+                        # Проверяем что текущий proposed_author совпадает с extracted_series
+                        # (т.е. папка действительно была взята как автор вместо серии)
+                        cur_author_norm = record.proposed_author.strip().lower().replace('ё', 'е')
+                        ext_series_norm = extracted_series.lower().replace('ё', 'е')
+                        if cur_author_norm != ext_series_norm:
+                            continue
+                        # Всё совпало — исправляем
+                        from name_normalizer import AuthorName as _AN
+                        _an = _AN(extracted_author)
+                        canonical_author = _an.normalized if (_an.is_valid and _an.normalized) else extracted_author
+                        record.proposed_author = canonical_author
+                        record.author_source = 'folder_dataset+series_pattern'
+                        if not record.proposed_series:
+                            record.proposed_series = extracted_series
+                            record.series_source = 'folder_hierarchy'
+                        _folder_pattern_count += 1
+                        break  # один паттерн на папку достаточно
+            if _folder_pattern_count:
+                self.logger.log(f"[PASS 2] Applied folder patterns to {_folder_pattern_count} records")
+                print(f"[PASS 2] Applied folder Series(Author) patterns to {_folder_pattern_count} records")
 
         # Кэш Path.parts: один и тот же file_path встречается в нескольких проходах
         _parts_cache: dict = {}
