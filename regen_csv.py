@@ -769,6 +769,27 @@ class RegenCSVService:
                 print(f"[POST-CHECK] Cleared {_series_eq_author_cleared} records where series == author")
                 self.logger.log(f"[OK] POST-CHECK: Cleared {_series_eq_author_cleared} series==author conflicts")
 
+            # ===== Post-check: metadata rescue — restore metadata_series for records still without series =====
+            # Handles cases where series was cleared (e.g. series==author post-check) but metadata has a real series.
+            # E.g. proposed_series was folder name "А_З_К, Берг Александр" → cleared → metadata="Антиблицкриг" rescued.
+            _meta_rescue_count = 0
+            for record in self.records:
+                if record.proposed_series or not record.metadata_series:
+                    continue
+                meta = record.metadata_series.strip()
+                if not meta:
+                    continue
+                author_norm = _norm_for_cmp(record.proposed_author or '')
+                meta_norm = _norm_for_cmp(meta)
+                if author_norm and meta_norm == author_norm:
+                    continue
+                record.proposed_series = meta
+                record.series_source = 'metadata'
+                _meta_rescue_count += 1
+            if _meta_rescue_count:
+                print(f"[POST-CHECK] Rescued {_meta_rescue_count} series from metadata after series==author cleanup")
+                self.logger.log(f"[OK] POST-CHECK: Rescued {_meta_rescue_count} series from metadata")
+
             # ===== Post-check: strip leading "N. " number prefix from series (filename artifact) =====
             # E.g. "3. Шмыг" → "Шмыг", "4. Городская Стража" → "Городская Стража"
             _digit_prefix_re = re.compile(r'^\d+\.\s+', re.UNICODE)
