@@ -428,13 +428,17 @@ class Pass2SeriesFilename:
                         ext_series_norm = extracted_series.lower().replace('ё', 'е')
                         if cur_author_norm != ext_series_norm:
                             continue
-                        # Всё совпало — исправляем
+                        # Всё совпало — исправляем автора
                         from name_normalizer import AuthorName as _AN
                         _an = _AN(extracted_author)
                         canonical_author = _an.normalized if (_an.is_valid and _an.normalized) else extracted_author
                         record.proposed_author = canonical_author
                         record.author_source = 'folder_dataset+series_pattern'
-                        if not record.proposed_series:
+                        # Серию из паттерна ставим только если файл в ПОДПАПКЕ этой папки,
+                        # а не непосредственно в ней (иначе "Орлов Алекс" попадает в серию).
+                        part_idx = list(path_parts[:-1]).index(part)
+                        file_is_direct_child = (part_idx == len(path_parts) - 2)
+                        if not record.proposed_series and not file_is_direct_child:
                             record.proposed_series = extracted_series
                             record.series_source = 'folder_hierarchy'
                         _folder_pattern_count += 1
@@ -599,7 +603,8 @@ class Pass2SeriesFilename:
                         _part_no_parens = re.sub(r'\s*\([^)]*\)\s*$', '', part.strip()).strip()
                         _part_words = re.split(r'[\s.\-]+', _part_no_parens) if _part_no_parens else re.split(r'[\s.\-]+', part.strip())
                         _part_last_word = _part_words[-1].lower().replace('ё', 'е') if _part_words else ''
-                        _author_words = set(w.lower().replace('ё', 'е') for w in author_name.split() if len(w) > 2)
+                        _author_name_clean = re.sub(r'\([^)]*\)', '', author_name).strip()
+                        _author_words = set(w.lower().replace('ё', 'е') for w in _author_name_clean.split() if len(w) > 2)
                         # Check if ANY word in the folder (>2 chars) matches an author word.
                         # This covers "Таннер А" where the FIRST word "Таннер" is the surname,
                         # not just the last word (the old check only caught endings like "Куанг").
@@ -611,6 +616,22 @@ class Pass2SeriesFilename:
                             )
                             for fw in (w.lower().replace('ё', 'е') for w in _part_words if len(w) > 2)
                         )
+                        # Также проверяем скобочный суффикс папки: если автор совпадает
+                        # с тем что в скобках — это папка "Серия (Автор)", не серия.
+                        # Пример: папка "Орлов Алекс (Дарищев Вадим)", автор "Дарищев Вадим"
+                        # → _part_words = ["Орлов", "Алекс"], author_words не совпадут,
+                        # но в скобках "Дарищев Вадим" == author → тоже авторская папка.
+                        if not _folder_contains_author:
+                            _parens_in_part = re.search(r'\(([^)]+)\)', part)
+                            if _parens_in_part:
+                                _parens_words = set(
+                                    w.lower().replace('ё', 'е')
+                                    for w in _parens_in_part.group(1).split()
+                                    if len(w) > 2
+                                )
+                                if _parens_words & _author_words:
+                                    _folder_contains_author = True
+
                         if _folder_contains_author:
                             pass  # Не устанавливаем серию из папки → идём дальше к filename extraction
                         else:

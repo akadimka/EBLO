@@ -723,6 +723,10 @@ class Pass4Consensus:
             if int(num) >= 1900:  # год — не трогаем ("Метро 2035" и т.п.)
                 continue
             sn = (record.series_number or '').strip()
+            # Если series_number уже задан и отличается от num — число часть названия серии,
+            # а не номер тома. Пример: "База 24" с series_number=1 → не трогаем.
+            if sn and sn != num:
+                continue
             record.proposed_series = m.group(1).strip()
             if not sn:
                 record.series_number = num
