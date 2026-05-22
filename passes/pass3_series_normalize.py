@@ -143,7 +143,7 @@ class Pass3SeriesNormalize:
         _AUTH_WORD = r'[А-ЯЁA-Z][А-Яа-яёЁA-Za-z]+'
         _AUTH_SEP  = r'(?:\s*[-–,]\s*' + _AUTH_WORD + r')*'
         _auth_disambig_match = re.search(
-            r'\s*\(' + _AUTH_WORD + _AUTH_SEP + r'\)\s*$',
+            r'\s*\(' + _AUTH_WORD + _AUTH_SEP + r'\s*\)\s*$',
             series
         )
         if _auth_disambig_match:
