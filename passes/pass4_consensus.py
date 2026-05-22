@@ -940,6 +940,15 @@ class Pass4Consensus:
             # Не берём если совпадает с именем автора
             if record.proposed_author and _nfc_lower_yo(meta) == _nfc_lower_yo(record.proposed_author):
                 continue
+            # Фильтруем издательские импринты через blacklist
+            _blacklist_words = self.settings.get_list('filename_blacklist') if self.settings else []
+            _meta_l = meta.lower()
+            _bl_hit = any(
+                re.search(r'(?<![а-яёa-z])' + re.escape(bl.lower().strip()) + r'(?![а-яёa-z])', _meta_l)
+                for bl in _blacklist_words if bl.strip()
+            )
+            if _bl_hit:
+                continue
             record.proposed_series = meta
             record.series_source = 'metadata'
             meta_rescue_count += 1

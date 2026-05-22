@@ -783,6 +783,15 @@ class RegenCSVService:
                 meta_norm = _norm_for_cmp(meta)
                 if author_norm and meta_norm == author_norm:
                     continue
+                # Фильтруем издательские импринты через blacklist (тот же что в pass2)
+                _meta_l = meta.lower()
+                _bl_hit = False
+                for _bl in self._compiled_blacklist:
+                    if _bl.search(_meta_l):
+                        _bl_hit = True
+                        break
+                if _bl_hit:
+                    continue
                 record.proposed_series = meta
                 record.series_source = 'metadata'
                 _meta_rescue_count += 1
