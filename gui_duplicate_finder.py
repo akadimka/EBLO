@@ -98,6 +98,8 @@ class DuplicateFinderWindow:
         self.settings_manager = settings_manager
         self.search_path = tk.StringVar()
         self._duplicates: list = []
+        self._all_dups: dict = {}
+        self._total_files: int = 0
         self._searching = False
         self._on_close_cb = on_close
 
@@ -162,7 +164,7 @@ class DuplicateFinderWindow:
         lf.rowconfigure(0, weight=1)
         lf.columnconfigure(0, weight=1)
 
-        self.src_list = tk.Listbox(lf, selectmode=tk.EXTENDED,
+        self.src_list = tk.Listbox(lf, selectmode=tk.SINGLE,
                                    bg='white', font=('', 9), activestyle='none')
         vsb_l = ttk.Scrollbar(lf, command=self.src_list.yview)
         hsb_l = ttk.Scrollbar(lf, orient=tk.HORIZONTAL, command=self.src_list.xview)
@@ -170,6 +172,7 @@ class DuplicateFinderWindow:
         self.src_list.grid(row=0, column=0, sticky='nsew')
         vsb_l.grid(row=0, column=1, sticky='ns')
         hsb_l.grid(row=1, column=0, sticky='ew')
+        self.src_list.bind('<<ListboxSelect>>', self._on_src_select)
 
         # Правая панель — дубликаты (Treeview с чекбоксами)
         right_pane = ttk.Frame(paned)
@@ -473,32 +476,75 @@ class DuplicateFinderWindow:
         self._searching = False
         self.btn_search.configure(state=tk.NORMAL)
         self.progress['value'] = 100
+        self._all_dups = all_dups
+        self._total_files = total
 
         sources = sorted({str(v['source']) for v in all_dups.values() if v['source']})
         for s in sources:
             self.src_list.insert(tk.END, s)
 
+        self._populate_dup_tree(all_dups)
+
+        if all_dups:
+            self.btn_check_all.configure(state=tk.NORMAL)
+            self._update_delete_btn()
+
+    def _populate_dup_tree(self, dups: dict):
+        """Заполнить dup_tree записями из dups, сохраняя состояние чекбоксов."""
+        # Сохранить отмеченные пути
+        checked = set()
+        for iid in self.dup_tree.get_children():
+            vals = self.dup_tree.item(iid, 'values')
+            if vals and vals[0] == '✓':
+                checked.add(vals[1])
+
+        for iid in self.dup_tree.get_children():
+            self.dup_tree.delete(iid)
+
         dup_size_total = 0
-        for dup_path in sorted(all_dups):
-            info = all_dups[dup_path]
+        for dup_path in sorted(dups):
+            info = dups[dup_path]
             sz = dup_path.stat().st_size if dup_path.exists() else 0
             dup_size_total += sz
             sz_str = (f'{sz // 1024} КБ' if sz < 1_048_576
                       else f'{sz / 1_048_576:.1f} МБ')
             reason = '+'.join(sorted(info['reasons']))
+            path_str = str(dup_path)
+            is_checked = path_str in checked or path_str not in checked  # по умолчанию все отмечены
+            tag = 'checked'
             self.dup_tree.insert('', tk.END,
-                values=('✓', str(dup_path), reason, info['series'], sz_str),
-                tags=('checked',))
+                values=('✓' if is_checked else '☐', path_str, reason, info['series'], sz_str),
+                tags=(tag,))
 
-        if all_dups:
+        total = getattr(self, '_total_files', 0)
+        all_count = len(getattr(self, '_all_dups', {}))
+        shown = len(dups)
+        if all_count:
             mb = dup_size_total / 1_048_576
-            self.status_var.set(
-                f'Найдено {len(all_dups)} дубликат(а/ов) из {total} файлов'
-                f' — можно освободить {mb:.1f} МБ')
-            self.btn_check_all.configure(state=tk.NORMAL)
-            self._update_delete_btn()
+            if shown < all_count:
+                self.status_var.set(
+                    f'Показано {shown} из {all_count} дубликат(а/ов)'
+                    f' — {mb:.1f} МБ')
+            else:
+                self.status_var.set(
+                    f'Найдено {all_count} дубликат(а/ов) из {total} файлов'
+                    f' — можно освободить {mb:.1f} МБ')
         else:
             self.status_var.set(f'Дубликаты не найдены ({total} файлов проверено)')
+        self._update_delete_btn()
+
+    def _on_src_select(self, _event=None):
+        """Фильтровать дубликаты по выбранному источнику."""
+        sel = self.src_list.curselection()
+        if not sel:
+            self._populate_dup_tree(self._all_dups)
+            return
+        selected_src = self.src_list.get(sel[0])
+        filtered = {
+            p: info for p, info in self._all_dups.items()
+            if str(info.get('source', '')) == selected_src
+        }
+        self._populate_dup_tree(filtered)
 
     def _on_error(self, msg: str):
         self._searching = False
