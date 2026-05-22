@@ -376,10 +376,11 @@ class Pass4Consensus:
                     if esc is None:
                         pass  # обычный случай — применяем
                     elif esc == '':
-                        # Пустая строка: разрешаем только если имя файла содержит серию
+                        # Пустая строка: разрешаем если серия есть в имени файла или в title
                         stem = _nfc_lower_yo(Path(record.file_path).stem)
+                        title = _nfc_lower_yo(record.file_title or '')
                         cs_norm = _nfc_lower_yo(consensus_series)
-                        if cs_norm not in stem:
+                        if cs_norm not in stem and cs_norm not in title:
                             continue
                     else:
                         continue  # уже был другой кандидат
