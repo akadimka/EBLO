@@ -922,6 +922,27 @@ class Pass4Consensus:
         )
         print(f"[PASS 4] Cleared {multiauthor_series_cleared} publisher-imprint series from multi-author folders")
 
+        # METADATA RESCUE: после очистки издательских серий восстанавливаем metadata_series
+        # если запись осталась без серии, а метаданные содержат корректное название.
+        # Типичный случай: "Fanzon. Век магии..." → folder_dataset-серия очищена,
+        # но metadata_series = "Изгой" (авторская серия) — используем её.
+        meta_rescue_count = 0
+        for record in records:
+            if record.proposed_series or not record.metadata_series:
+                continue
+            meta = record.metadata_series.strip()
+            if not meta or meta == record.proposed_author:
+                continue
+            # Не берём если совпадает с именем автора
+            if record.proposed_author and _nfc_lower_yo(meta) == _nfc_lower_yo(record.proposed_author):
+                continue
+            record.proposed_series = meta
+            record.series_source = 'metadata'
+            meta_rescue_count += 1
+        if meta_rescue_count:
+            self.logger.log(f"[PASS 4] Rescued {meta_rescue_count} series from metadata after publisher-imprint cleanup")
+            print(f"[PASS 4] Rescued {meta_rescue_count} series from metadata after publisher-imprint cleanup")
+
         # FILENAME SEQUENCE + METADATA DUAL CONFIRMATION (финальный шаг)
         #
         # Исправляем записи с низкодоверительной серией (consensus / author-consensus),
