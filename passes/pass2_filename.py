@@ -348,8 +348,10 @@ class Pass2Filename:
                                 rest = [w for i, w in enumerate(fb2_author.split()) if i != match_idx]
                                 reordered = fb2_author.split()[match_idx] + ' ' + ' '.join(rest)
                                 self._add_to_author_cache(extracted_author, reordered)
+                                self._last_meta_expanded = True
                                 return reordered
                             self._add_to_author_cache(extracted_author, fb2_author)
+                            self._last_meta_expanded = True
                             return fb2_author  # Use fuller name from FB2
                     elif (len(extracted_words_list) == len(fb2_words_list) and
                           extracted_words_list[0] == fb2_words_list[0]):
@@ -741,6 +743,7 @@ class Pass2Filename:
             filename = record.file_path.replace('\\', '/').split('/')[-1]  # Get basename only
             filename_without_ext = filename.rsplit('.', 1)[0]  # Remove extension
             
+            self._last_meta_expanded = False
             author = self._extract_author_from_filename(
                 filename_without_ext,
                 file_title=getattr(record, 'file_title', '') or '',
@@ -754,8 +757,8 @@ class Pass2Filename:
                 if record.author_source != "folder_dataset":
                     # Check if extracted author is incomplete (single name, initials, etc.)
                     expanded_author = author
-                    use_hybrid_source = False
-                    
+                    use_hybrid_source = self._last_meta_expanded
+
                     # STEP 1: Expand "Initial.Surname" tokens (e.g., "Г.Диксон" → "Гордон Диксон")
                     if record.metadata_authors:
                         new_author, was_init_expanded = self._expand_initial_surnames(author, record.metadata_authors)
@@ -833,7 +836,7 @@ class Pass2Filename:
                     # No folder_dataset - use filename extraction
                     # This OVERRIDES metadata (FILE -> METADATA priority)
                     record.proposed_author = expanded_author
-                    record.author_source = "filename_meta_confirmed" if use_hybrid_source else "filename"
+                    record.author_source = "filename+meta_expanded" if use_hybrid_source else "filename"
                     record.needs_filename_fallback = False  # Clear the fallback flag since we found something
                     processed_count += 1
 

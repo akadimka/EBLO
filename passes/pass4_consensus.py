@@ -491,7 +491,7 @@ class Pass4Consensus:
                 is_subset = is_author_subset(record.proposed_author, consensus_author)
                 
                 # For filename source
-                if record.author_source in ("filename", "filename_meta_confirmed"):
+                if record.author_source in ("filename", "filename+meta_expanded"):
                     if is_subset:
                         # Current author is incomplete version of consensus → DEFINITELY apply
                         record.proposed_author = consensus_author

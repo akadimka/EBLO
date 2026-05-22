@@ -347,7 +347,7 @@ class SeriesProcessor:
 
         for folder, group_records in groups.items():
             # Источники с высоким приоритетом (filename важнее metadata)
-            _HIGH_PRIORITY = {'folder_dataset', 'folder_hierarchy', 'filename', 'filename_meta_confirmed'}
+            _HIGH_PRIORITY = {'folder_dataset', 'folder_hierarchy', 'filename', 'filename+meta_expanded'}
             _LOW_PRIORITY  = {'metadata', 'consensus', ''}
 
             high_priority = [r for r in group_records if r.author_source in _HIGH_PRIORITY]

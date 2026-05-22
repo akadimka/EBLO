@@ -70,7 +70,7 @@ class Pass3Normalize:
                 continue
 
             original = record.proposed_author
-            
+
             # Check for multi-author cases with different separators
             # '; ' comes from folder_author_parser (temporary separator)
             # ', ' comes from filename or metadata
@@ -166,8 +166,8 @@ class Pass3Normalize:
                     metadata_for_normalization = record.metadata_authors
                 else:
                     metadata_for_normalization = ""
-            elif record.author_source in ("filename", "filename_meta_confirmed"):
-                # For filename / filename_meta_confirmed: use metadata strategy depends on structure
+            elif record.author_source in ("filename", "filename+meta_expanded"):
+                # For filename / filename+meta_expanded: use metadata strategy depends on structure
                 has_separator = ', ' in record.proposed_author or '; ' in record.proposed_author
                 
                 if has_separator:
@@ -208,7 +208,7 @@ class Pass3Normalize:
                 # ФИ order (Фамилия first). If normalize_format reordered the words (first word
                 # changed), the heuristics fired incorrectly — keep original ФИ order instead.
                 # Examples: "Линдквист Йон Айвиде", "Феррандис Хуан Франсиско"
-                if (record.author_source in ("filename", "filename_meta_confirmed")
+                if (record.author_source in ("filename", "filename+meta_expanded")
                         and normalized_candidate
                         and len(record.proposed_author.split()) >= 2
                         and metadata_for_normalization == ""):
@@ -236,8 +236,15 @@ class Pass3Normalize:
                     normalized = normalized_candidate
             
             if normalized and normalized != record.proposed_author:
+                orig_was_single = ' ' not in record.proposed_author.strip()
                 record.proposed_author = normalized
                 normalized_count += 1
+                # If a single-word filename surname was expanded using metadata → mark provenance
+                if (orig_was_single
+                        and ' ' in normalized
+                        and record.author_source == 'filename'
+                        and metadata_for_normalization):
+                    record.author_source = 'filename+meta_expanded'
 
         # Капитализация: каждое слово в proposed_author начинается с заглавной буквы.
         # Исключения: "Соавторство", "Сборник" — уже корректны.
