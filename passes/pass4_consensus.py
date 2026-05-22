@@ -104,7 +104,7 @@ class Pass4Consensus:
             records: List of BookRecord objects to process
         """
         print("[PASS 4] Applying consensus...")
-        
+
         # CLEANUP: Remove false "series" that are actually just titles/subtitles
         # These are single-appearance series with no numbering/service words markers
         # Example: "Осень 93-го" or "Баржа Т-36" (no other files in author's catalog with these series)

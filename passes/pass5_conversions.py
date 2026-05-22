@@ -48,7 +48,7 @@ class Pass5Conversions:
         for record in records:
             if not record.proposed_author or record.proposed_author == "Сборник":
                 continue
-            
+
             original = record.proposed_author
             
             # Check for multi-author case with both separators

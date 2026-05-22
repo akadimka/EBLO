@@ -344,16 +344,24 @@ class AuthorNormalizer:
         # Первый попыт: найти в авторах где фамилия - первое слово, имя начинается с инициала
         if surname_lower in authors_map:
             full_names = authors_map[surname_lower]
+            # Two passes: prefer non-abbreviated (no dots after surname) over abbreviated forms.
+            # This ensures "Умиралиев Арман Аскаржанович" wins over "Умиралиев А. А."
+            best_abbr = None
             for full_name in full_names:
                 parts = full_name.split()
                 # full_name = "Харников Александр" (Фамилия Имя)
                 if len(parts) >= 2:
                     # Проверяем первая часть - фамилия
                     if parts[0].lower() == surname_lower and parts[1][0].upper() == initial:
-                        # If map entry is the same as input minus trailing period, preserve input
-                        if full_name.rstrip('.') == author.rstrip('.') and author.endswith('.'):
-                            return author
-                        return full_name
+                        if '.' in ' '.join(parts[1:]):
+                            # Still abbreviated — save as fallback
+                            if best_abbr is None:
+                                best_abbr = full_name
+                            continue
+                        return full_name  # Non-abbreviated form wins immediately
+            # Only abbreviated forms found — use the first one as fallback (if it's not same as input)
+            if best_abbr and best_abbr != author:
+                return best_abbr
         
         # Второй попыт: найти в авторах где имя - первое слово (обратный порядок)
         # Может быть "Александр Харников"

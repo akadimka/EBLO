@@ -220,14 +220,26 @@ class Pass2Filename:
                 for author in fb2_authors:
                     if not author or ',' in author:
                         continue
+                    # Normalize to "Surname First" format before caching.
+                    # This prevents "First Middle Last" metadata (e.g. "Кристофер Джон Сэнсом")
+                    # from being stored under the first-name key ("кристофер"), which would
+                    # incorrectly expand unrelated single-word authors (e.g. "Кристофер" = Пол Кристофер).
+                    from name_normalizer import AuthorName as _AN2
+                    _an = _AN2(author)
+                    normalized_author = _an.normalized if (_an.is_valid and _an.normalized) else author
+                    # Only use normalized form if it successfully reordered to "Surname First"
+                    # (i.e. normalization produced a different result). Keep original for cache
+                    # key coverage but use normalized as the stored value.
+                    canonical = normalized_author if normalized_author != author else author
+
                     author_lower = author.lower().strip()
-                    self.author_cache[author_lower] = author
-                    author_words = author.split()
+                    self.author_cache[author_lower] = canonical
+                    author_words = canonical.split()
                     for idx, part in enumerate(author_words):
                         if len(part) > 2:
                             part_lower = part.lower()
                             if idx == 0:
-                                candidate = author
+                                candidate = canonical
                             else:
                                 rest = [w for i, w in enumerate(author_words) if i != idx]
                                 candidate = part + ' ' + ' '.join(rest)
