@@ -18,6 +18,32 @@ except ImportError:
     from .fb2_utils import fb2_rglob, read_fb2_bytes
 
 
+_COLLECTION_WORDS = re.compile(
+    r'\b(сборник|антология|anthology|collection|omnibus|сборн)\b',
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _priority_score(path: Path, rec=None) -> float:
+    """Чем выше score — тем больше этот файл заслуживает быть оригиналом (не дублём).
+
+    Критерии (убывающий приоритет):
+      +2  — есть proposed_series (файл в организованной серии)
+      +1  — ни одна часть пути не содержит слова-сборника
+      +0.1 × глубина — более глубокая иерархия предпочтительнее
+    """
+    score = 0.0
+    if rec is not None:
+        series = getattr(rec, 'proposed_series', '') or ''
+        if series.strip():
+            score += 2.0
+    parts = path.parts
+    if not any(_COLLECTION_WORDS.search(p) for p in parts):
+        score += 1.0
+    score += len(parts) * 0.1
+    return score
+
+
 def _file_hash(path: Path, chunk_size: int = 65536) -> str:
     """SHA-256 первых 256 КБ FB2-содержимого (прозрачно распаковывает fb2.zip)."""
     h = hashlib.sha256()
@@ -350,25 +376,42 @@ class DuplicateFinderWindow:
         """Объединить хэш-дубликаты и метадата-дубликаты.
 
         Возвращает {dup_path: {'source': Path, 'reasons': set, 'series': str}}.
+        Оригинал выбирается по _priority_score (серия > не-сборник > глубина > алфавит).
         """
         work_dir = Path(folder)
         result: dict = {}  # dup_path → {source, reasons, series}
+
+        # Индекс record по абсолютному пути для быстрого доступа при хэш-дублях
+        rec_by_path: dict = {}
+        for rec in records:
+            fp = getattr(rec, 'file_path', '') or ''
+            abs_p = self._resolve_path(work_dir, fp)
+            if abs_p:
+                rec_by_path[abs_p] = rec
+
+        def _pick_source(paths_with_recs):
+            """Вернуть (src, dups) отсортированные по приоритету (лучший = оригинал)."""
+            scored = sorted(
+                paths_with_recs,
+                key=lambda pr: (-_priority_score(pr[0], pr[1]), str(pr[0])),
+            )
+            src = scored[0][0]
+            dups = [p for p, _ in scored[1:]]
+            return src, dups
 
         # ── Хэш-дубликаты ──────────────────────────────────────────────
         for paths in hash_map.values():
             if len(paths) < 2:
                 continue
-            paths_sorted = sorted(paths)
-            src = paths_sorted[0]
-            for dup in paths_sorted[1:]:
+            paths_with_recs = [(p, rec_by_path.get(p)) for p in paths]
+            src, dups = _pick_source(paths_with_recs)
+            for dup in dups:
                 if dup not in result:
                     result[dup] = {'source': src, 'reasons': {'Хэш'}, 'series': ''}
                 else:
                     result[dup]['reasons'].add('Хэш')
 
         # ── Метаданные-дубликаты ───────────────────────────────────────
-        # Группируем по нормализованному title, затем попарно проверяем
-        # пересечение авторов (хотя бы один общий).
         title_map: dict = {}  # title_norm → [rec]
         for rec in records:
             title = _norm_str(getattr(rec, 'file_title', '') or '')
@@ -378,8 +421,8 @@ class DuplicateFinderWindow:
         for title, recs in title_map.items():
             if len(recs) < 2:
                 continue
-            recs_sorted = sorted(recs, key=lambda r: str(getattr(r, 'file_path', '')))
             # Попарная проверка: пересечение авторов → дубликат
+            recs_sorted = sorted(recs, key=lambda r: str(getattr(r, 'file_path', '')))
             for i, rec_a in enumerate(recs_sorted):
                 authors_a = _rec_authors(rec_a)
                 if not authors_a:
@@ -388,13 +431,22 @@ class DuplicateFinderWindow:
                     authors_b = _rec_authors(rec_b)
                     if not authors_b or not (authors_a & authors_b):
                         continue
-                    # Дубликат: src = первый по пути, dup = второй
-                    src_path = self._resolve_path(work_dir, getattr(rec_a, 'file_path', ''))
-                    dup_path = self._resolve_path(work_dir, getattr(rec_b, 'file_path', ''))
-                    if dup_path is None or not dup_path.exists():
+                    path_a = self._resolve_path(work_dir, getattr(rec_a, 'file_path', ''))
+                    path_b = self._resolve_path(work_dir, getattr(rec_b, 'file_path', ''))
+                    if path_b is None or not path_b.exists():
                         continue
-                    series = (getattr(rec_b, 'proposed_series', '') or
-                              getattr(rec_a, 'proposed_series', '') or '')
+                    # Выбираем оригинал по приоритету
+                    score_a = _priority_score(path_a, rec_a) if path_a else 0
+                    score_b = _priority_score(path_b, rec_b)
+                    if score_a >= score_b:
+                        src_path, dup_path, dup_rec = path_a, path_b, rec_b
+                    else:
+                        src_path, dup_path, dup_rec = path_b, path_a, rec_a
+                        if src_path is None or not src_path.exists():
+                            continue
+                    series = (getattr(dup_rec, 'proposed_series', '') or
+                              getattr(rec_a, 'proposed_series', '') or
+                              getattr(rec_b, 'proposed_series', '') or '')
                     if dup_path not in result:
                         result[dup_path] = {
                             'source': src_path,
