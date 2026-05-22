@@ -138,12 +138,18 @@ class Pass3SeriesNormalize:
         # б) слова через " - " (дефис):  "Серия (Замполит - Башибузук)" → "Серия"
         # в) слова через ", " (запятая): "Серия (Ларин, Барчук)"        → "Серия"
         # Признак: все слова начинаются с заглавной буквы, нет цифр.
+        # Исключение: если перед скобками только цифра — это порядковое название
+        # ("1 (Первый)" — скобки несут смысл, не убираем).
         _AUTH_WORD = r'[А-ЯЁA-Z][А-Яа-яёЁA-Za-z]+'
         _AUTH_SEP  = r'(?:\s*[-–,]\s*' + _AUTH_WORD + r')*'
-        series = re.sub(
+        _auth_disambig_match = re.search(
             r'\s*\(' + _AUTH_WORD + _AUTH_SEP + r'\)\s*$',
-            '', series
-        ).strip()
+            series
+        )
+        if _auth_disambig_match:
+            before_parens = series[:_auth_disambig_match.start()].strip()
+            if not re.match(r'^\d+$', before_parens):
+                series = before_parens
 
         # Шаг 1.9: Убрать хвостовой идентификатор-номер тома
         # "Отряд «Сигма» 07+" → "Отряд «Сигма»"

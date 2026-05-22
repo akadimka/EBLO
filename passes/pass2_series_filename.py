@@ -334,15 +334,18 @@ class Pass2SeriesFilename:
         # (MainSeries N из "MainSeries N. SubSeries M-K") — не убирать trailing number
         self._last_was_hierarchical = False
     
-    def _extract_series_from_folder_name(self, folder_name: str) -> str:
+    def _extract_series_from_folder_name(self, folder_name: str, author_hint: str = '') -> str:
         """
         Извлечь название серии из имени папки.
         Убирает ведущие номера ("1. ", "2) " и т.д.)
-        и всё перед скобками ("1941 (Иван Байбаков)" → "1941")
-        
+        и всё перед скобками ("1941 (Иван Байбаков)" → "1941"),
+        но только если содержимое скобок — многословное (похоже на имя автора)
+        и совпадает с author_hint. Однословные скобки сохраняются ("1 (Первый)" → "1 (Первый)").
+
         Args:
             folder_name: Имя папки
-            
+            author_hint: proposed_author записи для проверки скобок-автора
+
         Returns:
             Очищенное название серии
         """
@@ -350,11 +353,27 @@ class Pass2SeriesFilename:
         cleaned = re.sub(r'^\d+[\.\)\-]\s+', '', folder_name).strip()
         if cleaned and cleaned != folder_name:
             folder_name = cleaned
-        
-        # Fallback - всё перед скобками это серия
-        match = re.match(r'^(.+?)\s*\([^)]+\)\s*$', folder_name)
+
+        # Скобки убираем только если содержимое многословное (похоже на "Имя Фамилия")
+        # и либо совпадает с автором, либо author_hint не задан.
+        # Однословные скобки ("1 (Первый)") сохраняем — это часть названия серии.
+        match = re.match(r'^(.+?)\s*\(([^)]+)\)\s*$', folder_name)
         if match:
-            folder_name = match.group(1).strip()
+            before = match.group(1).strip()
+            inside = match.group(2).strip()
+            inside_words = inside.split()
+            if len(inside_words) >= 2:
+                # Многословное содержимое — убираем только если совпадает с автором
+                if not author_hint:
+                    folder_name = before
+                else:
+                    author_lower = author_hint.lower().replace('ё', 'е')
+                    inside_lower = inside.lower().replace('ё', 'е')
+                    # Совпадение: inside является частью имени автора или наоборот
+                    if (inside_lower in author_lower or author_lower in inside_lower
+                            or any(w in author_lower for w in inside_lower.split() if len(w) > 3)):
+                        folder_name = before
+            # Однословное содержимое — оставляем скобки как есть
 
         # По правилам русского языка после запятой всегда должен идти пробел
         folder_name = re.sub(r',(\S)', r', \1', folder_name)
@@ -508,11 +527,11 @@ class Pass2SeriesFilename:
                                     # Если есть ещё папка i+2 (подсерия) — строим "Серия\Подсерия",
                                     # сохраняя числовой префикс "N." в имени подсерии (порядок внутри серии).
                                     if i + 2 < len(path_parts) - 1:
-                                        parent_series_name = self._extract_series_from_folder_name(series_folder)
+                                        parent_series_name = self._extract_series_from_folder_name(series_folder, record.proposed_author or '')
                                         subseries_folder = path_parts[i + 2]
                                         record.proposed_series = f"{parent_series_name or series_folder}\\{subseries_folder}"
                                     else:
-                                        subseries_name = self._extract_series_from_folder_name(series_folder)
+                                        subseries_name = self._extract_series_from_folder_name(series_folder, record.proposed_author or '')
                                         record.proposed_series = subseries_name or series_folder
 
                                 record.series_source = "folder_hierarchy"
