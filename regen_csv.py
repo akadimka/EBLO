@@ -799,6 +799,17 @@ class RegenCSVService:
                 print(f"[POST-CHECK] Rescued {_meta_rescue_count} series from metadata after series==author cleanup")
                 self.logger.log(f"[OK] POST-CHECK: Rescued {_meta_rescue_count} series from metadata")
 
+            # ===== Post-check: clear series_number if >= 100 (year, chapter range, title fragment) =====
+            _large_num_count = 0
+            for record in self.records:
+                sn = (record.series_number or '').strip()
+                if sn and re.match(r'^\d+$', sn) and int(sn) >= 100:
+                    record.series_number = ''
+                    _large_num_count += 1
+            if _large_num_count:
+                print(f"[POST-CHECK] Cleared {_large_num_count} oversized series numbers (>=100)")
+                self.logger.log(f"[OK] POST-CHECK: Cleared {_large_num_count} oversized series numbers")
+
             # ===== Post-check: strip leading "N. " number prefix from series (filename artifact) =====
             # E.g. "3. Шмыг" → "Шмыг", "4. Городская Стража" → "Городская Стража"
             _digit_prefix_re = re.compile(r'^\d+\.\s+', re.UNICODE)
