@@ -352,17 +352,28 @@ class Pass3Normalize:
             for auth in authors:
                 words = auth.split()
                 if len(words) > 2:
-                    # Try AuthorName normalization first: if it produces exactly 2 words,
-                    # it successfully identified first+last (e.g. "Кристофер Джон Сэнсом"
-                    # → "Сэнсом Кристофер"). Use that result instead of blind truncation.
-                    # If normalization returns more or fewer words (couldn't resolve), fall
-                    # back to truncating to the first 2 words (safe for Russian patronymics).
-                    from name_normalizer import AuthorName as _AN
-                    _an = _AN(auth)
-                    if _an.is_valid and len(_an.normalized.split()) == 2:
-                        auth = _an.normalized
+                    # Names with particles (де, ван, фон, ла, …) form compound surnames
+                    # and must NOT be truncated — "де ла Мотт Андерс" must stay intact.
+                    _SURNAME_PARTICLES = frozenset({
+                        'де', 'ди', 'дю', 'ду', 'да', 'дер', 'ден', 'дель', 'дела', 'делла',
+                        'дос', 'дас', 'ван', 'фон', 'ля', 'ле', 'ла',
+                        'de', 'di', 'du', 'da', 'der', 'den', 'van', 'von',
+                        'la', 'le', 'les', 'del', 'della', 'dos', 'das',
+                    })
+                    words_lower = [w.lower() for w in words]
+                    if any(w in _SURNAME_PARTICLES for w in words_lower):
+                        pass  # compound surname — keep all words as-is
                     else:
-                        auth = ' '.join(words[:2])
+                        # Try AuthorName normalization: if it produces exactly 2 words,
+                        # it successfully identified first+last (e.g. "Кристофер Джон Сэнсом"
+                        # → "Сэнсом Кристофер"). Otherwise fall back to first-2-words
+                        # truncation (safe for Russian patronymics like Иванов Иван Иванович).
+                        from name_normalizer import AuthorName as _AN
+                        _an = _AN(auth)
+                        if _an.is_valid and len(_an.normalized.split()) == 2:
+                            auth = _an.normalized
+                        else:
+                            auth = ' '.join(words[:2])
                 fixed = []
                 for w in auth.split():
                     if _re_dot.match(r'^[А-ЯЁA-Z][а-яёa-zA-Z]?\.?$', w) and _is_abbreviation(w):
