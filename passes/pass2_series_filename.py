@@ -680,7 +680,21 @@ class Pass2SeriesFilename:
                     continue  # Папка дала series (кроме depth==4 ошибки)
             
             if record.series_source == "folder_hierarchy":
-                continue  # Иерархия папок определила серию - готово!
+                # Если серия из папки — publisher-blacklist → не считать найденной,
+                # дать шанс filename extraction (затем metadata как финальный fallback).
+                _folder_series_bl = False
+                if record.proposed_series and self.filename_blacklist:
+                    _fs_lower = record.proposed_series.lower()
+                    for _bl in self.filename_blacklist:
+                        if _bl.lower() in _fs_lower:
+                            _folder_series_bl = True
+                            break
+                if _folder_series_bl:
+                    record.proposed_series = ''
+                    record.series_source = ''
+                    # fall through to filename extraction
+                else:
+                    continue  # Иерархия папок определила серию - готово!
 
             if record.series_source == "no_series_folder":
                 continue  # Папка «Вне серий» — серии нет, дальше не ищем
