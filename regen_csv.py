@@ -838,16 +838,45 @@ class RegenCSVService:
                     continue
                 ps_l = record.proposed_series.lower().replace('ё', 'е')
                 ms_l = record.metadata_series.lower().replace('ё', 'е').strip()
+                rest_after_meta = record.proposed_series[len(ms_l):].strip()
+                # Don't trim if extra part contains digits (year, version — meaningful, not noise)
                 if (len(ms_l) >= 6
                         and ps_l.startswith(ms_l)
                         and len(record.proposed_series) > len(ms_l)
-                        and not record.proposed_series[len(ms_l)].isalpha()):
+                        and not record.proposed_series[len(ms_l)].isalpha()
+                        and not re.search(r'\d', rest_after_meta)):
                     record.proposed_series = record.metadata_series.strip()
                     record.series_source = 'metadata'
                     _meta_prefix_count += 1
             if _meta_prefix_count:
                 print(f"[POST-CHECK] Trimmed filename series to metadata prefix in {_meta_prefix_count} records")
                 self.logger.log(f"[OK] POST-CHECK: Trimmed series to metadata prefix in {_meta_prefix_count} records")
+
+            # ===== Post-check: expand truncated filename series using metadata =====
+            # If metadata_series STARTS WITH proposed_series (metadata is more complete),
+            # and the extra part is NOT purely alphabetic noise (has digits or ends with letters
+            # that are meaningful), expand proposed to metadata.
+            # Example: proposed="Боевой", metadata="Боевой 1918 год" → expand.
+            _meta_expand_count = 0
+            for record in self.records:
+                if not record.proposed_series or not record.metadata_series:
+                    continue
+                if 'filename' not in record.series_source:
+                    continue
+                ps_l = record.proposed_series.lower().replace('ё', 'е').strip()
+                ms_l = record.metadata_series.lower().replace('ё', 'е').strip()
+                if (len(ps_l) >= 3
+                        and ms_l.startswith(ps_l)
+                        and len(ms_l) > len(ps_l)):
+                    extra = ms_l[len(ps_l):].strip()
+                    # Only expand when extra is a meaningful addition (not just punctuation/noise)
+                    if extra and (extra[0].isalnum() or extra[0] in '0123456789'):
+                        record.proposed_series = record.metadata_series.strip()
+                        record.series_source = record.series_source + '+meta_expanded'
+                        _meta_expand_count += 1
+            if _meta_expand_count:
+                print(f"[POST-CHECK] Expanded truncated filename series via metadata in {_meta_expand_count} records")
+                self.logger.log(f"[OK] POST-CHECK: Expanded series via metadata in {_meta_expand_count} records")
 
             # ===== Post-check: strip trailing service words (Книга, Том, Часть, Book) =====
             _service_tail_re = re.compile(
