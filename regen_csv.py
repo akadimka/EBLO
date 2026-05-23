@@ -857,21 +857,26 @@ class RegenCSVService:
             # and the extra part is NOT purely alphabetic noise (has digits or ends with letters
             # that are meaningful), expand proposed to metadata.
             # Example: proposed="Боевой", metadata="Боевой 1918 год" → expand.
+            def _norm_dash(s: str) -> str:
+                return s.replace('–', '-').replace('—', '-').replace('‒', '-')
+
             _meta_expand_count = 0
             for record in self.records:
                 if not record.proposed_series or not record.metadata_series:
                     continue
                 if 'filename' not in record.series_source:
                     continue
-                ps_l = record.proposed_series.lower().replace('ё', 'е').strip()
-                ms_l = record.metadata_series.lower().replace('ё', 'е').strip()
+                ps_l = _norm_dash(record.proposed_series.lower().replace('ё', 'е').strip())
+                ms_l = _norm_dash(record.metadata_series.lower().replace('ё', 'е').strip())
                 if (len(ps_l) >= 3
                         and ms_l.startswith(ps_l)
                         and len(ms_l) > len(ps_l)):
                     extra = ms_l[len(ps_l):].strip()
-                    # Only expand when extra is a meaningful addition (not just punctuation/noise)
-                    if extra and (extra[0].isalnum() or extra[0] in '0123456789'):
-                        record.proposed_series = record.metadata_series.strip()
+                    # Only expand when extra is meaningful: starts with letter, digit, or dash
+                    # (dash covers "Наш дом" → "Наш дом – СССР" where extra = "– СССР")
+                    if extra and (extra[0].isalnum() or extra[0] in '-–—'):
+                        # Normalize em/en-dash to hyphen to match filename convention
+                        record.proposed_series = _norm_dash(record.metadata_series.strip())
                         record.series_source = record.series_source + '+meta_expanded'
                         _meta_expand_count += 1
             if _meta_expand_count:
