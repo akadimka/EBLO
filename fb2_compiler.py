@@ -1655,7 +1655,16 @@ class FB2CompilerService:
                     seen_positions[pos_key] = book
                     result.append(book)
                 else:
-                    duplicate_paths.append(book.abs_path)
+                    # Одинаковый номер в серии — проверяем title.
+                    # Если названия разные (издатель присвоил один номер двум разным книгам)
+                    # — оставляем обе, не считаем дублем.
+                    existing = seen_positions[pos_key]
+                    existing_title = _norm_key(existing.record.file_title or existing.abs_path.stem)
+                    this_title = _norm_key(book.record.file_title or book.abs_path.stem)
+                    if existing_title != this_title:
+                        result.append(book)  # разные книги с одним номером — берём обе
+                    else:
+                        duplicate_paths.append(book.abs_path)
             else:
                 result.append(book)
         return result
