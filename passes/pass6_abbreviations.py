@@ -206,10 +206,23 @@ class Pass6Abbreviations:
                 # Found matching surnames - pick the FULLEST name (most words)
                 full_names = authors_map[surname_lower]
                 best_name = max(full_names, key=lambda x: len(x.split()))
-                
+
                 if len(best_name.split()) > 1:  # Only expand if found a fuller version
                     return best_name
-        
+
+            # Prefix fallback: "Савенко" → "Савенкова" (gender inflection, min prefix 5 chars)
+            # Only when exactly one key matches to avoid ambiguity
+            if len(surname_lower) >= 5:
+                prefix_matches = [
+                    k for k in authors_map
+                    if k.startswith(surname_lower) and k != surname_lower
+                ]
+                if len(prefix_matches) == 1:
+                    full_names = authors_map[prefix_matches[0]]
+                    best_name = max(full_names, key=lambda x: len(x.split()))
+                    if len(best_name.split()) > 1:
+                        return best_name
+
         # No expansion needed or found
         return author
     
