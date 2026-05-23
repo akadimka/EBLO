@@ -675,26 +675,21 @@ class Pass2SeriesFilename:
                 record.series_source == "folder_dataset"
             )
             
-            if record.series_source == "folder_dataset" and not is_depth4_without_real_series:
-                if record.proposed_series:
-                    continue  # Папка дала series (кроме depth==4 ошибки)
-            
-            if record.series_source == "folder_hierarchy":
-                # Если серия из папки — publisher-blacklist → не считать найденной,
-                # дать шанс filename extraction (затем metadata как финальный fallback).
-                _folder_series_bl = False
-                if record.proposed_series and self.filename_blacklist:
-                    _fs_lower = record.proposed_series.lower()
-                    for _bl in self.filename_blacklist:
-                        if _bl.lower() in _fs_lower:
-                            _folder_series_bl = True
-                            break
+            # Общая проверка: если серия из папки (любого типа) попала в publisher-blacklist →
+            # сбросить и дать шанс filename extraction, затем metadata как финальный fallback.
+            if record.proposed_series and self.filename_blacklist:
+                _fs_lower = record.proposed_series.lower()
+                _folder_series_bl = any(_bl.lower() in _fs_lower for _bl in self.filename_blacklist)
                 if _folder_series_bl:
                     record.proposed_series = ''
                     record.series_source = ''
-                    # fall through to filename extraction
-                else:
-                    continue  # Иерархия папок определила серию - готово!
+
+            if record.series_source == "folder_dataset" and not is_depth4_without_real_series:
+                if record.proposed_series:
+                    continue  # Папка дала series (кроме depth==4 ошибки)
+
+            if record.series_source == "folder_hierarchy":
+                continue  # Иерархия папок определила серию - готово!
 
             if record.series_source == "no_series_folder":
                 continue  # Папка «Вне серий» — серии нет, дальше не ищем
