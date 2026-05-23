@@ -1966,7 +1966,7 @@ class Pass2SeriesFilename:
                     continue
                 ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
                 # Совпадение: proposed == folder_name или одно является префиксом другого
-                if ps_norm == folder_name_norm or folder_name_norm.startswith(ps_norm) or ps_norm.startswith(folder_name_norm):
+                if ps_norm == folder_name_norm or folder_name_norm.startswith(ps_norm) or ps_norm.startswith(folder_name_norm) or (len(ps_norm) >= 5 and ps_norm in folder_name_norm):
                     record.proposed_series = ''
                     record.series_source = ''
                     cleared += 1
