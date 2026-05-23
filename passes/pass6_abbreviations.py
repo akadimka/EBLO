@@ -76,33 +76,67 @@ class Pass6Abbreviations:
                 continue
             if not record.metadata_authors:
                 continue
-            # Only for single-word names from filename source
-            if ' ' in record.proposed_author:
-                continue
             if 'filename' not in record.author_source:
                 continue
-            proposed_norm = _norm_apos(record.proposed_author.lower())
-            # Parse metadata_authors: may be comma/semicolon separated
-            sep = '; ' if '; ' in record.metadata_authors else (', ' if ', ' in record.metadata_authors else None)
-            meta_parts = record.metadata_authors.split(sep) if sep else [record.metadata_authors]
-            for meta_name in meta_parts:
-                meta_name = meta_name.strip()
-                if not meta_name:
-                    continue
-                # Normalize and check if the surname word matches proposed_author
-                meta_normalized = self.normalizer.normalize_format(meta_name)
-                if not meta_normalized:
-                    continue
-                meta_words = meta_normalized.split()
-                if not meta_words:
-                    continue
-                # After normalize_format the surname is the first word
-                if _norm_apos(meta_words[0].lower()) == proposed_norm and len(meta_words) > 1:
-                    # Normalize apostrophe variants in the result to straight apostrophe
-                    record.proposed_author = _norm_apos(meta_normalized)
+
+            # Parse metadata_authors into normalized list once per record
+            sep_m = '; ' if '; ' in record.metadata_authors else (', ' if ', ' in record.metadata_authors else None)
+            meta_parts_raw = record.metadata_authors.split(sep_m) if sep_m else [record.metadata_authors]
+            meta_normalized_list = [
+                self.normalizer.normalize_format(m.strip())
+                for m in meta_parts_raw if m.strip()
+            ]
+
+            def _try_expand_single(proposed_word: str) -> str | None:
+                """Expand a single-word surname using record metadata.
+                Tries exact match first, then prefix match (gender inflections like Савенко→Савенкова).
+                Returns expanded name or None."""
+                pw_norm = _norm_apos(proposed_word.lower())
+                for meta_norm in meta_normalized_list:
+                    if not meta_norm:
+                        continue
+                    meta_words = meta_norm.split()
+                    if not meta_words or len(meta_words) < 2:
+                        continue
+                    meta_surname = _norm_apos(meta_words[0].lower())
+                    # Exact match
+                    if meta_surname == pw_norm:
+                        return _norm_apos(meta_norm)
+                    # Prefix match: "савенко" → "савенкова" (len >= 5, unambiguous)
+                    if len(pw_norm) >= 5 and meta_surname.startswith(pw_norm):
+                        return _norm_apos(meta_norm)
+                return None
+
+            # Single-word proposed_author
+            if ' ' not in record.proposed_author:
+                expanded = _try_expand_single(record.proposed_author)
+                if expanded:
+                    record.proposed_author = expanded
                     record.author_source = record.author_source + '+meta_expanded'
                     meta_expand_count += 1
-                    break
+                continue
+
+            # Multi-author: check each part individually
+            sep_a = '; ' if '; ' in record.proposed_author else (', ' if ', ' in record.proposed_author else None)
+            if not sep_a:
+                continue
+            author_parts = record.proposed_author.split(sep_a)
+            changed = False
+            new_parts = []
+            for part in author_parts:
+                part = part.strip()
+                # Only expand single-word parts (no space = no first name yet)
+                if ' ' not in part:
+                    expanded = _try_expand_single(part)
+                    if expanded:
+                        new_parts.append(expanded)
+                        changed = True
+                        continue
+                new_parts.append(part)
+            if changed:
+                record.proposed_author = sep_a.join(new_parts)
+                record.author_source = record.author_source + '+meta_expanded'
+                meta_expand_count += 1
         if meta_expand_count:
             print(f"[PASS 6] Expanded {meta_expand_count} single-word surnames using record metadata")
             self.logger.log(f"[PASS 6] Expanded {meta_expand_count} single-word surnames via metadata")
