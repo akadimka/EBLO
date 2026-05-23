@@ -2143,7 +2143,16 @@ class FB2CompilerService:
             return sorted_books, True, True
 
         has_ambiguous = any(b.order_ambiguous for b in books)
-        sorted_books = sorted(books, key=lambda b: b.sort_key)
+        # Тайбрейкер при одинаковом sort_key (напр. два разных тома с одним номером серии):
+        # сортируем по нормализованному названию, затем по пути файла.
+        sorted_books = sorted(
+            books,
+            key=lambda b: (
+                b.sort_key,
+                (b.record.file_title or b.abs_path.stem).lower(),
+                str(b.abs_path),
+            ),
+        )
         return sorted_books, not has_ambiguous, False
 
     def _compute_volume_range(self, books: List[CompilationBook]) -> str:
