@@ -1063,6 +1063,10 @@ class Pass2SeriesFilename:
                             # 🔑 Папка уже была проверена выше. Если мы здесь → это просто metadata series (не совпадает с папкой)
                             record.series_source = "metadata"
         
+        # 🔑 Многоавторные папки — коллекции, не серии.
+        # Если папка содержит книги РАЗНЫХ авторов → её имя не является серией.
+        self._clear_multiauthor_folder_series(records)
+
         # 🔑 НОВОЕ: Папочный консенсус
         # Если папка содержит файлы с series_source = "folder_dataset",
         # то ВСЕ файлы в этой папке должны получить одинаковую серию из папки
@@ -1925,6 +1929,51 @@ class Pass2SeriesFilename:
                 extracted = stem_series.get(id(record))
                 if extracted and extracted in qualified:
                     record.proposed_series = extracted
+
+    def _clear_multiauthor_folder_series(self, records: List[BookRecord]) -> None:
+        """Сбросить серию для папок с книгами РАЗНЫХ авторов (коллекций).
+
+        Правило: папка серии ВСЕГДА находится внутри папки автора.
+        Если папка содержит книги разных авторов — это тематическая коллекция,
+        и её имя не может быть серией ни из какого источника.
+
+        Для каждого файла в папке-коллекции: если proposed_series совпадает с именем
+        папки (из любого источника) — сбрасываем.
+        """
+        from collections import defaultdict
+
+        folder_files: dict = defaultdict(list)
+        for record in records:
+            folder_files[str(Path(record.file_path).parent)].append(record)
+
+        cleared = 0
+        for folder_path, files_in_folder in folder_files.items():
+            # proposed_author нормализован; metadata_authors — запасной для folder_dataset записей.
+            # Используем proposed_author как основной критерий.
+            unique_proposed = {
+                f.proposed_author.strip()
+                for f in files_in_folder
+                if f.proposed_author and f.proposed_author.strip() not in ('', 'Сборник')
+            }
+            if len(unique_proposed) <= 1:
+                continue  # Один (или ноль) предлагаемых авторов — не коллекция
+
+            # Имя папки-коллекции (нормализованное для сравнения)
+            folder_name_norm = Path(folder_path).name.lower().replace('ё', 'е').strip()
+
+            for record in files_in_folder:
+                if not record.proposed_series:
+                    continue
+                ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
+                # Совпадение: proposed == folder_name или одно является префиксом другого
+                if ps_norm == folder_name_norm or folder_name_norm.startswith(ps_norm) or ps_norm.startswith(folder_name_norm):
+                    record.proposed_series = ''
+                    record.series_source = ''
+                    cleared += 1
+
+        if cleared:
+            self.logger.log(f"[PASS 2] Cleared {cleared} series matching collection folder name")
+            print(f"[PASS 2] Cleared {cleared} series from multi-author collection folders")
 
     def _apply_folder_consensus(self, records: List[BookRecord]) -> None:
         """

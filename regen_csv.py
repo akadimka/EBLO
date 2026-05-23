@@ -1157,9 +1157,53 @@ class RegenCSVService:
                 record.proposed_series = ""
                 record.series_source = ""
     
+    def _clear_collection_folder_series(self) -> None:
+        """Финальный пост-чек: папка серии всегда внутри папки автора.
+
+        Если папка содержит книги разных авторов (коллекция), её имя не является серией
+        ни из какого источника. Сбрасываем proposed_series для всех файлов в такой папке,
+        если серия совпадает с именем папки.
+        """
+        from collections import defaultdict
+        from pathlib import Path as _P
+
+        folder_files: dict = defaultdict(list)
+        for record in self.records:
+            folder_files[str(_P(record.file_path).parent)].append(record)
+
+        cleared = 0
+        for folder_path, files_in_folder in folder_files.items():
+            # Используем proposed_author (нормализован pass3) для определения авторского состава.
+            unique_authors = {
+                f.proposed_author.strip()
+                for f in files_in_folder
+                if f.proposed_author and f.proposed_author.strip() not in ('', 'Сборник')
+            }
+            if len(unique_authors) <= 1:
+                continue
+
+            folder_name_norm = _P(folder_path).name.lower().replace('ё', 'е').strip()
+
+            for record in files_in_folder:
+                if not record.proposed_series:
+                    continue
+                ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
+                if ps_norm == folder_name_norm or folder_name_norm.startswith(ps_norm) or ps_norm.startswith(folder_name_norm):
+                    record.proposed_series = ''
+                    record.series_source = ''
+                    cleared += 1
+
+        if cleared:
+            print(f"[POST-CHECK] Cleared {cleared} collection-folder series (multi-author folders)")
+            self.logger.log(f"[OK] POST-CHECK: Cleared {cleared} series from multi-author collection folders")
+
     def _save_csv(self) -> None:
         """Save records to CSV file."""
-        
+
+
+        # Финальная очистка: серия из папки-коллекции (несколько авторов).
+        # Запускается ПОСЛЕ всех пасов и rescue-блоков — чтобы перекрыть любые источники.
+        self._clear_collection_folder_series()
 
         # Sort by file_path
         self.records.sort(key=lambda r: r.file_path)
