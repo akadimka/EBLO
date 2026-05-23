@@ -956,6 +956,81 @@ class RegenCSVService:
                 print(f"[POST-CHECK] Enriched {_folder_enrich_count} folder_hierarchy series with filename prefix")
                 self.logger.log(f"[OK] POST-CHECK: Enriched {_folder_enrich_count} folder_hierarchy series")
 
+            # ===== Post-check: filename prefix pattern — cross-file series detection =====
+            # Если Author. Title.fb2 И Author. Title. Subtitle.fb2 лежат в одной папке,
+            # то Title — название серии для обоих файлов.
+            # Признак: стем одного файла является префиксом стема другого (у того же автора).
+            _prefix_series_count = 0
+            _prefix_groups: dict = {}
+            for record in self.records:
+                folder = str(Path(record.file_path).parent)
+                author = record.proposed_author or ''
+                _prefix_groups.setdefault((folder, author), []).append(record)
+
+            for (folder, author), grp in _prefix_groups.items():
+                if len(grp) < 2:
+                    continue
+                # Извлечь часть имени файла после автора (Author. Title → Title)
+                def _title_part(rec, _author=author):
+                    stem = Path(rec.file_path).stem
+                    _a_norm = _norm_for_cmp(_author)
+                    for sep in ('. ', ' - '):
+                        if sep in stem:
+                            before, after = stem.split(sep, 1)
+                            if _norm_for_cmp(before) == _a_norm or _norm_for_cmp(before) in _a_norm:
+                                return after.strip()
+                    return stem.strip()
+
+                titled = [(r, _title_part(r)) for r in grp]
+
+                from difflib import SequenceMatcher
+
+                def _is_prefix_match(ta: str, tb: str) -> bool:
+                    """True если ta является префиксом tb (точно или с небольшой опечаткой).
+                    Стратегия: берём первые len(ta) символов tb и сравниваем через SequenceMatcher.
+                    Порог схожести 0.85 — допускает 1-2 символа разницы в длинных словах.
+                    """
+                    if not ta or not tb:
+                        return False
+                    # Точный match
+                    if tb.startswith(ta + '. ') or tb.startswith(ta + '.'):
+                        return True
+                    # Нечёткий: tb должен быть длиннее ta, сравниваем prefix
+                    if len(tb) <= len(ta):
+                        return False
+                    # Убедиться что после предполагаемого префикса идёт '. ' или конец
+                    cut = tb[:len(ta)]
+                    rest = tb[len(ta):]
+                    if not rest.startswith('. ') and not rest.startswith('.'):
+                        return False
+                    ratio = SequenceMatcher(None, ta, cut).ratio()
+                    return ratio >= 0.85
+
+                # Ищем пары A, B где title_A — префикс title_B (разделитель '. ')
+                for rec_a, title_a in titled:
+                    if not title_a:
+                        continue
+                    ta_norm = _norm_for_cmp(title_a)
+                    for rec_b, title_b in titled:
+                        if rec_b is rec_a or not title_b:
+                            continue
+                        tb_norm = _norm_for_cmp(title_b)
+                        if _is_prefix_match(ta_norm, tb_norm):
+                            # Canonical series name: prefer existing proposed_series (e.g. from "filename")
+                            canonical = rec_a.proposed_series or rec_b.proposed_series or title_a
+                            if not rec_a.proposed_series:
+                                rec_a.proposed_series = canonical
+                                rec_a.series_source = 'filename_prefix_pattern'
+                                _prefix_series_count += 1
+                            if not rec_b.proposed_series:
+                                rec_b.proposed_series = canonical
+                                rec_b.series_source = 'filename_prefix_pattern'
+                                _prefix_series_count += 1
+                            break
+            if _prefix_series_count:
+                print(f"[POST-CHECK] Assigned series via filename prefix pattern: {_prefix_series_count} records")
+                self.logger.log(f"[OK] POST-CHECK: filename prefix pattern → {_prefix_series_count} series assigned")
+
             # ===== Clear series for collections/compilations =====
             if progress_callback:
                 progress_callback(90, 100, "Финальная обработка")
