@@ -761,8 +761,12 @@ class RegenCSVService:
                         is_conflict = True
 
                 if is_conflict:
-                    record.proposed_series = record.metadata_series or ''
-                    record.series_source = 'metadata' if record.metadata_series else ''
+                    # Проверяем metadata_series через blacklist перед заменой
+                    _meta_replacement = record.metadata_series or ''
+                    if _meta_replacement and self._contains_blacklist_word_regen(_meta_replacement):
+                        _meta_replacement = ''
+                    record.proposed_series = _meta_replacement
+                    record.series_source = 'metadata' if _meta_replacement else ''
                     _series_eq_author_cleared += 1
 
             if _series_eq_author_cleared:
