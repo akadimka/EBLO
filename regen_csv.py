@@ -530,7 +530,12 @@ class RegenCSVService:
                 elif root_type in (FolderType.PUBLISHER, FolderType.COLLECTION):
                     # Корневая папка = издательский каталог.
                     # Серия = подпапки начиная с уровня 2 (index 1+).
-                    series_folders = parent_parts[1:]
+                    # Исключаем подпапки, совпадающие с папкой автора (имя может быть в другом порядке).
+                    subfolders = parent_parts[1:]
+                    series_folders = tuple(
+                        f for f in subfolders
+                        if not (author and self._surnames_match_folder(author, f))
+                    )
                     if series_folders:
                         if any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
                             result = ('', 'no_series_folder')

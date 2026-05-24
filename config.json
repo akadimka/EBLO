@@ -1,7 +1,7 @@
 {
   "library_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/EBook Library",
   "last_scan_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
-  "normalizer_folder": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test2",
+  "normalizer_folder": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
   "genre_association_method": "context_menu",
   "window_sizes": {
@@ -28,6 +28,8 @@
   "filename_blacklist": [
     "компиляция",
     "+",
+    "Психологический триллер",
+    "Мировой криминальный бестселлер",
     "Артефакт - детектив",
     "Современный фантастический боевик (АСТ)",
     "МИФ Проза",
@@ -87,6 +89,7 @@
     "1918 год",
     "Acting president",
     "Центрполиграф",
+    "Попаданец (АСТ)",
     "О. Р. З.",
     "Ка"
   ],
@@ -539,6 +542,9 @@
     "дель Торо": "Дель Торо Гильермо",
     "Shellina": "Шеллина Олеся",
     "Дарищев Вадим": "Орлов Алекс (Дарищев Вадим)",
+    "Мах Макс": "Мах Макс (Лейкин Марк)",
+    "Йорген": "Йорген (Воронцов Александр)",
+    "Замполит Д. Н.": "Замполит Д. Н. (Соболев Николай)",
     "Постельгио": "Постегильо"
   },
   "genre_category_words": [
@@ -1237,9 +1243,20 @@
     "Серия. "
   ],
   "system_folder_names": [
-    "fb2", "epub", "pdf", "mobi", "djvu",
-    "tmp", "temp", "covers", "cover",
-    "images", "img", "_backup", "backup", "cache"
+    "fb2",
+    "epub",
+    "pdf",
+    "mobi",
+    "djvu",
+    "tmp",
+    "temp",
+    "covers",
+    "cover",
+    "images",
+    "img",
+    "_backup",
+    "backup",
+    "cache"
   ],
   "no_series_folder_names": [
     "Вне серий",
