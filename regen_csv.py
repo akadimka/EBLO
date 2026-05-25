@@ -1214,6 +1214,35 @@ class RegenCSVService:
         # Запускается ПОСЛЕ всех пасов и rescue-блоков — чтобы перекрыть любые источники.
         self._clear_collection_folder_series()
 
+        # ===== Post-check: expand truncated metadata series using longer version from same author =====
+        # Случай: metadata_series книги содержит только начало названия ("Режиссер"),
+        # а у других книг того же автора есть полное название ("Режиссер Советского Союза").
+        # Расширяем усечённые значения до полного.
+        _STRONG = {'filename+meta_confirmed', 'filename', 'folder_dataset',
+                   'folder_hierarchy', 'folder_meta_consensus'}
+        _auth_long: dict = {}  # author → list of (proposed_series_lower, proposed_series_original)
+        for _r in self.records:
+            if _r.proposed_author and _r.proposed_series and _r.series_source in _STRONG:
+                _auth_long.setdefault(_r.proposed_author, []).append(
+                    (_r.proposed_series.lower().replace('ё', 'е').strip(), _r.proposed_series)
+                )
+        _meta_expand2_count = 0
+        for _r in self.records:
+            if not _r.proposed_series or _r.series_source != 'metadata':
+                continue
+            _ps_l = _r.proposed_series.lower().replace('ё', 'е').strip()
+            for _full_l, _full in _auth_long.get(_r.proposed_author, []):
+                if _full_l.startswith(_ps_l) and len(_full_l) > len(_ps_l):
+                    _extra = _full_l[len(_ps_l):].strip()
+                    if _extra and (_extra[0].isalnum() or _extra[0] in '-–— '):
+                        _r.proposed_series = _full
+                        _r.series_source = 'metadata+author_expanded'
+                        _meta_expand2_count += 1
+                        break
+        if _meta_expand2_count:
+            print(f"[POST-CHECK] Expanded {_meta_expand2_count} truncated metadata series via author group")
+            self.logger.log(f"[OK] POST-CHECK: Expanded {_meta_expand2_count} truncated metadata series via author group")
+
         # Sort by file_path
         self.records.sort(key=lambda r: r.file_path)
         
