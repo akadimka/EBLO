@@ -702,7 +702,7 @@ class Pass2SeriesFilename:
             # Но если folder_dataset дал пустую серию — продолжаем extraction из filename
             if record.series_source == "folder_dataset" and record.proposed_series:
                 continue  # Folder extraction already set hierarchical series
-            
+
             # Если папка НЕ дала series → пробуем extraction из filename
             series_candidate = self._extract_series_from_filename(
                 record.file_path, validate=False, metadata_series=record.metadata_series
@@ -795,7 +795,7 @@ class Pass2SeriesFilename:
                                                    and bool(record.metadata_series))
                     # Кандидат + номер в имени файла: "... - Серия N." или "... - Серия N "
                     _is_numbered_series = bool(_re.search(
-                        _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.]+\d+[\s.]',
+                        _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.\-–—]+\d+(?:[\s.]|$)',
                         _fn_stem_lower.replace('ё', 'е')
                     ))
                     if not _is_confirmed_by_meta and not _is_meta_prefix and not _is_meta_with_service_suffix and not _is_in_parens and not _is_numbered_series and not _is_block_matcher_confident and (
@@ -961,7 +961,7 @@ class Pass2SeriesFilename:
                             _fn_stem_fb = Path(record.file_path).stem.lower().replace('ё', 'е')
                             _sp_norm = series_part.lower().replace('ё', 'е')
                             _is_numbered_in_fn = bool(re.search(
-                                re.escape(_sp_norm) + r'[\s.]+\d+[\s.]',
+                                re.escape(_sp_norm) + r'[\s.\-–—]+\d+(?:[\s.]|$)',
                                 _fn_stem_fb
                             ))
                             if (_is_numbered_in_fn or not _in_title) and self._is_valid_series(series_part, extracted_author=record.proposed_author):
@@ -3966,6 +3966,9 @@ class Pass2SeriesFilename:
         # Правило -1: Удалить ведущий дефис/тире (артефакт разбиения по ". " в паттернах "Author - Series")
         # Пример: "- Сказания Тремейна" → "Сказания Тремейна"
         text = re.sub(r'^[-–—]\s*', '', text).strip()
+        # Удалить хвостовой дефис/тире (артефакт когда " - N" разобрался как "series -" + "N")
+        # Пример: "Режиссер Советского Союза -" → "Режиссер Советского Союза"
+        text = re.sub(r'\s*[-–—]+\s*$', '', text).strip()
         if not text:
             return ""
         

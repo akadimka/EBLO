@@ -850,6 +850,7 @@ class RegenCSVService:
                 rest_after_meta = record.proposed_series[len(ms_l):].strip()
                 # Don't trim if extra part contains digits (year, version — meaningful, not noise)
                 if (len(ms_l) >= 6
+                        and len(ms_l.split()) >= 2  # однословный metadata скорее усечён, чем верен
                         and ps_l.startswith(ms_l)
                         and len(record.proposed_series) > len(ms_l)
                         and not record.proposed_series[len(ms_l)].isalpha()
