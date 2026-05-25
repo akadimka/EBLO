@@ -677,9 +677,18 @@ class Pass2SeriesFilename:
             
             # Общая проверка: если серия из папки (любого типа) попала в publisher-blacklist →
             # сбросить и дать шанс filename extraction, затем metadata как финальный fallback.
+            # Используем word-boundary regex чтобы "СИ" не совпадало с "Русич" и т.п.
             if record.proposed_series and self.filename_blacklist:
-                _fs_lower = record.proposed_series.lower()
-                _folder_series_bl = any(_bl.lower() in _fs_lower for _bl in self.filename_blacklist)
+                _fs_lower = record.proposed_series.lower().replace('ё', 'е')
+                _folder_series_bl = False
+                for _bl in self.filename_blacklist:
+                    _bl_l = _bl.lower().replace('ё', 'е').strip()
+                    if not _bl_l:
+                        continue
+                    _pat = r'(?<![а-яёa-z\w])' + re.escape(_bl_l) + r'(?![а-яёa-z\w])'
+                    if re.search(_pat, _fs_lower):
+                        _folder_series_bl = True
+                        break
                 if _folder_series_bl:
                     record.proposed_series = ''
                     record.series_source = ''

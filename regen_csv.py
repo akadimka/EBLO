@@ -597,9 +597,17 @@ class RegenCSVService:
             # Предвычисляем части пути один раз
             _parts_cache: dict = {}
 
+            # Источники по возрастанию приоритета. Папка (3) > файл (2) > мета (1).
+            # VARIANT B всегда перезаписывает источники с приоритетом ниже папочного.
+            _FOLDER_SOURCES = {
+                'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+                'folder_metadata_confirmed', 'no_series_folder',
+            }
+
             for record in self.records:
-                if record.proposed_series:
-                    continue  # Skip if series already set
+                # Пропускаем только если уже установлен папочный источник
+                if record.series_source in _FOLDER_SOURCES:
+                    continue
 
                 file_path_parts = _parts_cache.get(record.file_path)
                 if file_path_parts is None:
@@ -620,7 +628,7 @@ class RegenCSVService:
 
                 # Если author_folder_index < 0 (папка автора не найдена) —
                 # серия из папок не извлекается; Pass 2 Series и metadata возьмут на себя.
-            
+
             print(f"[SERIES folders] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Series extracted from folder structure (Variant B)")
 
@@ -1222,7 +1230,6 @@ class RegenCSVService:
 
     def _save_csv(self) -> None:
         """Save records to CSV file."""
-
 
         # Финальная очистка: серия из папки-коллекции (несколько авторов).
         # Запускается ПОСЛЕ всех пасов и rescue-блоков — чтобы перекрыть любые источники.
