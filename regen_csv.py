@@ -530,12 +530,25 @@ class RegenCSVService:
                 elif root_type in (FolderType.PUBLISHER, FolderType.COLLECTION):
                     # Корневая папка = издательский каталог.
                     # Серия = подпапки начиная с уровня 2 (index 1+).
-                    # Исключаем подпапки, совпадающие с папкой автора (имя может быть в другом порядке).
+                    # Исключаем подпапки, которые являются ЧИСТОЙ папкой автора.
+                    # Папка формата "Серия (Автор)" НЕ является чистой папкой автора —
+                    # из неё нужно извлечь серию через _extract_series_from_folder_name.
                     subfolders = parent_parts[1:]
-                    series_folders = tuple(
-                        f for f in subfolders
-                        if not (author and self._surnames_match_folder(author, f))
-                    )
+                    series_folders = []
+                    for _sf in subfolders:
+                        if not author or not self._surnames_match_folder(author, _sf):
+                            series_folders.append(_sf)
+                            continue
+                        # Автор найден в имени подпапки.
+                        # Пробуем извлечь серию — если она непустая и не совпадает с автором,
+                        # это формат "Серия (Автор)", используем её.
+                        _extracted = self._extract_series_from_folder_name(_sf)
+                        _auth_norm = self._normalize_name_for_comparison(author)
+                        _extr_norm = self._normalize_name_for_comparison(_extracted) if _extracted else ''
+                        if _extracted and _extr_norm != _auth_norm:
+                            series_folders.append(_sf)
+                        # иначе — чистая папка автора, пропускаем
+                    series_folders = tuple(series_folders)
                     if series_folders:
                         if any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
                             result = ('', 'no_series_folder')

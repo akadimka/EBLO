@@ -683,7 +683,6 @@ class Pass2SeriesFilename:
                 if _folder_series_bl:
                     record.proposed_series = ''
                     record.series_source = ''
-
             if record.series_source == "folder_dataset" and not is_depth4_without_real_series:
                 if record.proposed_series:
                     continue  # Папка дала series (кроме depth==4 ошибки)
