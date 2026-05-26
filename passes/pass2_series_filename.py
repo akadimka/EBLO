@@ -428,14 +428,10 @@ class Pass2SeriesFilename:
                         _an = _AN(extracted_author)
                         canonical_author = _an.normalized if (_an.is_valid and _an.normalized) else extracted_author
                         record.proposed_author = canonical_author
-                        record.author_source = 'folder_dataset+series_pattern'
-                        # Серию из паттерна ставим только если файл в ПОДПАПКЕ этой папки,
-                        # а не непосредственно в ней (иначе "Орлов Алекс" попадает в серию).
-                        part_idx = list(path_parts[:-1]).index(part)
-                        file_is_direct_child = (part_idx == len(path_parts) - 2)
-                        if not record.proposed_series and not file_is_direct_child:
+                        record.author_source = 'folder_dataset'
+                        if not record.proposed_series:
                             record.proposed_series = extracted_series
-                            record.series_source = 'folder_hierarchy'
+                            record.series_source = 'folder_dataset'
                         _folder_pattern_count += 1
                         break  # один паттерн на папку достаточно
             if _folder_pattern_count:
