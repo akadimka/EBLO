@@ -456,6 +456,8 @@ class Pass2SeriesFilename:
                 self.logger.log(f"[PASS 2] Applied folder patterns to {_folder_pattern_count} records")
                 print(f"[PASS 2] Applied folder Series(Author) patterns to {_folder_pattern_count} records")
 
+        self._unify_series_folder_authors(records)
+
         # Кэш Path.parts: один и тот же file_path встречается в нескольких проходах
         _parts_cache: dict = {}
 
@@ -2003,6 +2005,77 @@ class Pass2SeriesFilename:
         if cleared:
             self.logger.log(f"[PASS 2] Cleared {cleared} series matching collection folder name")
             print(f"[PASS 2] Cleared {cleared} series from multi-author collection folders")
+
+    def _unify_series_folder_authors(self, records: List[BookRecord]) -> None:
+        """Унифицировать авторов в папках типа 'Серия (Автор)'.
+
+        Когда папка распознана как 'Серия (Автор)' и разные книги содержат разные
+        вариации имени одного автора (напр. 'Гвор Виктор' и 'Гвор Михаил'), собираем
+        всех авторов с совпадающей фамилией из папки и назначаем объединённый список
+        всем книгам в этой папке.
+
+        Пример: папка 'Волхвы Скрытной Управы (Гвор)'
+          Книга 1: 'Гвор Виктор, Рагимов Михаил' → фильтруем по 'гвор' → 'Гвор Виктор'
+          Книга 2: 'Гвор Михаил'                 → фильтруем по 'гвор' → 'Гвор Михаил'
+          Итог для обеих: 'Гвор Виктор, Гвор Михаил'
+        """
+        if not self.compiled_folder_patterns:
+            return
+
+        from collections import defaultdict
+        folder_records: dict = defaultdict(list)
+        for record in records:
+            folder = str(Path(record.file_path).parent)
+            folder_records[folder].append(record)
+
+        unified = 0
+        for folder_path, recs in folder_records.items():
+            folder_name = Path(folder_path).name
+            # Найти "Серия (Автор)" паттерн для этой папки
+            extracted_surname = None
+            for _p_str, _p_re, _p_groups in self.compiled_folder_patterns:
+                if 'series' not in _p_groups or 'author' not in _p_groups:
+                    continue
+                m = _p_re.match(folder_name)
+                if not m:
+                    continue
+                extracted_surname = m.group('author').strip().lower().replace('ё', 'е')
+                break
+            if not extracted_surname or len(extracted_surname.replace(' ', '')) < 3:
+                continue
+
+            # Собрать уникальных авторов из папки, чьё имя содержит фамилию из паттерна
+            # Для мультиавторных строк ("Гвор Виктор, Рагимов Михаил") — разбиваем и фильтруем
+            matched_authors: list = []
+            seen: set = set()
+            for rec in recs:
+                if not rec.proposed_author:
+                    continue
+                for part in re.split(r',\s*', rec.proposed_author):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    part_norm = part.lower().replace('ё', 'е')
+                    surname_words = re.sub(r'[^\w]', ' ', extracted_surname).split()
+                    if any(sw in part_norm for sw in surname_words if len(sw) > 2):
+                        key = part_norm
+                        if key not in seen:
+                            seen.add(key)
+                            matched_authors.append(part)
+
+            if len(matched_authors) <= 1:
+                continue  # Нет смысла объединять одного автора
+
+            combined = ', '.join(matched_authors)
+            for rec in recs:
+                if rec.proposed_author != combined:
+                    rec.proposed_author = combined
+                    rec.author_source = 'folder_dataset'
+                    unified += 1
+
+        if unified:
+            self.logger.log(f"[PASS 2] Unified authors in Series(Author) folders: {unified} records")
+            print(f"[PASS 2] Unified {unified} records with Series(Author) folder authors")
 
     def _apply_folder_consensus(self, records: List[BookRecord]) -> None:
         """

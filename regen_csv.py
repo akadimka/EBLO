@@ -1237,6 +1237,10 @@ class RegenCSVService:
             for record in files_in_folder:
                 if not record.proposed_series:
                     continue
+                # Папочный источник авторитетен — пользователь сам создал структуру
+                if record.series_source in ('folder_dataset', 'folder_hierarchy',
+                                            'folder_meta_consensus', 'folder_metadata_confirmed'):
+                    continue
                 ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
                 if ps_norm == folder_name_norm or folder_name_norm.startswith(ps_norm) or ps_norm.startswith(folder_name_norm) or (len(ps_norm) >= 5 and ps_norm in folder_name_norm):
                     record.proposed_series = ''
