@@ -365,17 +365,12 @@ class Pass2SeriesFilename:
             inside = match.group(2).strip()
             inside_words = inside.split()
             if len(inside_words) >= 2:
-                # Многословное содержимое — убираем только если совпадает с автором
-                if not author_hint:
-                    folder_name = before
-                else:
-                    author_lower = author_hint.lower().replace('ё', 'е')
-                    inside_lower = inside.lower().replace('ё', 'е')
-                    # Совпадение: inside является частью имени автора или наоборот
-                    if (inside_lower in author_lower or author_lower in inside_lower
-                            or any(w in author_lower for w in inside_lower.split() if len(w) > 3)):
-                        folder_name = before
-            # Однословное содержимое — оставляем скобки как есть
+                # Многословное содержимое в скобках — всегда имя автора (дизамбигуатор).
+                # Срезаем независимо от того, совпадает ли с author_hint.
+                # Примеры: "Русич (Посняков Андрей)" → "Русич",
+                #          "Орда (Посняков Андрей)" → "Орда".
+                folder_name = before
+            # Однословное содержимое — оставляем скобки как есть ("Алхимик (завершён)")
 
         # По правилам русского языка после запятой всегда должен идти пробел
         folder_name = re.sub(r',(\S)', r', \1', folder_name)
@@ -492,6 +487,11 @@ class Pass2SeriesFilename:
                             author_folder_idx = i
                             break
 
+                _FOLDER_SOURCES_P2 = {
+                    'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+                    'folder_metadata_confirmed', 'no_series_folder',
+                }
+
                 if author_folder_idx is not None:
                     i = author_folder_idx
                     part = path_parts[i]
@@ -499,9 +499,14 @@ class Pass2SeriesFilename:
                     if record.author_source == "metadata":
                         record.author_source = "metadata_folder_confirmed"
 
+                    # Если VARIANT B уже установил серию из папки — не перезаписываем.
+                    # Только обновление author_source выше допустимо.
+                    if record.series_source in _FOLDER_SOURCES_P2 and record.proposed_series:
+                        pass  # серия уже определена папочной структурой
+
                     # Найдена папка автора на позиции i
                     # Следующая папка (i+1) это серия (если это не файл)
-                    if i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
+                    elif i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
                         series_folder = path_parts[i + 1]
                         if not series_folder.endswith('.fb2'):
                             # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии
@@ -587,7 +592,7 @@ class Pass2SeriesFilename:
                                         record.proposed_series = subseries_name or series_folder
 
                                 record.series_source = "folder_hierarchy"
-                    else:
+                    elif not (record.series_source in _FOLDER_SOURCES_P2 and record.proposed_series):
                         # Папка i содержит автора И является папкой серии одновременно
                         # (формат: "Сборник\Серия (Автор)\Файл.fb2" — нет подпапки серии)
                         # Папка имеет ВЫСШИЙ приоритет. Но если metadata_series — вариация

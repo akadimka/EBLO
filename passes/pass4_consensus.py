@@ -577,11 +577,16 @@ class Pass4Consensus:
                 if _first_seg_lc and (sub_lc.startswith(_first_seg_lc) or _first_seg_lc.startswith(sub_lc)):
                     subseries_file_count.setdefault(key, set()).add(r.file_path)
 
-            # Схлопываем подсерии где только один файл подтверждён из filename
+            # Схлопываем подсерии где только один файл подтверждён из filename.
+            # Папочные источники (folder_dataset, folder_hierarchy) уже авторитетны — не трогаем.
+            _FOLDER_SRC = {'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+                           'folder_metadata_confirmed'}
             for r in author_recs:
                 s = r.proposed_series or ''
                 if '\\' not in s:
                     continue
+                if (r.series_source or '') in _FOLDER_SRC:
+                    continue  # папка авторитетнее filename-подтверждения
                 base = s.split('\\')[0].strip()
                 sub  = s.split('\\', 1)[1].strip()
                 base_lc = base.lower().replace('ё', 'е')
