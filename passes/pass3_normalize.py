@@ -210,23 +210,24 @@ class Pass3Normalize:
                     normalized = record.proposed_author
             else:
                 # Single author — normalize
-                normalized_candidate = self.normalizer.normalize_format(record.proposed_author, metadata_for_normalization)
-
-                # If result contains a noble/foreign particle (de, van, де…), normalize_format
-                # may place the particle at the end ("Берньер Луи де") which looks wrong.
-                # In that case use the metadata form directly — it has natural order.
+                # If metadata contains a noble/foreign particle (де, van, фон…),
+                # normalize_format will reorder the name wrongly (e.g. "Берньер Луи де").
+                # Skip normalize_format entirely and use the metadata form directly.
                 _PARTICLES_EARLY = frozenset({
                     'де', 'ди', 'дю', 'ду', 'да', 'дер', 'ден', 'дель', 'дела', 'делла',
                     'дос', 'дас', 'ван', 'фон', 'ля', 'ле', 'ла',
                     'de', 'di', 'du', 'da', 'der', 'den', 'van', 'von',
                     'la', 'le', 'les', 'del', 'della', 'dos', 'das',
                 })
-                if normalized_candidate and metadata_for_normalization:
-                    _nc_words = [w.lower() for w in normalized_candidate.split()]
-                    if any(w in _PARTICLES_EARLY for w in _nc_words):
-                        _meta_natural = metadata_for_normalization.split(';')[0].strip()
-                        if _meta_natural:
-                            normalized_candidate = _meta_natural
+                _meta_words_lower = [
+                    w.lower() for w in metadata_for_normalization.split()
+                ] if metadata_for_normalization else []
+                if any(w in _PARTICLES_EARLY for w in _meta_words_lower):
+                    # Use the first author from metadata as-is (natural order)
+                    _meta_natural = metadata_for_normalization.split(';')[0].strip()
+                    normalized_candidate = _meta_natural if _meta_natural else record.proposed_author
+                else:
+                    normalized_candidate = self.normalizer.normalize_format(record.proposed_author, metadata_for_normalization)
 
                 # For filename-sourced multi-word authors: the block extractor already guarantees
                 # ФИ order (Фамилия first). If normalize_format reordered the words (first word
