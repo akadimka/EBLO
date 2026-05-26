@@ -291,6 +291,8 @@ class RegenCSVService:
             self._compiled_blacklist = self._compile_blacklist_for_run()
             # Загрузить пользовательский список «без серии» один раз на прогон
             self._no_series_names = self.settings.get_no_series_folder_names()
+            # Загрузить ключевые слова вариантных папок
+            self._variant_kw = [kw.lower() for kw in (self.settings.get_list('variant_folder_keywords') or [])]
 
             print("\n" + "="*80)
             print("  CSV REGENERATION - 6-PASS SYSTEM (Modular)")
@@ -548,7 +550,16 @@ class RegenCSVService:
                         if _extracted and _extr_norm != _auth_norm:
                             series_folders.append(_sf)
                         # иначе — чистая папка автора, пропускаем
-                    series_folders = tuple(series_folders)
+                    # Вариантные папки ("Вариант с СИ", "ЛП" и т.п.) не образуют уровень иерархии.
+                    # Файлы внутри них получают серию из ближайшей не-вариантной папки выше.
+                    _vkw = getattr(self, '_variant_kw', [])
+                    series_folders_clean = []
+                    for _sf in series_folders:
+                        _sf_lower = _sf.lower().replace('ё', 'е')
+                        if any(_vk in _sf_lower for _vk in _vkw):
+                            continue  # вариантная папка — пропускаем
+                        series_folders_clean.append(_sf)
+                    series_folders = tuple(series_folders_clean)
                     if series_folders:
                         if any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
                             result = ('', 'no_series_folder')
@@ -798,7 +809,6 @@ class RegenCSVService:
             if _series_eq_author_cleared:
                 print(f"[POST-CHECK] Cleared {_series_eq_author_cleared} records where series == author")
                 self.logger.log(f"[OK] POST-CHECK: Cleared {_series_eq_author_cleared} series==author conflicts")
-
             # ===== Post-check: metadata rescue — restore metadata_series for records still without series =====
             # Handles cases where series was cleared (e.g. series==author post-check) but metadata has a real series.
             # E.g. proposed_series was folder name "А_З_К, Берг Александр" → cleared → metadata="Антиблицкриг" rescued.
