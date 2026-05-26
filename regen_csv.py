@@ -866,6 +866,40 @@ class RegenCSVService:
                 print(f"[POST-CHECK] Cleared {_large_num_count} oversized series numbers (>=100)")
                 self.logger.log(f"[OK] POST-CHECK: Cleared {_large_num_count} oversized series numbers")
 
+            # ===== Post-check: clear false-positive series where series+number == file_title =====
+            # Случай: "Коу Джонатан - Номер 11.fb2" → series="Номер", number="11", title="Номер 11"
+            # proposed_series + series_number реконструируют file_title → это заголовок, не серия.
+            # Защита: не очищаем если metadata подтверждает серию или source не filename.
+            _title_series_fp_count = 0
+            _title_num_re = re.compile(r'\s+\d{1,3}\s*$')
+            for record in self.records:
+                if not record.proposed_series:
+                    continue
+                if 'filename' not in (record.series_source or ''):
+                    continue
+                ft = (record.file_title or '').strip().lower().replace('ё', 'е')
+                ps = record.proposed_series.strip().lower().replace('ё', 'е')
+                sn = (record.series_number or '').strip()
+                # Вариант 1: series + number (если number извлечён) совпадают с title
+                reconstructed = (ps + ' ' + sn).strip() if sn else None
+                match1 = reconstructed and ft == reconstructed
+                # Вариант 2: title без концевого числа (1–3 цифры) совпадает с series
+                ft_stripped = _title_num_re.sub('', ft).strip()
+                match2 = ft_stripped == ps and ft_stripped != ft
+                if not match1 and not match2:
+                    continue
+                # metadata подтверждает серию — не трогаем
+                ms = (record.metadata_series or '').strip().lower().replace('ё', 'е')
+                if ms and ps in ms:
+                    continue
+                record.proposed_series = ''
+                record.series_source = ''
+                record.series_number = ''
+                _title_series_fp_count += 1
+            if _title_series_fp_count:
+                print(f"[POST-CHECK] Cleared {_title_series_fp_count} false-positive series (series+number==title)")
+                self.logger.log(f"[OK] POST-CHECK: Cleared {_title_series_fp_count} series==title false positives")
+
             # ===== Post-check: strip leading "N. " number prefix from series (filename artifact) =====
             # E.g. "3. Шмыг" → "Шмыг", "4. Городская Стража" → "Городская Стража"
             _digit_prefix_re = re.compile(r'^\d+\.\s+', re.UNICODE)
