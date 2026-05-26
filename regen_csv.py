@@ -871,7 +871,7 @@ class RegenCSVService:
             # proposed_series + series_number реконструируют file_title → это заголовок, не серия.
             # Защита: не очищаем если metadata подтверждает серию или source не filename.
             _title_series_fp_count = 0
-            _title_num_re = re.compile(r'\s+\d{1,3}\s*$')
+            _title_num_re = re.compile(r'\s+\d{1,2}\s*$')
             for record in self.records:
                 if not record.proposed_series:
                     continue
@@ -883,10 +883,15 @@ class RegenCSVService:
                 # Вариант 1: series + number (если number извлечён) совпадают с title
                 reconstructed = (ps + ' ' + sn).strip() if sn else None
                 match1 = reconstructed and ft == reconstructed
-                # Вариант 2: title без концевого числа (1–3 цифры) совпадает с series
+                # Вариант 2: title без концевого числа (1–2 цифры) совпадает с series
                 ft_stripped = _title_num_re.sub('', ft).strip()
                 match2 = ft_stripped == ps and ft_stripped != ft
-                if not match1 and not match2:
+                # Вариант 3: title начинается с "Series NNN..." где NNN ≥ 100 (трёхзначное)
+                # Серийные тома не бывают трёхзначными — это часть заголовка
+                # Пример: "Код 612. Кто убил Маленького принца" → series="Код" ложное
+                ft_after = ft[len(ps):].lstrip() if ft.startswith(ps) else ''
+                match3 = bool(ft_after and re.match(r'^\d{3,}', ft_after))
+                if not match1 and not match2 and not match3:
                     continue
                 # metadata подтверждает серию — не трогаем
                 ms = (record.metadata_series or '').strip().lower().replace('ё', 'е')
