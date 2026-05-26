@@ -642,6 +642,12 @@ class RegenCSVService:
 
             print(f"[SERIES folders] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Series extracted from folder structure (Variant B)")
+            def _chk(label):
+                for r in self.records:
+                    if 'Зверь лютый (Бирюк' in r.file_path:
+                        print(f"[{label}] {r.file_path[-35:]} | ser_src={r.series_source!r}")
+                        break
+            _chk("AFTER_VARB")
 
             # ===== SERIES PASS 2 =====
             if progress_callback:
@@ -654,6 +660,7 @@ class RegenCSVService:
             pass2_series.execute(self.records)
             print(f"[SERIES PASS 2] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Series PASS 2: Extracted from filenames")
+            _chk("AFTER_P2S")
 
             # ===== SERIES PASS 3 =====
             if progress_callback:
@@ -664,6 +671,7 @@ class RegenCSVService:
             pass3_series.execute(self.records)
             print(f"[SERIES PASS 3] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Series PASS 3: Normalized series names")
+            _chk("AFTER_P3S")
 
             # ===== PASS 3 =====
             if progress_callback:
@@ -682,6 +690,7 @@ class RegenCSVService:
             pass4.execute(self.records)
             print(f"[PASS 4] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] PASS 4: Consensus applied")
+            _chk("AFTER_P4")
 
             # ===== PASS 5 =====
             if progress_callback:

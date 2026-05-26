@@ -392,14 +392,23 @@ class Pass2SeriesFilename:
         # даже для файлов у которых proposed_author был "Соавторство"/"Сборник".
         self._propagate_ancestor_folder_authors(records)
 
+        _FOLDER_SOURCES_P2 = {
+            'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+            'folder_metadata_confirmed', 'no_series_folder',
+        }
+
         # PRE-PASS: Применяем паттерны папок (author_series_patterns_in_folders).
         # Исправляет случаи "Серия (Автор)" где папка классифицирована как авторская,
         # но на самом деле является серией с автором в скобках.
         # Пример: "Князь Игорь (Аксеничев Олег)" → author="Аксеничев Олег", series="Князь Игорь"
         if self.compiled_folder_patterns:
             _folder_pattern_count = 0
+            _FOLDER_AUTHOR_SRC = {
+                'folder_dataset', 'folder_hierarchy',
+                'metadata_folder_confirmed', 'folder_multiauthor',
+            }
             for record in records:
-                if record.author_source != 'folder_dataset':
+                if record.author_source not in _FOLDER_AUTHOR_SRC:
                     continue
                 path_parts = Path(record.file_path).parts
                 for part in path_parts[:-1]:  # все папки, не файл
@@ -413,23 +422,32 @@ class Pass2SeriesFilename:
                         extracted_author = m.group('author').strip()
                         if not extracted_series or not extracted_author:
                             continue
-                        # Проверяем что extracted_author совпадает с metadata_authors
-                        # или просто содержит слово длиннее 3 букв (похоже на фамилию)
                         if len(extracted_author.replace(' ', '')) < 3:
                             continue
-                        # Проверяем что текущий proposed_author совпадает с extracted_series
-                        # (т.е. папка действительно была взята как автор вместо серии)
                         cur_author_norm = record.proposed_author.strip().lower().replace('ё', 'е')
                         ext_series_norm = extracted_series.lower().replace('ё', 'е')
-                        if cur_author_norm != ext_series_norm:
+                        ext_author_norm = extracted_author.lower().replace('ё', 'е')
+
+                        # Case A: папка взята как автор вместо серии — исправить автора
+                        author_was_series = (cur_author_norm == ext_series_norm)
+
+                        # Case B: автор уже верный (совпадает по фамилии с extracted_author)
+                        # Проверка: длинное слово из extracted_author есть в proposed_author
+                        _ext_words = [w for w in re.sub(r'[^\w]', ' ', ext_author_norm).split() if len(w) > 3]
+                        author_matches = bool(_ext_words) and any(w in cur_author_norm for w in _ext_words)
+
+                        if not author_was_series and not author_matches:
                             continue
-                        # Всё совпало — исправляем автора
-                        from name_normalizer import AuthorName as _AN
-                        _an = _AN(extracted_author)
-                        canonical_author = _an.normalized if (_an.is_valid and _an.normalized) else extracted_author
-                        record.proposed_author = canonical_author
-                        record.author_source = 'folder_dataset'
-                        if not record.proposed_series:
+
+                        if author_was_series:
+                            from name_normalizer import AuthorName as _AN
+                            _an = _AN(extracted_author)
+                            canonical_author = _an.normalized if (_an.is_valid and _an.normalized) else extracted_author
+                            record.proposed_author = canonical_author
+                            record.author_source = 'folder_dataset'
+
+                        # Ставим серию из папки (апгрейд с metadata → folder_dataset)
+                        if not record.proposed_series or record.series_source not in _FOLDER_SOURCES_P2:
                             record.proposed_series = extracted_series
                             record.series_source = 'folder_dataset'
                         _folder_pattern_count += 1
@@ -482,11 +500,6 @@ class Pass2SeriesFilename:
                         if _author_matches_folder(author_name, part):
                             author_folder_idx = i
                             break
-
-                _FOLDER_SOURCES_P2 = {
-                    'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
-                    'folder_metadata_confirmed', 'no_series_folder',
-                }
 
                 if author_folder_idx is not None:
                     i = author_folder_idx
@@ -1975,6 +1988,10 @@ class Pass2SeriesFilename:
 
             for record in files_in_folder:
                 if not record.proposed_series:
+                    continue
+                # Папочный источник авторитетен — не сбрасываем
+                if record.series_source in ('folder_dataset', 'folder_hierarchy',
+                                            'folder_meta_consensus', 'folder_metadata_confirmed'):
                     continue
                 ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
                 # Совпадение: proposed == folder_name или одно является префиксом другого
