@@ -187,9 +187,10 @@ class Pass3Normalize:
             else:
                 metadata_for_normalization = record.metadata_authors
             
-            # folder_multiauthor: автор уже установлен Pass 2 как единый для всей папки — не трогаем
+            # folder_multiauthor: не расширяем из metadata, но порядок слов нормализуем.
+            # "Евгений Красницкий" → "Красницкий Евгений", "Красницкий и другие" — без изменений.
             if record.author_source == 'folder_multiauthor':
-                normalized = record.proposed_author
+                normalized = self.normalizer.normalize_format(record.proposed_author, "")
 
             elif '; ' in record.proposed_author or ', ' in record.proposed_author:
                 # Determine separator
