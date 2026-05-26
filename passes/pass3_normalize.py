@@ -13,6 +13,13 @@ def _nfc_yo_to_ye(s: str) -> str:
     return unicodedata.normalize('NFC', s).replace('\u0451', '\u0435')
 
 
+
+
+def _strip_diacritics(s: str) -> str:
+    """Remove combining diacritic marks (e.g. stress accent е́ → е)."""
+    return unicodedata.normalize('NFC',
+        ''.join(c for c in unicodedata.normalize('NFD', s)
+                if unicodedata.category(c) != 'Mn'))
 class Pass3Normalize:
     """PASS 3: Normalize author names to standard format.
     
@@ -204,6 +211,22 @@ class Pass3Normalize:
             else:
                 # Single author — normalize
                 normalized_candidate = self.normalizer.normalize_format(record.proposed_author, metadata_for_normalization)
+
+                # If result contains a noble/foreign particle (de, van, де…), normalize_format
+                # may place the particle at the end ("Берньер Луи де") which looks wrong.
+                # In that case use the metadata form directly — it has natural order.
+                _PARTICLES_EARLY = frozenset({
+                    'де', 'ди', 'дю', 'ду', 'да', 'дер', 'ден', 'дель', 'дела', 'делла',
+                    'дос', 'дас', 'ван', 'фон', 'ля', 'ле', 'ла',
+                    'de', 'di', 'du', 'da', 'der', 'den', 'van', 'von',
+                    'la', 'le', 'les', 'del', 'della', 'dos', 'das',
+                })
+                if normalized_candidate and metadata_for_normalization:
+                    _nc_words = [w.lower() for w in normalized_candidate.split()]
+                    if any(w in _PARTICLES_EARLY for w in _nc_words):
+                        _meta_natural = metadata_for_normalization.split(';')[0].strip()
+                        if _meta_natural:
+                            normalized_candidate = _meta_natural
 
                 # For filename-sourced multi-word authors: the block extractor already guarantees
                 # ФИ order (Фамилия first). If normalize_format reordered the words (first word
@@ -399,5 +422,12 @@ class Pass3Normalize:
                 normalized_series = _nfc_yo_to_ye(record.proposed_series)
                 if normalized_series != record.proposed_series:
                     record.proposed_series = normalized_series
+
+        # Снять комбинированные диакритические знаки (знаки ударения е́ → е) из имён авторов.
+        for record in records:
+            if record.proposed_author:
+                stripped = _strip_diacritics(record.proposed_author)
+                if stripped != record.proposed_author:
+                    record.proposed_author = stripped
 
         self.logger.log(f"[PASS 3] Normalized {normalized_count} author names")
