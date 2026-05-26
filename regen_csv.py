@@ -197,28 +197,32 @@ class RegenCSVService:
 
         return True
     
-    def _extract_series_from_folder_name(self, folder_name: str) -> str:
+    def _extract_series_from_folder_name(self, folder_name: str,
+                                         preserve_leading_number: bool = False) -> str:
         """
         Извлечь название серии из имени папки, применяя паттерны.
-        
-        1. Убирает ведущие номера ("1. ", "2) " и т.д.)
+
+        1. Убирает ведущие номера ("1. ", "2) " и т.д.) — если preserve_leading_number=False
         2. Затем применяет паттерны для извлечения серии из авторов в скобках
         3. Fallback: берёт всё перед скобками
-        
+
         Args:
             folder_name: Имя папки ("1941 (Иван Байбаков)" или "1. Путь в Царьград")
-        
+            preserve_leading_number: если True — не срезаем числовой префикс (папка является
+                подсерией в иерархии и порядковый номер несёт смысл для читателя)
+
         Returns:
             Название серии или исходное имя папки
         """
-        # ШАГ 0: СНАЧАЛА убрать ведущие номера ("1. ", "2) " и т.д.)
+        # ШАГ 0: убрать ведущие номера ("1. ", "2) " и т.д.)
         # "1. Путь в Царьград" → "Путь в Царьград"
         # "2) Варяг" → "Варяг"
-        # НО: "1941 (Иван Байбаков)" оставляем как есть (1941 это часть имени)
-        cleaned = re.sub(r'^\d+[\.\)\-]\s+', '', folder_name).strip()
-        if cleaned and cleaned != folder_name:
-            # Если что-то удалили, используем очищенную версию
-            folder_name = cleaned
+        # НО: "1941 (Иван Байбаков)" оставляем (1941 — часть имени, не порядковый номер)
+        # НЕ срезаем когда папка — подсерия в иерархии (preserve_leading_number=True)
+        if not preserve_leading_number:
+            cleaned = re.sub(r'^\d+[\.\)\-]\s+', '', folder_name).strip()
+            if cleaned and cleaned != folder_name:
+                folder_name = cleaned
         
         # ШАГ 1: Попробуем применить паттерны и найти группу "series"
         for pattern_str, pattern_regex, group_names in self.folder_patterns:
@@ -564,7 +568,8 @@ class RegenCSVService:
                         if any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
                             result = ('', 'no_series_folder')
                         else:
-                            series_names = [self._extract_series_from_folder_name(f) for f in series_folders]
+                            _pln = len(series_folders) >= 2
+                            series_names = [self._extract_series_from_folder_name(f, preserve_leading_number=_pln) for f in series_folders]
                             series_combined = '\\'.join(s for s in series_names if s)
                             if series_combined:
                                 result = (series_combined, 'folder_dataset')
@@ -585,7 +590,8 @@ class RegenCSVService:
                             if any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
                                 result = ('', 'no_series_folder')
                             else:
-                                series_names = [self._extract_series_from_folder_name(f) for f in series_folders]
+                                _pln = len(series_folders) >= 2
+                                series_names = [self._extract_series_from_folder_name(f, preserve_leading_number=_pln) for f in series_folders]
                                 series_combined = '\\'.join(s for s in series_names if s)
                                 if series_combined:
                                     result = (series_combined, 'folder_dataset')
@@ -597,7 +603,8 @@ class RegenCSVService:
                         if any(is_no_series_folder(f, self._no_series_names) for f in series_folders):
                             result = ('', 'no_series_folder')
                         else:
-                            series_names = [self._extract_series_from_folder_name(f) for f in series_folders]
+                            _pln = len(series_folders) >= 2
+                            series_names = [self._extract_series_from_folder_name(f, preserve_leading_number=_pln) for f in series_folders]
                             series_combined = '\\'.join(s for s in series_names if s)
                             if series_combined:
                                 result = (series_combined, 'folder_dataset')
