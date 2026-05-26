@@ -700,10 +700,14 @@ class Pass4Consensus:
                 r.proposed_series for r in author_records
                 if r.proposed_series and '\\' in r.proposed_series
             )
+            _FOLD_SRC = {'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+                         'folder_metadata_confirmed'}
             for record in author_records:
                 s = record.proposed_series or ''
                 if '\\' not in s:
                     continue
+                if (record.series_source or '') in _FOLD_SRC:
+                    continue  # папочная иерархия авторитетна без count-подтверждения
                 if subseries_counts[s] >= 2:
                     continue
                 # Уникальная подсерия — сбрасываем в базовую серию
