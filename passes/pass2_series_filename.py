@@ -954,8 +954,9 @@ class Pass2SeriesFilename:
                             match = re.search(r'^(.+?)\s+\d+[-\u2013\u2014]\d+\s*$', second_part_bare)
                             is_range_match = bool(match)
                             if not match:
-                                # Одиночное арабское число: "Охотник 1"
-                                match = re.search(r'^(.+?)\s+\d+\s*$', second_part_bare)
+                                # Одиночное арабское число 1–2 цифры: "Охотник 1", "Серия 12"
+                                # 3+ цифры (888, 1234) — номер дела/произведения, не том серии.
+                                match = re.search(r'^(.+?)\s+\d{1,2}\s*$', second_part_bare)
                             if not match:
                                 # Римские цифры: "Бесноватый Цесаревич I"
                                 match = re.search(r'^(.+?)\s+[IVX]+\s*$', second_part_bare)
@@ -974,7 +975,7 @@ class Pass2SeriesFilename:
                 # "Шалашов Евгений - Господин следователь 2" → "Господин следователь"
                 # Также: "Author - Series N. Title" (число не в конце, за ним ". Title")
                 if not series_candidate and ' - ' in file_name_for_fallback:
-                    match = re.match(r'^(.+?)\s*-\s*(.+?)\s+(?:\d+[-\u2013\u2014]\d+|\d+|[IVX]+)\s*$', file_name_for_fallback)
+                    match = re.match(r'^(.+?)\s*-\s*(.+?)\s+(?:\d{1,2}[-\u2013\u2014]\d{1,2}|\d{1,2}|[IVX]+)\s*$', file_name_for_fallback)
                     if not match:
                         # Попытка: "Author - Series N. Title"
                         match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d{1,2}\.\s+.+$', file_name_for_fallback)
@@ -3321,10 +3322,11 @@ class Pass2SeriesFilename:
 
                 if looks_like_author:
                     # Проверяем диапазоны: "Совок 1-5", "Попаданец в Дракона 1-8" → True
-                    series_match = re.match(r'^(.+?)\s+\d+[-–—]\d+\s*$', second_part)
-                    # Проверяем арабские цифры: "Охотник 1" → True
+                    series_match = re.match(r'^(.+?)\s+\d{1,2}[-–—]\d{1,2}\s*$', second_part)
+                    # Проверяем арабские цифры 1–2 знака: "Охотник 1" → True
+                    # 3+ цифры (888) — номер дела/произведения, не том серии.
                     if not series_match:
-                        series_match = re.match(r'^(.+?)\s+\d+\s*$', second_part)
+                        series_match = re.match(r'^(.+?)\s+\d{1,2}\s*$', second_part)
                     # Если нет арабских, проверяем римские цифры: "Бесноватый Цесаревич I" → True
                     if not series_match:
                         series_match = re.match(r'^(.+?)\s+[IVX]+\s*$', second_part)
@@ -3615,7 +3617,9 @@ class Pass2SeriesFilename:
             ).strip()
             
             # Дополнительно удаляем "№ N" или одиночный "№" в конце
-            series_name = re.sub(r'\s*№\s*\d*\s*$', '', series_name).strip()
+            # Только 1–2 цифры: №888 — это номер дела/произведения, не том серии.
+            series_name = re.sub(r'\s*№\s*\d{1,2}\s*$', '', series_name).strip()
+            series_name = re.sub(r'\s*№\s*$', '', series_name).strip()
             
             # Однобуквенные компоненты — это части аббревиатуры (напр. «О. Р. З.»), а не уровни серии.
             # Сбрасываем всю иерархию, чтобы не собирать мусор вида «Р\или Сказ...»
@@ -4185,7 +4189,9 @@ class Pass2SeriesFilename:
             # "Смертельный аромат № 5" → "Смертельный аромат"
             # "Смертельный аромат №5" → "Смертельный аромат"
             # "Смертельный аромат №" → "Смертельный аромат"
-            text = re.sub(r'\s*№\s*\d*\s*$', '', text).strip()
+            # Только 1–2 цифры: №888 — это номер дела/произведения, не том серии.
+            text = re.sub(r'\s*№\s*\d{1,2}\s*$', '', text).strip()
+            text = re.sub(r'\s*№\s*$', '', text).strip()
             
             # Правило 3: Удалить всё после "номер " (менее строгое)
             # Паттерн: "слова цифра слова" → берем только "слова"
