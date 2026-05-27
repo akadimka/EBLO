@@ -16,10 +16,10 @@ def _nfc_yo_to_ye(s: str) -> str:
 
 
 def _strip_diacritics(s: str) -> str:
-    """Remove combining diacritic marks (e.g. stress accent е́ → е)."""
+    """Remove stress accent marks only (U+0301 acute), preserving й, ё, etc."""
     return unicodedata.normalize('NFC',
         ''.join(c for c in unicodedata.normalize('NFD', s)
-                if unicodedata.category(c) != 'Mn'))
+                if c != '́'))
 class Pass3Normalize:
     """PASS 3: Normalize author names to standard format.
     
