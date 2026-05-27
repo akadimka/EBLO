@@ -731,7 +731,10 @@ class RegenCSVService:
             # ===== Post-check: series must never equal author =====
             # Normalize both sides for comparison: strip trailing periods, lowercase.
             def _norm_for_cmp(s: str) -> str:
-                return s.rstrip('. ').strip().lower().replace('ё', 'е')
+                import re as _re_cmp
+                s = s.rstrip('. ').strip().lower().replace('ё', 'е')
+                s = _re_cmp.sub(r'[«»""„"‹›]', '', s)
+                return s
 
             _series_eq_author_cleared = 0
             for record in self.records:
