@@ -355,8 +355,18 @@ class Pass2Filename:
                             # Put the matched surname FIRST (ФИ convention).
                             # FB2 metadata often stores names in ИФ order ("Хуан Франсиско Феррандис"),
                             # but canonical format is ФИ ("Феррандис Хуан Франсиско").
+                            # EXCEPTION: if the metadata contains a noble particle (де, van, фон…),
+                            # do NOT reorder — the particle belongs next to its word.
+                            # "Луи де Берньер" must stay "Луи де Берньер", not "Берньер Луи де".
+                            _PARTICLES_P2 = frozenset({
+                                'де', 'ди', 'дю', 'ду', 'да', 'дер', 'ден', 'дель', 'дела', 'делла',
+                                'дос', 'дас', 'ван', 'фон', 'ля', 'ле', 'ла',
+                                'de', 'di', 'du', 'da', 'der', 'den', 'van', 'von',
+                                'la', 'le', 'les', 'del', 'della', 'dos', 'das',
+                            })
+                            _has_particle = any(w in _PARTICLES_P2 for w in fb2_words_list)
                             match_idx = fb2_words_list.index(extracted_lower)
-                            if match_idx > 0:
+                            if match_idx > 0 and not _has_particle:
                                 rest = [w for i, w in enumerate(fb2_author.split()) if i != match_idx]
                                 reordered = fb2_author.split()[match_idx] + ' ' + ' '.join(rest)
                                 self._add_to_author_cache(extracted_author, reordered)
