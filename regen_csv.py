@@ -382,6 +382,7 @@ class RegenCSVService:
             print(f"[PASS 2 Fallback] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] PASS 2 Fallback: Metadata applied")
 
+
             # ===== PASS 2.5: Expand abbreviated/plural author from consistent metadata =====
             _t25 = time.perf_counter()
             # Случай: папка "Войлошниковы", proposed_author="Войлошниковы" (filename),

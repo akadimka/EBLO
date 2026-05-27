@@ -298,6 +298,7 @@ class Pass2Filename:
 
         extracted_lower = extracted_author.lower().strip()
 
+
         # STEP 1: Check author cache first (knowledge from other files).
         # BUT: for single-word extractions (surname only), the cache entry might have come
         # from a DIFFERENT author who shares the same surname (e.g. "Стайн Роберт" vs
@@ -915,7 +916,21 @@ class Pass2Filename:
                     if (surname_cached
                             and len(surname_cached.split()) > len(author_words)
                             and surname_cached.split()[0].lower() == first_lower):
-                        cached = surname_cached
+                        # Guard: if record has metadata and the cached longer form
+                        # contains non-surname words NOT found in metadata, it's a
+                        # different person sharing the same surname — don't upgrade.
+                        # Example: "Дэвис Анна" (meta="Анна Дэвис") must not be
+                        # upgraded to "Дэвис Дж. Мэдисон" from another Дэвис book.
+                        _meta = (getattr(record, 'metadata_authors', '') or '').lower()
+                        if _meta:
+                            _new_non_surname = [
+                                w for w in surname_cached.lower().split()[1:]
+                                if len(w) > 2 and '.' not in w
+                            ]
+                            if any(w not in _meta for w in _new_non_surname):
+                                surname_cached = None
+                        if surname_cached:
+                            cached = surname_cached
 
             if cached and len(cached.split()) > len(author_words):
                 record.proposed_author = cached
