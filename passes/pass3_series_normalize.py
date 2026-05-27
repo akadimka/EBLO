@@ -78,6 +78,17 @@ class Pass3SeriesNormalize:
                 if _nfc_lower_yo(record.metadata_series.strip()) == _nfc_lower_yo(original):
                     normalized = original
 
+            # Bracket-author suffix ([Громов], [Иванов]) всегда убираем —
+            # даже если metadata guard восстановил оригинал.
+            normalized = re.sub(r'\s*\[[^\]]*\]\s*$', '', normalized).strip()
+
+            # series_conversions применяем ПОСЛЕ metadata guard — они имеют
+            # приоритет над метаданными (явная конфигурация важнее автоопределения).
+            for old_name, new_name in self.series_conversions.items():
+                if normalized.lower() == old_name.lower():
+                    normalized = new_name
+                    break
+
             # FOLDER-PREFIX GUARD: если серия вида «Коллекция. Подсерия»,
             # а «Коллекция» совпадает с именем одной из родительских папок —
             # оставляем только «Подсерия».

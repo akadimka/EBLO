@@ -525,7 +525,6 @@
     "Старец": "Старицын",
     "Роберт Дж. Сойер": "Роберт Сойер",
     "Лейкин Марк": "Мах Макс",
-    "Кондакова Анна": "Райро А.",
     "Шмаев Валерий": "Сержант Леший",
     "Гоблин, Каин": "Гоблин MeXXanik",
     "Романович Роман": "Романович (Пастырь) Роман",
@@ -1311,5 +1310,9 @@
     "о"
   ],
   "duplicate_finder_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
-  "compiler_scan_dir": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1"
+  "compiler_scan_dir": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
+  "series_conversions": {
+    "Писательница-детективщица Алена Дмитриева": "Алена Дмитриева, детективщица",
+    "1": "1 (Первый)"
+  }
 }
