@@ -348,7 +348,14 @@ class AuthorName:
         known_suffixes = self._get_known_initials_and_suffixes()
         patronymic = None
         remaining_words = words[:]
-        
+
+        # Special case: "Имя Отчество Фамилия" (First Patronymic Surname)
+        # If exactly 3 words and the MIDDLE word is a patronymic, handle it explicitly
+        # before the generic "check last word" logic picks up the surname as patronymic.
+        # Example: "Ольга Ивановна Тарасевич" → (Тарасевич, Ольга, Ивановна)
+        if len(words) == 3 and self._is_patronymic(words[1]) and not self._is_patronymic(words[0]):
+            return (words[2], words[0], words[1])
+
         # Check if last word is patronymic
         if self._is_patronymic(remaining_words[-1]):
             patronymic = remaining_words[-1]

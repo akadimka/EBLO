@@ -231,6 +231,11 @@ class Pass2Filename:
                     # (i.e. normalization produced a different result). Keep original for cache
                     # key coverage but use normalized as the stored value.
                     canonical = normalized_author if normalized_author != author else author
+                    # Reduce to 2-word Surname First form for word-keyed cache entries.
+                    # 3-word forms (with patronymic) cause false upgrades: "Тарасевич Ольга"
+                    # would be incorrectly upgraded to "Тарасевич Ольга Ивановна".
+                    if len(canonical.split()) >= 3 and _an.is_valid and _an.parts[2]:
+                        canonical = ' '.join(canonical.split()[:2])
 
                     author_lower = author.lower().strip()
                     self.author_cache[author_lower] = canonical
