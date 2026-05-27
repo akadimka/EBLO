@@ -806,15 +806,27 @@ class SynchronizationService:
                     self.stats['files_moved'] += 1
 
                     # Patch FB2 metadata: author, series, book-title.
-                    # Автор: перезаписываем только если исходных авторов < 3
-                    # (коллективные сборники не трогаем).
+                    # Автор: перезаписываем только если:
+                    #   а) исходных авторов < 3 (коллективные сборники не трогаем)
+                    #   б) proposed_author — не коллективный маркер (Соавторство / Сборник / …)
+                    # Если proposed_author — коллективный маркер, файл всё равно перемещается
+                    # в папку с этим именем, но авторы внутри FB2 остаются оригинальными.
                     # Заголовок: если file_title ошибочен (содержит имя автора) или
                     # отличается от реального — записываем правильный из имени файла.
+                    _COLLECTIVE_AUTHORS = {
+                        'соавторство', 'сборник', 'антология', 'коллектив авторов',
+                        'разные авторы', 'various authors', 'anthology',
+                    }
+                    _prop_auth_lower = (record.proposed_author or '').strip().lower()
+                    _is_collective = _prop_auth_lower in _COLLECTIVE_AUTHORS
                     orig_auth_count = len([
                         a for a in re.split(r'[;,]+', record.metadata_authors or '')
                         if a.strip()
                     ])
-                    patch_author = record.proposed_author if orig_auth_count < 3 else None
+                    patch_author = (
+                        None if _is_collective or orig_auth_count >= 3
+                        else record.proposed_author
+                    )
                     patch_title = None
                     derived = self._derive_title_from_filename(record)
                     if derived:
