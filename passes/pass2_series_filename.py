@@ -365,11 +365,14 @@ class Pass2SeriesFilename:
             inside = match.group(2).strip()
             inside_words = inside.split()
             if len(inside_words) >= 2:
-                # Многословное содержимое в скобках — всегда имя автора (дизамбигуатор).
-                # Срезаем независимо от того, совпадает ли с author_hint.
-                # Примеры: "Русич (Посняков Андрей)" → "Русич",
-                #          "Орда (Посняков Андрей)" → "Орда".
-                folder_name = before
+                # Многословное содержимое в скобках — обычно имя автора (дизамбигуатор).
+                # НО: если скобки содержат цифры ("Хроники 7-8", "тт. 1-4") —
+                # это контекстный суффикс нумерации, не имя автора. Оставляем.
+                # Примеры убираем: "Русич (Посняков Андрей)" → "Русич",
+                #                  "Орда (Посняков Андрей)" → "Орда".
+                # Примеры сохраняем: "Возвращение в Тооредаан (Хроники 7-8)" — оставить как есть.
+                if not any(c.isdigit() for c in inside):
+                    folder_name = before
             # Однословное содержимое — оставляем скобки как есть ("Алхимик (завершён)")
 
         # По правилам русского языка после запятой всегда должен идти пробел
@@ -564,9 +567,15 @@ class Pass2SeriesFilename:
 
                                 if has_parent_series:
                                     # Б) Иерархия: {цикл}\{Подсерия}
-                                    # Убираем суффикс "(Автор)", но сохраняем числовой префикс "N. "
-                                    # — он становится порядковым номером подсерии в компиляции.
-                                    subfolder_display = re.sub(r'\s*\([^)]*\)\s*$', '', series_folder).strip()
+                                    # Убираем суффикс "(Автор)", но сохраняем:
+                                    # - числовой префикс "N. " — порядковый номер подсерии
+                                    # - скобочный суффикс с цифрами "(Хроники 7-8)" — глобальный контекст
+                                    _par_m = re.search(r'\s*\(([^)]*)\)\s*$', series_folder)
+                                    if _par_m and any(c.isdigit() for c in _par_m.group(1)):
+                                        # Содержит цифры — это контекст нумерации, не имя автора
+                                        subfolder_display = series_folder.strip()
+                                    else:
+                                        subfolder_display = re.sub(r'\s*\([^)]*\)\s*$', '', series_folder).strip()
                                     record.proposed_series = f"{author_folder_series}\\{subfolder_display}"
 
                                     # Костыль для многоавторных папок: "Серия (Фамилия и др)" →
@@ -1225,6 +1234,9 @@ class Pass2SeriesFilename:
         # «01_Якудза...» → series_number=1 даже если metadata ошибочно говорит 3.
         self._correct_series_number_from_filename(records)
 
+        # Пометить устаревшие дубликаты (старый/новый вариант одной книги)
+        self._mark_duplicate_variants(records)
+
         # 🔑 ФИНАЛЬНЫЙ КОСТЫЛЬ: многоавторные папки "Серия (Фамилия и др)"
         # После всей обработки исправляем автора для ВСЕХ файлов под такими папками.
         # ВАЖНО: вызываем до _unify_folder_series_source повторно, потому что
@@ -1311,6 +1323,26 @@ class Pass2SeriesFilename:
             if lo_b >= hi_b or 1900 <= lo_b <= 2099:
                 continue
             record.series_number = f'{lo_b}-{hi_b}'
+
+        # Правило 5: «Слово N» в имени файла — «Свиток 1», «Том 3», «Книга 4» и т.п.
+        # Применяется только когда series_number ещё не задан (нет метаданных и нет префикса).
+        _WORD_NUM_RE = re.compile(
+            r'(?:свиток|том|книга|часть|выпуск|арка|vol\.?|part)\s+(\d{1,4})\b',
+            re.IGNORECASE | re.UNICODE,
+        )
+        for record in records:
+            if record.series_number:
+                continue
+            if not record.file_path:
+                continue
+            stem = Path(record.file_path).stem
+            mw = _WORD_NUM_RE.search(stem)
+            if not mw:
+                continue
+            fn_numW = int(mw.group(1))
+            if 1900 <= fn_numW <= 2099:
+                continue
+            record.series_number = str(fn_numW)
 
     def _resolve_hierarchical_flat_mismatch(self, records: List[BookRecord]) -> None:
         """Нормализует рассогласование «A\\B» и «A» у одного автора.
@@ -1531,6 +1563,50 @@ class Pass2SeriesFilename:
                         _qm = _qual_re.search(Path(rec.file_path).stem)
                         if _qm:
                             rec.proposed_series = f'{rec.proposed_series.strip()} {_qm.group(1)}'
+
+    def _mark_duplicate_variants(self, records: List[BookRecord]) -> None:
+        """Помечает устаревшие дубликаты: два файла с одинаковым автором+серия+номер.
+
+        Когда одна и та же книга существует в старом и новом вариантах (например,
+        «Возвращение в Тооредаан.fb2» и «Возвращение в Тооредаан (новый вариант) (СИ).fb2»
+        оба имеют series_number=1), нужно оставить более новый и пометить старый.
+
+        Маркеры «нового варианта» в имени файла: «новый вариант», «новая редакция»,
+        «новая версия», «new version», «revised», «updated».
+        Файл С таким маркером — новый, БЕЗ маркера — старый → delete_flag=True.
+        """
+        import unicodedata as _ud
+        _NEW_MARKERS = re.compile(
+            r'нов(?:ый|ая|ое)\s+(?:вариант|редакци|версия|издани)|'
+            r'new\s+(?:version|edition|variant)|revised|updated',
+            re.IGNORECASE | re.UNICODE,
+        )
+
+        def _norm(s: str) -> str:
+            return re.sub(r'\s+', ' ', _ud.normalize('NFC', s).lower().replace('ё', 'е')).strip()
+
+        from collections import defaultdict
+        # Группируем по (автор, серия, номер_в_серии)
+        groups: dict = defaultdict(list)
+        for rec in records:
+            if not rec.proposed_series or not rec.series_number:
+                continue
+            key = (_norm(rec.proposed_author or ''), _norm(rec.proposed_series), rec.series_number)
+            groups[key].append(rec)
+
+        marked = 0
+        for key, grp in groups.items():
+            if len(grp) < 2:
+                continue
+            # Разбиваем на «новые» и «старые» по маркеру в имени файла
+            new_variants = [r for r in grp if _NEW_MARKERS.search(Path(r.file_path).stem)]
+            old_variants = [r for r in grp if not _NEW_MARKERS.search(Path(r.file_path).stem)]
+            if new_variants and old_variants:
+                for r in old_variants:
+                    r.delete_flag = True
+                    marked += 1
+        if marked:
+            print(f"[PASS 2] Marked {marked} records as duplicate (superseded by newer variant)")
 
     def _fix_multiauthor_folders(self, records: List[BookRecord]) -> None:
         """Финальный костыль: папки "Серия (Фамилия и др)" → автор всех файлов = "Фамилия Имя и другие".

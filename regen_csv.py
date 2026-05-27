@@ -232,13 +232,23 @@ class RegenCSVService:
                 if 'series' in group_names:
                     series = match.group('series').strip()
                     if series:
+                        # Если паттерн также захватил 'author' группу содержащую цифры —
+                        # это контекст нумерации "(Хроники 7-8)", а не имя автора.
+                        # Пропускаем паттерн, не стрипаем суффикс.
+                        # Если остаток строки после серии содержит цифры — это контекст
+                        # нумерации ("Хроники 7-8"), а не имя автора. Пропускаем паттерн.
+                        _remaining = folder_name[folder_name.find(series) + len(series):].strip()
+                        if any(c.isdigit() for c in _remaining):
+                            continue
                         return series
         
         # ШАГ 2: Fallback - простое правило: всё перед скобками это серия
         # "1941 (Иван Байбаков)" → "1941"
-        match = re.match(r'^(.+?)\s*\([^)]+\)\s*$', folder_name)
+        # НО: если скобки содержат цифры ("Хроники 7-8") — это контекст нумерации, не автор
+        match = re.match(r'^(.+?)\s*\(([^)]+)\)\s*$', folder_name)
         if match:
-            return match.group(1).strip()
+            if not any(c.isdigit() for c in match.group(2)):
+                return match.group(1).strip()
         
         # ШАГ 3: Если ничего не помогло, берём всё имя
         return folder_name.strip()
@@ -1352,7 +1362,8 @@ class RegenCSVService:
                 'series_source',
                 'series_number',
                 'file_title',
-                'metadata_genre'
+                'metadata_genre',
+                'delete_flag'
             ])
 
             # Write data
@@ -1367,7 +1378,8 @@ class RegenCSVService:
                     record.series_source,
                     record.series_number,
                     record.file_title,
-                    record.metadata_genre
+                    record.metadata_genre,
+                    'DELETE' if getattr(record, 'delete_flag', False) else ''
                 ])
 
 

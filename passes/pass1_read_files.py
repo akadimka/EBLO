@@ -152,6 +152,7 @@ class BookRecord:
     series_number: str = ""       # Sequence number within series (from <sequence number=.../>)
     extracted_series_candidate: str = ""  # Series found in filename (even if blocked by BL)
     needs_filename_fallback: bool = False  # True if folder parse found nothing, need filename PASS 2
+    delete_flag: bool = False     # True if this is an older duplicate superseded by a newer variant
     
     def to_tuple(self):
         """Convert record to tuple for GUI table display."""
