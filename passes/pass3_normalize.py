@@ -222,9 +222,17 @@ class Pass3Normalize:
                 _meta_words_lower = [
                     w.lower() for w in metadata_for_normalization.split()
                 ] if metadata_for_normalization else []
-                if any(w in _PARTICLES_EARLY for w in _meta_words_lower):
-                    # Use the first author from metadata as-is (natural order)
-                    _meta_natural = metadata_for_normalization.split(';')[0].strip()
+                _prop_words_lower = [w.lower() for w in record.proposed_author.split()]
+                _has_particle = (
+                    any(w in _PARTICLES_EARLY for w in _meta_words_lower) or
+                    any(w in _PARTICLES_EARLY for w in _prop_words_lower)
+                )
+                if _has_particle and record.metadata_authors:
+                    # Use the first author from metadata as-is (natural order).
+                    # Covers both cases:
+                    #   "Берньер" + meta "Луи де Берньер" → "Луи де Берньер"
+                    #   "де Виган Дельфин" (from filename) + meta "Дельфин де Виган" → "Дельфин де Виган"
+                    _meta_natural = record.metadata_authors.split(';')[0].strip()
                     normalized_candidate = _meta_natural if _meta_natural else record.proposed_author
                 else:
                     normalized_candidate = self.normalizer.normalize_format(record.proposed_author, metadata_for_normalization)
