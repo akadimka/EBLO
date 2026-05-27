@@ -1010,6 +1010,11 @@ class Pass2Filename:
             if ', ' in filename:
                 # Extract both authors separated by comma
                 before_period = filename.split('. ', 1)[0].strip()
+                # If the last word is a single uppercase letter (initial like "А"),
+                # the dot was consumed as the author/title separator — reattach it.
+                _bp_words = before_period.split()
+                if _bp_words and len(_bp_words[-1]) == 1 and _bp_words[-1][0].isupper():
+                    before_period = before_period + '.'
                 authors = [a.strip() for a in before_period.split(', ')]
                 author = ', '.join(authors)  # Return both: "Author1, Author2"
         
@@ -1193,7 +1198,15 @@ class Pass2Filename:
                 return ""
             
             author = author.strip()
-            
+
+            # INITIAL-DOT RESTORE: block tokenizer uses '. ' as delimiter, so
+            # a trailing initial like "А" in "Райро А. Угроза..." loses its dot.
+            # If the last token of the extracted author is a single uppercase letter,
+            # re-attach the dot (it was the block separator, not end-of-author).
+            _auth_words = author.split()
+            if _auth_words and len(_auth_words[-1]) == 1 and _auth_words[-1][0].isupper():
+                author = author + '.'
+
             # TITLE-AS-AUTHOR GUARD: <book-title> can NEVER be an author.
             # This catches tie-breaking mistakes: e.g. "Алдерман Наоми - Сила" scores equally
             # for "Author - Title" and "Title - Author"; if the winning candidate equals the

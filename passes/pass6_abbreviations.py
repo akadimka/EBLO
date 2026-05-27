@@ -226,8 +226,10 @@ class Pass6Abbreviations:
         if not author:
             return author
         
-        # Try abbreviation expansion first (has priority)
-        if '.' in author:
+        # Try abbreviation expansion first (has priority).
+        # Пропускаем если автор содержит скобочный суффикс вида "(Реальное Имя)" —
+        # это намеренное дополнение из author_surname_conversions, не аббревиатура.
+        if '.' in author and '(' not in author:
             return self.normalizer.expand_abbreviation(author, authors_map)
         
         # Check if this is an incomplete name (single word)
