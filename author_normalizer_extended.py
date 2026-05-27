@@ -275,6 +275,10 @@ class AuthorNormalizer:
             import re as _re
             result = single
             for pattern, replacement in conversions.items():
+                # Skip if replacement is already present — prevents double-application
+                # when pass3 and pass5 both call apply_conversions on the same string.
+                if replacement in result:
+                    continue
                 # Используем границы слов чтобы «Бирюк» не срабатывал внутри «Бирюков»
                 result = _re.sub(
                     r'(?<![\w])' + _re.escape(pattern) + r'(?![\w])',
