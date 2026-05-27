@@ -1183,11 +1183,17 @@ class Pass2SeriesFilename:
             ak = _norm(rec.proposed_author or '')
             _author_roots.setdefault(ak, {})[_norm(root_base)] = root_base
 
+        _FOLDER_SRC_AR = {
+            'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+            'folder_metadata_confirmed',
+        }
         for record in records:
             if '\\' in (record.proposed_series or ''):
                 continue  # уже подсерия
             if not record.proposed_series:
                 continue
+            if record.series_source in _FOLDER_SRC_AR:
+                continue  # папочная серия авторитетна — не дополняем числами
             ak = _norm(record.proposed_author or '')
             series_norm = _norm(record.proposed_series.strip())
             # Только если этот же автор имеет подсерии с тем же корнем
@@ -1420,10 +1426,17 @@ class Pass2SeriesFilename:
             matches = _STEM_SN_RE.findall(stem)
             return matches[-1] if matches else ''
 
+        _FOLDER_SRC_SNS = {
+            'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+            'folder_metadata_confirmed',
+        }
         # Группируем по (автор, proposed_series) — только плоские серии
+        # Папочные источники авторитетны: их серии не дополняем номерами.
         groups: dict = defaultdict(list)
         for rec in records:
             if not rec.proposed_series or '\\' in rec.proposed_series:
+                continue
+            if rec.series_source in _FOLDER_SRC_SNS:
                 continue
             if not _sn_from_stem(rec):
                 continue
