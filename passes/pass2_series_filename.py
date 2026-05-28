@@ -1377,6 +1377,11 @@ class Pass2SeriesFilename:
             arc_norm_ps = _norm(arc.strip())
             if arc_norm_ps and arc_norm_ps not in _norm(stem):
                 continue
+            # Пропускаем если арк = корень серии (нормализованно без точек/многоточий).
+            # «Пункт назначения..\Пункт назначения» — это ложный арк, не реальная подсерия.
+            _root_base_stripped = _norm(re.sub(r'[.…]+$', '', root_base.strip()))
+            if arc_norm_ps and arc_norm_ps == _root_base_stripped:
+                continue
             key = (_norm(rec.proposed_author or ''), _norm(root_base), _norm(arc))
             existing_arcs[key].append((rec, vol_num, root_base, arc))
 
