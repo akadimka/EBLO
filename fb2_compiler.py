@@ -1690,6 +1690,16 @@ class FB2CompilerService:
         # "Варяг"), её порядковый номер не имеет смысла для текущей серии.
         is_subseries = '\\' in (rec.proposed_series or '')
         sn = (rec.series_number or '').strip()
+
+        # Исключение: filename_named_arc — series_number это ГЛОБАЛЬНАЯ позиция тома
+        # (выставлена нашим же кодом в _detect_named_arcs), не позиция в подсерии.
+        # Используем напрямую, минуя обычную subseries-логику.
+        if sn and is_subseries and (rec.series_source or '') == 'filename_named_arc':
+            if re.match(r'^\d+$', sn):
+                _arc_n = int(sn)
+                if _arc_n and _arc_n < 1900:
+                    return (0, _arc_n, 0, 0), 'series_number', False, sn
+
         if sn and not is_subseries:
             meta_s = (rec.metadata_series or '').strip().lower().replace('ё', 'е')
             prop_s = (rec.proposed_series or '').strip().lower().replace('ё', 'е')
