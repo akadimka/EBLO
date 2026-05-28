@@ -1215,9 +1215,17 @@ class Pass2SeriesFilename:
             _pat = re.compile(_escaped + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
             _m = _pat.search(stem_norm)
             if _m:
-                n = int(_m.group(1))
+                n_str = _m.group(1)
+                n = int(n_str)
                 if n < 1900:
-                    record.proposed_series = f'{record.proposed_series.strip()} {n}'
+                    if n_str.startswith('0') and len(n_str) >= 2:
+                        # Zero-padded номер («01», «07») — это порядковый номер тома,
+                        # а не суффикс названия серии. Записываем в series_number,
+                        # название серии оставляем как есть («Флибер», не «Флибер 1»).
+                        if not record.series_number:
+                            record.series_number = str(n)
+                    else:
+                        record.proposed_series = f'{record.proposed_series.strip()} {n}'
 
         # Commented out: folder pattern consensus was also causing issues
         # self._apply_series_folder_pattern_consensus(records)
@@ -1230,6 +1238,8 @@ class Pass2SeriesFilename:
         self._resolve_hierarchical_flat_mismatch(records)
         # Разбиваем «Серия N. Заголовок. Том M» на подсерии «Серия N»
         self._split_numbered_subseries(records)
+        # Обнаруживаем именованные дуги «Серия 0N. ArcTitle [ArcN]» → «Серия\ArcTitle»
+        self._detect_named_arcs(records)
 
         # Коррекция series_number: числовой префикс имени файла перебивает metadata.
         # «01_Якудза...» → series_number=1 даже если metadata ошибочно говорит 3.
@@ -1243,6 +1253,76 @@ class Pass2SeriesFilename:
         # ВАЖНО: вызываем до _unify_folder_series_source повторно, потому что
         # при первом вызове авторы были разные → guard "len(authors)>1" пропустил папку.
         self._fix_multiauthor_folders(records)
+
+    def _detect_named_arcs(self, records: List[BookRecord]) -> None:
+        """Обнаружить именованные дуги в серии и создать подсерии через '\\'.
+
+        Паттерн: «Author - SeriesRoot 0N. ArcTitle [ArcOrdinal]»
+        Если ArcTitle (без хвостового порядкового числа) встречается у 2+ томов
+        одной серии — это именованная дуга, которая становится подсерией.
+
+        Пример:
+          «Флибер 04. Джони, о-е! Или назад в СССР»   → Флибер\\Джони, о-е! Или назад в СССР  sn=4
+          «Флибер 05. Джони, о-е! Или назад в СССР 2» → Флибер\\Джони, о-е! Или назад в СССР  sn=5
+          «Флибер 01. Изменить будущее»                → Флибер  sn=1  (title уникален — не дуга)
+        """
+        import unicodedata as _ud
+        from collections import defaultdict
+
+        _norm = lambda s: _ud.normalize('NFC', s).lower().replace('ё', 'е').strip()
+
+        # Zero-padded паттерн: «SeriesRoot 0N. ArcTitle»
+        # Захватываем серию, номер тома (zero-padded) и arc candidate.
+        # Допускаем многосоставный arc title с точками внутри: «Другая жизнь. Назад в СССР»
+        _ARC_RE = re.compile(
+            r'^(?:.+?\s*-\s*)?(.+?)\s+(0\d+)\.\s+(.+)$',
+            re.UNICODE,
+        )
+        # Хвостовой порядковый номер дуги: «Джони, о-е! 2» → «Джони, о-е!»
+        _TRAIL_NUM = re.compile(r'\s+\d{1,2}\s*$')
+
+        # 1. Для каждой записи с плоской filename-серией пробуем извлечь arc.
+        #    Ключ: (author_norm, series_norm), значение: список (record, vol_num, arc_norm, arc_display)
+        groups: dict = defaultdict(list)
+        for rec in records:
+            if not rec.proposed_series or '\\' in rec.proposed_series:
+                continue
+            if 'filename' not in (rec.series_source or ''):
+                continue
+            stem = Path(rec.file_path).stem
+            m = _ARC_RE.match(stem)
+            if not m:
+                continue
+            series_in_stem = _norm(m.group(1))
+            series_rec = _norm(rec.proposed_series)
+            # Проверяем что корень в стеме совпадает с proposed_series
+            if series_in_stem != series_rec and not series_rec.startswith(series_in_stem):
+                continue
+            vol_num = int(m.group(2))
+            arc_raw = m.group(3).strip()
+            # Убираем хвостовой порядковый номер дуги
+            arc_display = _TRAIL_NUM.sub('', arc_raw).strip()
+            arc_norm = _norm(arc_display)
+            if not arc_norm or len(arc_norm) < 4:
+                continue
+            key = (_norm(rec.proposed_author or ''), series_rec)
+            groups[key].append((rec, vol_num, arc_norm, arc_display))
+
+        # 2. По каждой группе: arc titles с 2+ вхождениями → подсерия
+        for (_author_k, _series_k), entries in groups.items():
+            arc_counts: dict = defaultdict(list)
+            for rec, vol_num, arc_norm, arc_display in entries:
+                arc_counts[arc_norm].append((rec, vol_num, arc_display))
+
+            for arc_norm, arc_entries in arc_counts.items():
+                if len(arc_entries) < 2:
+                    continue  # уникальный title — не дуга
+                # Берём наиболее длинный arc_display как каноническое название дуги
+                arc_canonical = max((arc_display for _, _, arc_display in arc_entries), key=len)
+                for rec, vol_num, _ in arc_entries:
+                    rec.proposed_series = f'{rec.proposed_series}\\{arc_canonical}'
+                    rec.series_number = str(vol_num)
+                    rec.series_source = rec.series_source or 'filename'
 
     def _correct_series_number_from_filename(self, records: List[BookRecord]) -> None:
         """Переопределяет series_number числовым префиксом имени файла.
