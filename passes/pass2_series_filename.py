@@ -1321,9 +1321,15 @@ class Pass2SeriesFilename:
                 arc_canonical = max((arc_display for _, _, arc_display in arc_entries), key=len)
                 vols = sorted(vol_num for _, vol_num, _ in arc_entries)
                 lo, hi = vols[0], vols[-1]
-                # Диапазон глобальных номеров включается в корень серии:
-                # «Флибер 4-7\Джони, о-е!» чтобы сохранить сквозную нумерацию.
-                range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
+                # Диапазон в корне серии нужен только когда дуга — подмножество:
+                # «Флибер 4-7\Джони» — часть серии, есть другие тома вне дуги.
+                # Если же ВСЕ тома серии принадлежат этой дуге — диапазон лишний:
+                # «Вторая жизнь\Нагнуть Европу», а не «Вторая жизнь 1-2\Нагнуть Европу».
+                is_partial_arc = len(arc_entries) < len(entries)
+                if is_partial_arc:
+                    range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
+                else:
+                    range_suffix = ''
                 series_root = entries[0][0].proposed_series  # исходное имя серии
                 new_series = f'{series_root}{range_suffix}\\{arc_canonical}'
                 for rec, vol_num, _ in arc_entries:
@@ -1356,6 +1362,14 @@ class Pass2SeriesFilename:
             root, arc = s.split('\\', 1)
             root_base = re.sub(r'\s+\d+[-–—]\d+\s*$', '', root).strip()
             root_base = re.sub(r'\s+\d+\s*$', '', root_base).strip()
+            # Проверяем что дуга из proposed_series встречается в стеме.
+            # Том 13 («аворг. Назад в СССР») не должен попасть в группу «Другая жизнь»
+            # потому что «другая жизнь» не встречается в его стеме.
+            # Для Чинцова («Нагнуть Европу 1. Сокровища тамплиеров») «нагнуть европу»
+            # присутствует в стеме → правильно включается.
+            arc_norm_ps = _norm(arc.strip())
+            if arc_norm_ps and arc_norm_ps not in _norm(stem):
+                continue
             key = (_norm(rec.proposed_author or ''), _norm(root_base), _norm(arc))
             existing_arcs[key].append((rec, vol_num, root_base, arc))
 
@@ -1364,7 +1378,14 @@ class Pass2SeriesFilename:
                 continue
             vols = sorted(vol_num for _, vol_num, _, _ in arc_entries)
             lo, hi = vols[0], vols[-1]
-            range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
+            # Диапазон нужен только когда дуга — подмножество серии.
+            # Признак: дуга не начинается с тома 1 (lo > 1) — значит есть предшествующие тома.
+            # Это надёжнее чем счётчик записей, который не видит плоские тома из других групп.
+            is_partial_arc = lo > 1
+            if is_partial_arc:
+                range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
+            else:
+                range_suffix = ''
             root_base = arc_entries[0][2]
             arc_display = arc_entries[0][3]
             new_series = f'{root_base}{range_suffix}\\{arc_display}'
