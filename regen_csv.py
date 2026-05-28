@@ -197,6 +197,28 @@ class RegenCSVService:
                 return False
 
         return True
+
+    def _folder_is_author_login(self, folder_name: str, proposed_author: str) -> bool:
+        """Проверяет, является ли папка логином/псевдонимом автора на латинице.
+
+        Покрывает случай когда имя папки — однословный латинский никнейм/транслит:
+        «shellina» для автора «Шеллина Олеся».
+        Критерии: 1 слово, все ASCII-буквы, длина ≈ длине одного из слов автора (±3 символа).
+        """
+        if not folder_name or not proposed_author:
+            return False
+        # Папка — ровно одно слово из ASCII-букв
+        if not re.match(r'^[A-Za-z]+$', folder_name.strip()):
+            return False
+        fl = len(folder_name.strip())
+        if fl < 4:
+            return False
+        # Сравниваем длину с каждым словом имени автора (кириллица, ≥4 символа)
+        for word in re.split(r'[\s,;]+', proposed_author):
+            word = word.strip()
+            if len(word) >= 4 and not word.isascii() and abs(fl - len(word)) <= 3:
+                return True
+        return False
     
     def _extract_series_from_folder_name(self, folder_name: str,
                                          preserve_leading_number: bool = False) -> str:
@@ -555,6 +577,9 @@ class RegenCSVService:
                     series_folders = []
                     for _sf in subfolders:
                         if not author or not self._surnames_match_folder(author, _sf):
+                            # Дополнительная проверка: папка = латинский логин/транслит автора
+                            if self._folder_is_author_login(_sf, author):
+                                continue  # папка автора, не серия
                             series_folders.append(_sf)
                             continue
                         # Автор найден в имени подпапки.
