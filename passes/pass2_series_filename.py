@@ -1331,6 +1331,48 @@ class Pass2SeriesFilename:
                     rec.series_number = str(vol_num)
                     rec.series_source = 'filename_named_arc'
 
+        # --- Второй проход: выравниваем существующие Series\Arc из filename-источников ---
+        # Тома которые уже имеют '\' (созданы старым двухточечным механизмом) должны
+        # получить тот же формат с диапазоном в корне, что и дуги из первого прохода.
+        # Используем расширенный паттерн — принимаем и zero-padded (08, 09) и двузначные
+        # (10, 11, 12), так как записи с '\' уже прошли фильтрацию по другому критерию.
+        _ARC_RE2 = re.compile(
+            r'^(?:.+?\s*-\s*)?(.+?)\s+(\d{1,2})\.\s+(.+)$',
+            re.UNICODE,
+        )
+        _FILENAME_SRCS = {'filename', 'filename+meta_confirmed', 'filename+meta_expanded'}
+        existing_arcs: dict = defaultdict(list)
+        for rec in records:
+            s = rec.proposed_series or ''
+            if '\\' not in s:
+                continue
+            if (rec.series_source or '') not in _FILENAME_SRCS:
+                continue
+            stem = Path(rec.file_path).stem
+            m = _ARC_RE2.match(stem)
+            if not m:
+                continue
+            vol_num = int(m.group(2))
+            root, arc = s.split('\\', 1)
+            root_base = re.sub(r'\s+\d+[-–—]\d+\s*$', '', root).strip()
+            root_base = re.sub(r'\s+\d+\s*$', '', root_base).strip()
+            key = (_norm(rec.proposed_author or ''), _norm(root_base), _norm(arc))
+            existing_arcs[key].append((rec, vol_num, root_base, arc))
+
+        for (_ak, _rk, _srk), arc_entries in existing_arcs.items():
+            if len(arc_entries) < 2:
+                continue
+            vols = sorted(vol_num for _, vol_num, _, _ in arc_entries)
+            lo, hi = vols[0], vols[-1]
+            range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
+            root_base = arc_entries[0][2]
+            arc_display = arc_entries[0][3]
+            new_series = f'{root_base}{range_suffix}\\{arc_display}'
+            for rec, vol_num, _, _ in arc_entries:
+                rec.proposed_series = new_series
+                rec.series_number = str(vol_num)
+                rec.series_source = 'filename_named_arc'
+
     def _correct_series_number_from_filename(self, records: List[BookRecord]) -> None:
         """Переопределяет series_number числовым префиксом имени файла.
 
