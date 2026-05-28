@@ -431,8 +431,15 @@ class Pass2SeriesFilename:
                         ext_series_norm = extracted_series.lower().replace('ё', 'е')
                         ext_author_norm = extracted_author.lower().replace('ё', 'е')
 
-                        # Case A: папка взята как автор вместо серии — исправить автора
-                        author_was_series = (cur_author_norm == ext_series_norm)
+                        # Case A: папка взята как автор вместо серии — исправить автора.
+                        # Требуем что extracted_author выглядит как «Фамилия Имя» (≥2 слова):
+                        # если в скобках одно слово («Базилио»), скорее всего это псевдоним,
+                        # а папка «Риддер Аристарх (Базилио)» — авторская, не серийная.
+                        _ext_author_words = [w for w in re.sub(r'[^\w]', ' ', ext_author_norm).split() if w]
+                        author_was_series = (
+                            cur_author_norm == ext_series_norm
+                            and len(_ext_author_words) >= 2
+                        )
 
                         # Case B: автор уже верный (совпадает по фамилии с extracted_author)
                         # Проверка: длинное слово из extracted_author есть в proposed_author

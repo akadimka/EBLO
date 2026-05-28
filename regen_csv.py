@@ -187,7 +187,8 @@ class RegenCSVService:
         if not unique_surnames:
             return False
 
-        folder_words = [w for w in re.split(r'[\s,;\-]+', folder_name.lower().replace('ё', 'е')) if w]
+        folder_words = [re.sub(r'[()]', '', w) for w in re.split(r'[\s,;\-]+', folder_name.lower().replace('ё', 'е')) if w]
+        folder_words = [w for w in folder_words if w]
 
         # Каждая уникальная фамилия должна совпадать хотя бы с одним словом папки.
         # startswith учитывает форму множественного числа (Живов → Живовы)
@@ -562,7 +563,15 @@ class RegenCSVService:
                         _extracted = self._extract_series_from_folder_name(_sf)
                         _auth_norm = self._normalize_name_for_comparison(author)
                         _extr_norm = self._normalize_name_for_comparison(_extracted) if _extracted else ''
-                        if _extracted and _extr_norm != _auth_norm:
+                        # Если extracted является частью имени автора (или наоборот),
+                        # это всё равно папка автора — псевдоним и реальное имя.
+                        # Пример: автор «Базилио (Риддер Аристарх)», папка «Риддер Аристарх (Базилио)»
+                        # → extracted «Риддер Аристарх», auth_norm «базилио риддер аристарх»
+                        # → «риддер аристарх» is substring of auth_norm → чистая папка автора.
+                        _is_author_variant = (_extr_norm and (
+                            _extr_norm in _auth_norm or _auth_norm in _extr_norm
+                        ))
+                        if _extracted and _extr_norm != _auth_norm and not _is_author_variant:
                             series_folders.append(_sf)
                         # иначе — чистая папка автора, пропускаем
                     # Вариантные папки ("Вариант с СИ", "ЛП" и т.п.) не образуют уровень иерархии.
