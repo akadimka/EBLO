@@ -892,7 +892,20 @@ class RegenCSVService:
             # ===== Post-check: clear false-positive series where series+number == file_title =====
             # Случай: "Коу Джонатан - Номер 11.fb2" → series="Номер", number="11", title="Номер 11"
             # proposed_series + series_number реконструируют file_title → это заголовок, не серия.
-            # Защита: не очищаем если metadata подтверждает серию или source не filename.
+            # Защита: не очищаем если metadata подтверждает серию, source не filename,
+            # или другой том того же автора+серии имеет подтверждённый source.
+            _confirmed_series_pairs: set = set()
+            _CONFIRMED_SRCS = {'filename+meta_confirmed', 'filename+meta_expanded',
+                               'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+                               'folder_metadata_confirmed', 'author-consensus (metadata-confirmed)'}
+            for _r in self.records:
+                if (_r.proposed_author or '') and (_r.proposed_series or ''):
+                    if ((_r.series_source or '') in _CONFIRMED_SRCS
+                            or 'meta_confirmed' in (_r.series_source or '')):
+                        _confirmed_series_pairs.add((
+                            (_r.proposed_author or '').strip().lower().replace('ё', 'е'),
+                            (_r.proposed_series or '').strip().lower().replace('ё', 'е'),
+                        ))
             _title_series_fp_count = 0
             _title_num_re = re.compile(r'\s+\d{1,2}\s*$')
             for record in self.records:
@@ -922,6 +935,13 @@ class RegenCSVService:
                 ms_norm = re.sub(r'[:\-«»""„"\']+', '', ms).strip()
                 ps_norm = re.sub(r'[:\-«»""„"\']+', '', ps).strip()
                 if ms and (ps_norm in ms_norm or ps in ms):
+                    continue
+                # Другой том того же автора+серии уже подтверждён → серия реальная.
+                _pair = (
+                    (record.proposed_author or '').strip().lower().replace('ё', 'е'),
+                    ps,
+                )
+                if _pair in _confirmed_series_pairs:
                     continue
                 record.proposed_series = ''
                 record.series_source = ''
