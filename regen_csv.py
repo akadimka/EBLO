@@ -907,9 +907,12 @@ class RegenCSVService:
                 match3 = bool(ft_after and re.match(r'^\d{3,}', ft_after))
                 if not match1 and not match2 and not match3:
                     continue
-                # metadata подтверждает серию — не трогаем
+                # metadata подтверждает серию — не трогаем.
+                # Нормализуем пунктуацию при сравнении: «Ревизор: возвращение» содержит «Ревизор возвращение».
                 ms = (record.metadata_series or '').strip().lower().replace('ё', 'е')
-                if ms and ps in ms:
+                ms_norm = re.sub(r'[:\-«»""„"\']+', '', ms).strip()
+                ps_norm = re.sub(r'[:\-«»""„"\']+', '', ps).strip()
+                if ms and (ps_norm in ms_norm or ps in ms):
                     continue
                 record.proposed_series = ''
                 record.series_source = ''
