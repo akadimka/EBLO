@@ -580,7 +580,7 @@ class Pass4Consensus:
             # Схлопываем подсерии где только один файл подтверждён из filename.
             # Папочные источники (folder_dataset, folder_hierarchy) уже авторитетны — не трогаем.
             _FOLDER_SRC = {'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
-                           'folder_metadata_confirmed'}
+                           'folder_metadata_confirmed', 'filename_named_arc'}
             for r in author_recs:
                 s = r.proposed_series or ''
                 if '\\' not in s:

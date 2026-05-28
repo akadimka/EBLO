@@ -1319,10 +1319,17 @@ class Pass2SeriesFilename:
                     continue  # уникальный title — не дуга
                 # Берём наиболее длинный arc_display как каноническое название дуги
                 arc_canonical = max((arc_display for _, _, arc_display in arc_entries), key=len)
+                vols = sorted(vol_num for _, vol_num, _ in arc_entries)
+                lo, hi = vols[0], vols[-1]
+                # Диапазон глобальных номеров включается в корень серии:
+                # «Флибер 4-7\Джони, о-е!» чтобы сохранить сквозную нумерацию.
+                range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
+                series_root = entries[0][0].proposed_series  # исходное имя серии
+                new_series = f'{series_root}{range_suffix}\\{arc_canonical}'
                 for rec, vol_num, _ in arc_entries:
-                    rec.proposed_series = f'{rec.proposed_series}\\{arc_canonical}'
+                    rec.proposed_series = new_series
                     rec.series_number = str(vol_num)
-                    rec.series_source = rec.series_source or 'filename'
+                    rec.series_source = 'filename_named_arc'
 
     def _correct_series_number_from_filename(self, records: List[BookRecord]) -> None:
         """Переопределяет series_number числовым префиксом имени файла.
