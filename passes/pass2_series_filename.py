@@ -1718,6 +1718,11 @@ class Pass2SeriesFilename:
                     for rec in recs:
                         if 'filename' not in rec.series_source:
                             continue
+                        # Пропускаем если метаданные уже подтверждают серию без квалификатора
+                        _ms_norm = _norm(rec.metadata_series or '')
+                        _ps_norm = _norm(rec.proposed_series or '')
+                        if _ms_norm and _ms_norm == _ps_norm:
+                            continue
                         _qm = _qual_re.search(Path(rec.file_path).stem)
                         if _qm:
                             rec.proposed_series = f'{rec.proposed_series.strip()} {_qm.group(1)}'
