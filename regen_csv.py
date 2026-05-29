@@ -221,7 +221,8 @@ class RegenCSVService:
         return False
     
     def _extract_series_from_folder_name(self, folder_name: str,
-                                         preserve_leading_number: bool = False) -> str:
+                                         preserve_leading_number: bool = False,
+                                         _genre_prefixes: list = None) -> str:
         """
         Извлечь название серии из имени папки, применяя паттерны.
 
@@ -237,6 +238,22 @@ class RegenCSVService:
         Returns:
             Название серии или исходное имя папки
         """
+        # ШАГ -1: убрать жанрово-издательский префикс «Фэнтези МИФ. », «Детектив МИФ. » и т.п.
+        # Эти значения явно перечислены в config.json → genre_folder_prefixes.
+        if _genre_prefixes is None:
+            _genre_prefixes = getattr(self, '_genre_folder_prefixes_cache', None)
+            if _genre_prefixes is None:
+                _genre_prefixes = [p.lower() for p in
+                                   (self.settings.settings.get('genre_folder_prefixes', [])
+                                    if hasattr(self.settings, 'settings') else [])]
+                self._genre_folder_prefixes_cache = _genre_prefixes
+        for _gp in _genre_prefixes:
+            if folder_name.lower().startswith(_gp + '.'):
+                rest = folder_name[len(_gp):].lstrip('. ').strip()
+                if rest:
+                    folder_name = rest
+                break
+
         # ШАГ 0: убрать ведущие номера ("1. ", "2) " и т.д.)
         # "1. Путь в Царьград" → "Путь в Царьград"
         # "2) Варяг" → "Варяг"
