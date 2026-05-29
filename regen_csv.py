@@ -610,8 +610,13 @@ class RegenCSVService:
                         # Пример: автор «Базилио (Риддер Аристарх)», папка «Риддер Аристарх (Базилио)»
                         # → extracted «Риддер Аристарх», auth_norm «базилио риддер аристарх»
                         # → «риддер аристарх» is substring of auth_norm → чистая папка автора.
+                        # Проверяем оба порядка слов: нормализованный («Фамилия Имя»)
+                        # и исходный («Имя Фамилия») для западных имён типа «Элин Хильдебранд».
+                        _auth_words = set(_auth_norm.split())
+                        _extr_words = set(_extr_norm.split())
                         _is_author_variant = (_extr_norm and (
                             _extr_norm in _auth_norm or _auth_norm in _extr_norm
+                            or (_auth_words and _auth_words.issubset(_extr_words))
                         ))
                         if _extracted and _extr_norm != _auth_norm and not _is_author_variant:
                             series_folders.append(_sf)
