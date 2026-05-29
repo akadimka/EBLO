@@ -341,7 +341,17 @@ class FB2CompilerService:
             series = (rec.proposed_series or '').strip()
             if not author or not series:
                 continue
-            key = (_norm_key(author), _series_group_key(series))
+            # filename_named_arc с «\»: группируем по базовому имени серии (без номера/диапазона
+            # и без подсерии). «Пожиратель 7-8\Город воров» → ключ «пожиратель», чтобы
+            # слиться с плоскими томами «Пожиратель 1-6, 9-11» в одну компиляцию.
+            # Остальные источники (folder_hierarchy и т.д.) используют стандартную логику.
+            if '\\' in series and (rec.series_source or '') == 'filename_named_arc':
+                _arc_root = series.split('\\')[0].strip()
+                _arc_base = re.sub(r'\s+\d{1,4}(?:\s*[-–—]\s*\d{1,4})?\s*$', '', _arc_root).strip()
+                sk = _punct_norm(_arc_base if _arc_base else _arc_root)
+            else:
+                sk = _series_group_key(series)
+            key = (_norm_key(author), sk)
             buckets.setdefault(key, []).append(rec)
 
         # Комбинированное слияние бакетов: работает когда автор И/ИЛИ серия отличаются.
