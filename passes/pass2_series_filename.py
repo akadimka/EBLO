@@ -1742,6 +1742,19 @@ class Pass2SeriesFilename:
                         record.series_number = f'{lo35}-{hi35}'
                         continue
 
+            # Правило 1.5: дробный префикс «N.M.» или «N.M_»
+            # «0.1. Двигатель (рассказ).fb2» → series_number='0.1'
+            # Проверяем ДО Правила 1, иначе _PREFIX_RE съест только «0».
+            _FRAC_PREFIX_RE = re.compile(r'^(\d{1,3}\.\d{1,4})[\._\s]', re.UNICODE)
+            mf = _FRAC_PREFIX_RE.match(stem)
+            if mf:
+                fn_frac = mf.group(1)
+                fn_frac_lo = int(fn_frac.split('.')[0])
+                if not (1900 <= fn_frac_lo <= 2099):
+                    if not (record.series_number and re.match(r'^\d+\.\d+$', record.series_number)):
+                        record.series_number = fn_frac
+                    continue
+
             m = _PREFIX_RE.match(stem)
             if m:
                 fn_num = int(m.group(1))

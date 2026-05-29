@@ -1711,15 +1711,17 @@ class FB2CompilerService:
                 if _arc_n and _arc_n < 1900:
                     return (0, _arc_n, 0, 0), 'series_number', False, sn
 
-        # Дробный sn вида «8.1», «8.2» — временная подсерия (flat серия + дробная позиция).
-        # Создаётся _detect_named_arcs когда все книги арка имеют одинаковый vol_num.
+        # Дробный sn вида «8.1», «8.2» или «0.1», «0.2» — позиция внутри тома/пролога.
+        # Создаётся _detect_named_arcs или правилом 1.5 из дробного префикса имени файла.
         # sort_key: (0, major, minor, 0) — встраивается между целыми позициями.
-        if sn and not is_subseries and (rec.series_source or '') == 'filename_named_arc':
+        # Применяем для любого источника (не только filename_named_arc), т.к.
+        # дробный sn может быть извлечён из префикса файла «0.1. Заголовок.fb2».
+        if sn and not is_subseries:
             _frac_m = re.match(r'^(\d+)\.(\d+)$', sn)
             if _frac_m:
                 _major = int(_frac_m.group(1))
                 _minor = int(_frac_m.group(2))
-                if _major and _major < 1900:
+                if _major < 1900:  # 0 допустим (пролог), проверяем только потолок
                     return (0, _major, _minor, 0), 'series_number', False, sn
 
         if sn and not is_subseries:
