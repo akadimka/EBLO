@@ -1238,6 +1238,15 @@ class Pass2SeriesFilename:
         # Не требует наличия иерархических записей у того же автора.
         # Пример: metadata='Хоттабыч', filename='Author. Хоттабыч 1. Позывной Хоттабыч 2'
         #   → proposed_series = 'Хоттабыч 1'
+        #
+        # Условие безопасности: число N добавляется в имя серии ТОЛЬКО если оно одинаково
+        # у всех файлов той же author+series группы (дуга/сезон, а не номер тома).
+        # Пример: Хоттабыч — у всех файлов «Хоттабыч 1.» → N=1 везде → добавляем.
+        # Пластуны — «Пластуны 3.», «Пластуны 6.» → N варьируется → не добавляем.
+        from collections import defaultdict as _dfl
+        _meta_arc_map: dict = {}  # (author_norm, ps_norm) → set of matched numbers
+        _meta_arc_pat: dict = {}  # (author_norm, ps_norm) → compiled pattern
+        _meta_arc_recs: list = []  # список записей подходящих под критерии
         for record in records:
             if '\\' in (record.proposed_series or ''):
                 continue
@@ -1249,21 +1258,37 @@ class Pass2SeriesFilename:
             ps_norm = _norm(record.proposed_series.strip())
             if ms_norm != ps_norm:
                 continue
+            ak = _norm(record.proposed_author or '')
+            key = (ak, ps_norm)
+            if key not in _meta_arc_pat:
+                _escaped = re.escape(ps_norm)
+                _meta_arc_pat[key] = re.compile(
+                    _escaped + r'\s+(\d{1,4})\s*[.\-–—](?!\d)', re.UNICODE
+                )
+                _meta_arc_map[key] = set()
             stem_norm = _norm(Path(record.file_path).stem)
-            _escaped = re.escape(ps_norm)
-            # (?!\d) — не совпадать с версионным номером (2.0): точка за числом не должна
-            # предшествовать другой цифре. Пример: «Лесник поневоле 2.0» → пропустить.
-            _pat = re.compile(_escaped + r'\s+(\d{1,4})\s*[.\-–—](?!\d)', re.UNICODE)
-            _m = _pat.search(stem_norm)
+            _m = _meta_arc_pat[key].search(stem_norm)
             if _m:
-                n_str = _m.group(1)
-                n = int(n_str)
+                n = int(_m.group(1))
                 if n < 1900:
-                    if n_str.startswith('0') and len(n_str) >= 2:
-                        if not record.series_number:
-                            record.series_number = str(n_str.lstrip('0') or '0')
-                    else:
-                        record.proposed_series = f'{record.proposed_series.strip()} {n}'
+                    _meta_arc_map[key].add(n)
+            _meta_arc_recs.append((record, key))
+
+        for record, key in _meta_arc_recs:
+            nums = _meta_arc_map.get(key, set())
+            if len(nums) != 1:
+                continue  # числа варьируются → это номера томов, не арк
+            n = next(iter(nums))
+            n_str = str(n)
+            stem_norm = _norm(Path(record.file_path).stem)
+            _m = _meta_arc_pat[key].search(stem_norm)
+            if not _m:
+                continue
+            if n_str.startswith('0') and len(n_str) >= 2:
+                if not record.series_number:
+                    record.series_number = str(n_str.lstrip('0') or '0')
+            else:
+                record.proposed_series = f'{record.proposed_series.strip()} {n}'
 
         # После установки серии с числом («Хоттабыч 1») ищем series_number как второе число:
         # «Хоттабыч 1. Позывной Хоттабыч 6. Аватар Х» → sn=6 (не sn=1 из metadata).
