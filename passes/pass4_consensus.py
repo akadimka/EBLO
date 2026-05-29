@@ -722,6 +722,13 @@ class Pass4Consensus:
         # Ранее проверяли sn == num, но это пропускало случаи когда блок-матчер добавлял
         # номер подсерии в название ("Азиатская сага 2", sn="1"), оставляя мусор в серии.
         trailing_num_strip_count = 0
+        # Предварительно строим индекс: (author, series) → множество series_number
+        _series_sn_map: dict = {}
+        for _r in records:
+            if _r.proposed_series and not ('\\' in (_r.proposed_series or '')):
+                _k = (_r.proposed_author or '', _r.proposed_series)
+                _series_sn_map.setdefault(_k, set()).add((_r.series_number or '').strip())
+
         for record in records:
             s = record.proposed_series or ''
             if '\\' in s:
@@ -737,6 +744,12 @@ class Pass4Consensus:
             # а не номер тома. Пример: "База 24" с series_number=1 → не трогаем.
             if sn and sn != num:
                 continue
+            # Если другие тома той же серии у того же автора имеют РАЗНЫЕ series_number —
+            # число является частью имени серии (arc/season), а не номером тома.
+            # Пример: «Хоттабыч 1» с sn=1 НЕ стрипится если тома 2-7 тоже «Хоттабыч 1».
+            _all_sn = _series_sn_map.get((_record_author := (record.proposed_author or ''), s), set())
+            if len(_all_sn) >= 2:
+                continue  # несколько разных sn → «1» — часть названия серии
             record.proposed_series = m.group(1).strip()
             if not sn:
                 record.series_number = num

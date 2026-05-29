@@ -1234,6 +1234,60 @@ class Pass2SeriesFilename:
                     else:
                         record.proposed_series = f'{record.proposed_series.strip()} {n}'
 
+        # Дополнительный путь: metadata подтверждает серию → ищем «серия N.» в стеме.
+        # Не требует наличия иерархических записей у того же автора.
+        # Пример: metadata='Хоттабыч', filename='Author. Хоттабыч 1. Позывной Хоттабыч 2'
+        #   → proposed_series = 'Хоттабыч 1'
+        for record in records:
+            if '\\' in (record.proposed_series or ''):
+                continue
+            if not record.proposed_series or not record.metadata_series:
+                continue
+            if record.series_source in _FOLDER_SRC_AR:
+                continue
+            ms_norm = _norm(record.metadata_series.replace('…', '...').strip())
+            ps_norm = _norm(record.proposed_series.strip())
+            if ms_norm != ps_norm:
+                continue
+            stem_norm = _norm(Path(record.file_path).stem)
+            _escaped = re.escape(ps_norm)
+            _pat = re.compile(_escaped + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
+            _m = _pat.search(stem_norm)
+            if _m:
+                n_str = _m.group(1)
+                n = int(n_str)
+                if n < 1900:
+                    if n_str.startswith('0') and len(n_str) >= 2:
+                        if not record.series_number:
+                            record.series_number = str(n_str.lstrip('0') or '0')
+                    else:
+                        record.proposed_series = f'{record.proposed_series.strip()} {n}'
+
+        # После установки серии с числом («Хоттабыч 1») ищем series_number как второе число:
+        # «Хоттабыч 1. Позывной Хоттабыч 6. Аватар Х» → sn=6 (не sn=1 из metadata).
+        for record in records:
+            if '\\' in (record.proposed_series or ''):
+                continue
+            if not record.proposed_series:
+                continue
+            if record.series_source in _FOLDER_SRC_AR:
+                continue
+            ps_norm = _norm(record.proposed_series.strip())
+            if not re.search(r'\s+\d+$', ps_norm):
+                continue  # серия без числа — пропускаем
+            stem_norm = _norm(Path(record.file_path).stem)
+            _escaped_ps = re.escape(ps_norm)
+            # Паттерн: «Серия N. ArcTitle M.» — извлекаем M
+            _sn_pat = re.compile(
+                _escaped_ps + r'\s*\.\s*[а-яёa-zA-ZЀ-ӿ][^\d.]*\s+(\d{1,3})\s*[.\-–—]',
+                re.UNICODE,
+            )
+            _sm = _sn_pat.search(stem_norm)
+            if _sm:
+                n = int(_sm.group(1))
+                if n < 1900 and str(n) != (record.series_number or ''):
+                    record.series_number = str(n)
+
         # Commented out: folder pattern consensus was also causing issues
         # self._apply_series_folder_pattern_consensus(records)
 
@@ -1379,8 +1433,11 @@ class Pass2SeriesFilename:
                 continue
             # Пропускаем если арк = корень серии (нормализованно без точек/многоточий).
             # «Пункт назначения..\Пункт назначения» — это ложный арк, не реальная подсерия.
+            # Также пропускаем если корень содержится в имени арка:
+            # «Хоттабыч\Позывной Хоттабыч» — «хоттабыч» ⊂ «позывной хоттабыч» → ложный арк.
             _root_base_stripped = _norm(re.sub(r'[.…]+$', '', root_base.strip()))
-            if arc_norm_ps and arc_norm_ps == _root_base_stripped:
+            if arc_norm_ps and (arc_norm_ps == _root_base_stripped
+                                or (_root_base_stripped and _root_base_stripped in arc_norm_ps)):
                 continue
             key = (_norm(rec.proposed_author or ''), _norm(root_base), _norm(arc))
             existing_arcs[key].append((rec, vol_num, root_base, arc))
@@ -3122,6 +3179,13 @@ class Pass2SeriesFilename:
                                         # Пример: metadata="Второй Апокалипсис", pattern has Subseries
                                         #   → возвращаем "Второй Апокалипсис\Аспект-Император"
                                         if pattern_has_subseries:
+                                            # Safety: если арк содержит корень — ложная иерархия
+                                            # «Хоттабыч\Позывной Хоттабыч»: «хоттабыч» ⊂ «позывной хоттабыч»
+                                            _sfb_parts = series_from_block_cleaned.split('\\', 1)
+                                            if len(_sfb_parts) == 2:
+                                                _arc_lc = _sfb_parts[1].lower().replace('ё', 'е')
+                                                if root_cmp and root_cmp in _arc_lc:
+                                                    return _sfb_parts[0].strip()
                                             return series_from_block_cleaned
                                         # Без Subseries в паттерне: subseries не подтверждена → только root
                                         return series_from_block_cleaned.split('\\')[0].strip()
