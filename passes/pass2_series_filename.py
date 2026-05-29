@@ -1402,30 +1402,60 @@ class Pass2SeriesFilename:
             r'^(?:.+?\s*-\s*)?(.+?)\s+(0\d+)\.\s+(.+)$',
             re.UNICODE,
         )
+        # Нуль-непаддированный паттерн для любых источников: «SeriesRoot N. ArcTitle[. Subtitle]»
+        # Используется как запасной когда _ARC_RE не совпал, или как основной для non-filename.
+        _ARC_RE_ANY = re.compile(
+            r'^(?:.+?\s*-\s*)?(.+?)\s+(\d{1,2})\.\s+(.+)$',
+            re.UNICODE,
+        )
         # Хвостовой порядковый номер дуги: «Джони, о-е! 2» → «Джони, о-е!»
         _TRAIL_NUM = re.compile(r'\s+\d{1,2}\s*$')
 
-        # 1. Для каждой записи с плоской filename-серией пробуем извлечь arc.
+        # 1. Для каждой записи с плоской серией пробуем извлечь arc.
         #    Ключ: (author_norm, series_norm), значение: список (record, vol_num, arc_norm, arc_display)
+        #    Обрабатываем и filename-источники (через _ARC_RE / _ARC_RE_ANY), и другие источники
+        #    (metadata и т.п.) через _ARC_RE_ANY — берём только первую секцию до '. '.
         groups: dict = defaultdict(list)
         for rec in records:
             if not rec.proposed_series or '\\' in rec.proposed_series:
                 continue
-            if 'filename' not in (rec.series_source or ''):
+            if (rec.series_source or '') == 'filename_named_arc':
                 continue
             stem = Path(rec.file_path).stem
-            m = _ARC_RE.match(stem)
+            _is_fn_src = 'filename' in (rec.series_source or '')
+            m = _ARC_RE.match(stem) if _is_fn_src else None
+            if not m:
+                m = _ARC_RE_ANY.match(stem)
             if not m:
                 continue
             series_in_stem = _norm(m.group(1))
             series_rec = _norm(rec.proposed_series)
-            # Проверяем что корень в стеме совпадает с proposed_series
+            # Проверяем что корень в стеме совпадает с proposed_series.
+            # Если нет — возможно в стеме есть авторский префикс «Автор. Серия N. Арк».
+            # Ищем series_rec в нормализованном стеме; принимаем только если он
+            # стоит сразу после '. ' или '- ' (авторский разделитель, не внутри слова).
             if series_in_stem != series_rec and not series_rec.startswith(series_in_stem):
-                continue
+                _stem_n = _norm(stem)
+                _idx = _stem_n.find(series_rec)
+                if _idx <= 0:
+                    continue
+                _prefix = _stem_n[:_idx]
+                if not (_prefix.endswith('. ') or _prefix.endswith('- ')):
+                    continue  # series_rec внутри другого слова, не авторский префикс
+                m2 = _ARC_RE_ANY.match(stem[_idx:])
+                if not m2:
+                    continue
+                _sin2 = _norm(m2.group(1))
+                if _sin2 != series_rec and not series_rec.startswith(_sin2):
+                    continue
+                m = m2
             vol_num = int(m.group(2))
             arc_raw = m.group(3).strip()
             # Убираем хвостовой порядковый номер дуги
             arc_display = _TRAIL_NUM.sub('', arc_raw).strip()
+            # Берём первую секцию до '. ' — общий arc-prefix без подзаголовка.
+            # «Пилот ракетоносца. Выбор курса» → «Пилот ракетоносца»
+            arc_display = re.split(r'\.\s+', arc_display)[0].strip()
             arc_norm = _norm(arc_display)
             if not arc_norm or len(arc_norm) < 4:
                 continue
@@ -1555,6 +1585,68 @@ class Pass2SeriesFilename:
                 rec.proposed_series = new_series
                 rec.series_number = str(vol_num)
                 rec.series_source = 'filename_named_arc'
+
+        # --- Третий проход: обратное применение арка к плоским томам ---
+        # Если (автор, корень, арк) уже подтверждён (2+ тома с «ArcName. Subtitle»),
+        # плоские тома у которых stem = «Серия N. ArcName» (без подзаголовка)
+        # тоже включаются в тот же арк.
+        # Пример: «Фортуна Эрика Минца 1. Пилот ракетоносца» + известный арк
+        # «Пилот ракетоносца» из томов 2-3 → все три тома в арке.
+        _arc_registry: dict = defaultdict(list)
+        for rec in records:
+            _s_r = rec.proposed_series or ''
+            if '\\' not in _s_r or (rec.series_source or '') != 'filename_named_arc':
+                continue
+            _sn_r = (rec.series_number or '').strip()
+            if not _sn_r.isdigit():
+                continue  # дробный sn (8.1) — временная подсерия, не трогаем
+            _root_r, _arc_r = _s_r.split('\\', 1)
+            _root_base_r = re.sub(r'\s+\d+[-–—]\d+\s*$', '', _root_r).strip()
+            _root_base_r = re.sub(r'\s+\d+\s*$', '', _root_base_r).strip()
+            _key_r = (_norm(rec.proposed_author or ''), _norm(_root_base_r), _norm(_arc_r.strip()))
+            _arc_registry[_key_r].append((rec, int(_sn_r), _root_base_r, _arc_r.strip()))
+
+        for rec in records:
+            if not rec.proposed_series or '\\' in (rec.proposed_series or ''):
+                continue
+            if (rec.series_source or '') == 'filename_named_arc':
+                continue
+            if 'filename' not in (rec.series_source or ''):
+                continue
+            _stem_f = Path(rec.file_path).stem
+            _m_f = _ARC_RE2.match(_stem_f)
+            if not _m_f:
+                continue
+            _vol_f = int(_m_f.group(2))
+            _arc_raw_f = _m_f.group(3).strip()
+            # Первая секция до '. ' — кандидат в арки (без подзаголовка)
+            _arc_cand_f = re.split(r'\.\s+', _arc_raw_f)[0].strip()
+            _arc_norm_f = _norm(_arc_cand_f)
+            if not _arc_norm_f or len(_arc_norm_f) < 4:
+                continue
+            _root_ps_f = rec.proposed_series
+            # Пробуем ключ с зачисткой числового суффикса из proposed_series и без
+            _root_norm_f = _norm(re.sub(r'\s+\d+[-–—]?\d*\s*$', '', _root_ps_f).strip())
+            _key_f = (_norm(rec.proposed_author or ''), _root_norm_f, _arc_norm_f)
+            if _key_f not in _arc_registry:
+                _key_f = (_norm(rec.proposed_author or ''), _norm(_root_ps_f), _arc_norm_f)
+            if _key_f not in _arc_registry:
+                continue
+            _arc_recs_f = _arc_registry[_key_f]
+            _all_vols_f = sorted({_vol_f} | {v for _, v, _, _ in _arc_recs_f})
+            _new_lo_f, _new_hi_f = _all_vols_f[0], _all_vols_f[-1]
+            _root_base_f = _arc_recs_f[0][2]
+            _arc_disp_f = _arc_recs_f[0][3]
+            _is_partial_f = _new_lo_f > 1
+            _rsuf_f = (f' {_new_lo_f}-{_new_hi_f}' if _new_lo_f != _new_hi_f else f' {_new_lo_f}') if _is_partial_f else ''
+            _new_series_f = f'{_root_base_f}{_rsuf_f}\\{_arc_disp_f}'
+            rec.proposed_series = _new_series_f
+            rec.series_number = str(_vol_f)
+            rec.series_source = 'filename_named_arc'
+            # Обновляем уже назначенные тома арка — диапазон мог измениться
+            for _arc_rec_f, _arc_vol_f, _, _ in _arc_recs_f:
+                _arc_rec_f.proposed_series = _new_series_f
+                _arc_rec_f.series_number = str(_arc_vol_f)
 
     def _correct_series_number_from_filename(self, records: List[BookRecord]) -> None:
         """Переопределяет series_number числовым префиксом имени файла.

@@ -1024,6 +1024,8 @@ class RegenCSVService:
                     continue
                 if 'filename' not in record.series_source:
                     continue
+                if '\\' in record.proposed_series:
+                    continue  # иерархическая серия (арк) — не обрезать до метадаты
                 ps_l = record.proposed_series.lower().replace('ё', 'е')
                 ms_l = record.metadata_series.lower().replace('ё', 'е').strip()
                 rest_after_meta = record.proposed_series[len(ms_l):].strip()
