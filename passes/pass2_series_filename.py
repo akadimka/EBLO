@@ -1489,6 +1489,12 @@ class Pass2SeriesFilename:
                 # «Вторая жизнь\Нагнуть Европу», а не «Вторая жизнь 1-2\Нагнуть Европу».
                 is_partial_arc = len(arc_entries) < len(entries)
                 if is_partial_arc:
+                    # Диапазон «lo-hi» ставим только если нет пробелов.
+                    # Если hi - lo + 1 > len(arc_entries) — есть gap (тома 7 и 9 без 8):
+                    # арк с разрывом не создаём — все книги остаются плоскими.
+                    _arc_is_dense = (hi - lo + 1) == len(arc_entries)
+                    if lo != hi and not _arc_is_dense:
+                        continue  # разрывный арк — пропускаем
                     range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
                 else:
                     range_suffix = ''
@@ -1596,7 +1602,14 @@ class Pass2SeriesFilename:
             # Это надёжнее чем счётчик записей, который не видит плоские тома из других групп.
             is_partial_arc = lo > 1
             if is_partial_arc:
-                range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
+                # Диапазон «lo-hi» ставим только если нет пробелов (все позиции заняты).
+                # Если hi - lo + 1 > len(arc_entries) — есть gap (напр. тома 7 и 9 без 8),
+                # диапазон «7-9» вводит в заблуждение → используем только lo.
+                _arc_is_dense = (hi - lo + 1) == len(arc_entries)
+                if lo != hi and _arc_is_dense:
+                    range_suffix = f' {lo}-{hi}'
+                else:
+                    range_suffix = f' {lo}'
             else:
                 range_suffix = ''
             root_base = arc_entries[0][2]
