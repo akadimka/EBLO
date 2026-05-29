@@ -834,8 +834,20 @@ class Pass2SeriesFilename:
                     # Только с metadata-подтверждением: title совпадает с серией у omnibus или 1-й книги.
                     # Без metadata — блок-матчер мог дать score=1.0 из-за Author→Series coercion,
                     # а настоящий title книги случайно совпадает с кандидатом — гарду надо сработать.
+                    # metadata_series считается подтверждением только если она НЕ в blacklist.
+                    # Если metadata — издательский ярлык (напр. «МИФ Проза»), он мог быть
+                    # очищен внутри block-matcher, но record.metadata_series всё ещё не пустая.
+                    # В таком случае confidence не оправдана — guard должен сработать.
+                    _meta_is_bl = False
+                    if record.metadata_series and self.filename_blacklist:
+                        _ml = record.metadata_series.lower().replace('ё', 'е')
+                        _meta_is_bl = any(
+                            bl.lower().replace('ё', 'е') in _ml
+                            for bl in self.filename_blacklist if bl
+                        )
                     _is_block_matcher_confident = (getattr(self, '_last_from_block_matcher', False)
-                                                   and bool(record.metadata_series))
+                                                   and bool(record.metadata_series)
+                                                   and not _meta_is_bl)
                     # Кандидат + номер в имени файла: "... - Серия N." или "... - Серия N "
                     _is_numbered_series = bool(_re.search(
                         _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.\-–—]+\d+(?:[\s.]|$)',
