@@ -1923,6 +1923,22 @@ class FB2CompilerService:
                     if re.match(r'^\d+$', sn):
                         sub_ordinal = int(sn)
 
+            # Если в имени подсерии есть диапазон «(Слово N-M)» или «(N-M)» и корень серии
+            # не имеет собственного числа (parent_num==0), используем lo диапазона как
+            # реальную позицию в родительской серии.
+            # Пример: «Хроники Дебила\Возвращение в Тооредаан (Хроники 7-8)», sub_ordinal=1
+            #   → effective_pos = 7 + 1 - 1 = 7  (вместо (0,0,1,0) даёт (0,7,0,0))
+            if not parent_num and sub_ordinal:
+                _sub_range_m = re.search(
+                    r'\(\s*(?:\w+\s+)?(\d{1,4})\s*[-–—]\s*(\d{1,4})\s*\)',
+                    subseries_name,
+                )
+                if _sub_range_m:
+                    _lo_r = int(_sub_range_m.group(1))
+                    if _lo_r and _lo_r < 1900:
+                        _eff_pos = _lo_r + sub_ordinal - 1
+                        return (0, _eff_pos, 0, 0), 'subseries_range', False, str(_eff_pos)
+
             if parent_num or sub_ordinal or inline:
                 _lbl = str(parent_num)
                 if sub_ordinal:
