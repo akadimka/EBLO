@@ -785,12 +785,13 @@ class Pass4Consensus:
             if pos < 0:
                 continue
             after = stem[pos + len(series):]
-            m = re.match(r'[\s\-]*0*(\d{1,4})\s*[\.\s\-]', after)
+            m = re.match(r'[\s\-]*0*(\d{1,4}(?:\s*[-–—]\s*\d{1,4})?)\s*(?:[\.\s]|$)', after)
             if not m:
                 # Номера в стеме нет — не перебиваем series_number (остаётся из меты)
                 continue
-            fn_num = m.group(1)
-            if int(fn_num) >= 1900:
+            fn_num = re.sub(r'\s*[-–—]\s*', '-', m.group(1).strip())
+            fn_num_lo = int(fn_num.split('-')[0])
+            if fn_num_lo >= 1900:
                 continue
             _cur_sn = (record.series_number or '').strip()
             if _cur_sn != fn_num:

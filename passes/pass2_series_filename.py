@@ -1715,32 +1715,38 @@ class Pass2SeriesFilename:
                     record.series_number = str(fn_num)
                 continue
 
-            # Правило 2: «SeriesRoot N. BookTitle» в середине стема
-            # Пример: «Автор. Серия 6. Название.fb2» → series_number=6
-            # Применяем для любого series_source: если серия видна в имени файла с числом,
-            # это надёжнее метаданных (пример: series_source="author-consensus", meta-number=6,
-            # но имя файла говорит "Небо в кармане! 1." → правильный номер 1).
+            # Правило 2: «SeriesRoot N. BookTitle» в середине стема.
+            # Расширено: поддерживает диапазон «N-M» («Орёл 1-2. Римский орел»)
+            # и нормализацию ё→е при сопоставлении.
             if not record.proposed_series:
                 continue
             series_root = record.proposed_series.split('\\')[0].strip()
             if not series_root:
                 continue
+            _sr_n = series_root.replace('ё', 'е').replace('Ё', 'Е')
+            _stem_n2 = stem.replace('ё', 'е').replace('Ё', 'Е')
             m2 = re.search(
-                r'(?i)' + re.escape(series_root) + r'[\s\-]+(\d{1,3})\s*(?:[\.\s]|$)',
-                stem
+                r'(?i)' + re.escape(_sr_n)
+                + r'[\s\-]+(\d{1,3}(?:\s*[-–—]\s*\d{1,3})?)\s*(?:[\.\s]|$)',
+                _stem_n2
             )
             if not m2:
                 continue
-            fn_num2 = int(m2.group(1))
-            if 1900 <= fn_num2 <= 2099:
+            fn_val2 = re.sub(r'\s*[-–—]\s*', '-', m2.group(1).strip())
+            fn_lo2 = int(fn_val2.split('-')[0])
+            if 1900 <= fn_lo2 <= 2099:
                 continue
-            if record.series_number and record.series_number == str(fn_num2):
+            if record.series_number and record.series_number == fn_val2:
                 continue  # уже верное значение
             # Не перезаписываем дробный sn вида «8.1» (временная подсерия):
-            # он уже точнее чем целый номер из имени файла.
             if record.series_number and re.match(r'^\d+\.\d+$', record.series_number):
                 continue
-            record.series_number = str(fn_num2)
+            record.series_number = fn_val2
+            # Если диапазон N-M и серия была иерархической «Корень\Арк» —
+            # выпрямляем: «Арк» это подзаголовок компиляции, а не настоящая подсерия.
+            if '-' in fn_val2 and '\\' in (record.proposed_series or ''):
+                if (record.series_source or '') != 'filename_named_arc':
+                    record.proposed_series = series_root
 
         # Правило 4: голый диапазон в конце стема без скобок
         # «Варяг 1-3.fb2» → series_number='1-3'
