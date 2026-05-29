@@ -1475,6 +1475,10 @@ class Pass2SeriesFilename:
                 arc_canonical = max((arc_display for _, _, arc_display in arc_entries), key=len)
                 vols = sorted(vol_num for _, vol_num, _ in arc_entries)
                 lo, hi = vols[0], vols[-1]
+                # Если все вхождения арка имеют ОДИНАКОВЫЙ vol_num — это дубли одного
+                # файла в разных папках, а не реальная подсерия. Пропускаем.
+                if lo == hi:
+                    continue
                 # Диапазон в корне серии нужен только когда дуга — подмножество:
                 # «Флибер 4-7\Джони» — часть серии, есть другие тома вне дуги.
                 # Если же ВСЕ тома серии принадлежат этой дуге — диапазон лишний:
