@@ -1669,18 +1669,44 @@ class Pass2SeriesFilename:
             r'(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*\)',
             re.IGNORECASE | re.UNICODE,
         )
+        # Правило 3.5: «(SeriesName N-M)» — название серии в скобках перед диапазоном.
+        # Пример: «Красницкий - Отрок. Ближний круг (Отрок 4-6)» → sn='4-6'
+        # Prefix в скобках должен совпадать с proposed_series (нормализовано).
+        _BRACKET_SERIES_RANGE_RE = re.compile(
+            r'\(\s*([^\d()]+?)\s+(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*\)',
+            re.UNICODE,
+        )
+
+        def _br_series_match(prefix_raw: str, proposed: str) -> bool:
+            """Prefix ≈ proposed_series root (нечувствительно к знакам и регистру)."""
+            import unicodedata as _ud2
+            _n = lambda s: re.sub(r'[\W_]+', ' ', _ud2.normalize('NFC', s).lower().replace('ё', 'е')).strip()
+            p = _n(prefix_raw)
+            root = _n(proposed.split('\\')[0])
+            root = re.sub(r'\s*\d+\s*$', '', root).strip()  # убираем хвостовые цифры
+            return p == root or root.startswith(p + ' ') or root == p
+
         for record in records:
             if not record.file_path:
                 continue
             stem = Path(record.file_path).stem
 
-            # Правило 3 — проверяем первым: явный диапазон в скобках
+            # Правило 3 — проверяем первым: явный диапазон в скобках (с ключевым словом)
             m3 = _BRACKET_RANGE_RE.search(stem)
             if m3:
                 lo3, hi3 = int(m3.group(1)), int(m3.group(2))
                 if lo3 < hi3 and not (1900 <= lo3 <= 2099):
                     record.series_number = f'{lo3}-{hi3}'
                     continue
+
+            # Правило 3.5 — диапазон с именем серии в скобках
+            m35 = _BRACKET_SERIES_RANGE_RE.search(stem)
+            if m35 and record.proposed_series:
+                lo35, hi35 = int(m35.group(2)), int(m35.group(3))
+                if lo35 < hi35 and not (1900 <= lo35 <= 2099):
+                    if _br_series_match(m35.group(1), record.proposed_series):
+                        record.series_number = f'{lo35}-{hi35}'
+                        continue
 
             m = _PREFIX_RE.match(stem)
             if m:
