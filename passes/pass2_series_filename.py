@@ -758,11 +758,14 @@ class Pass2SeriesFilename:
                 if ',' in series_candidate:
                     # ИСКЛЮЧЕНИЕ: если кандидат совпадает с metadata_series →
                     # запятая является частью настоящего названия серии ("Мы, Мигель Мартинес")
-                    _meta_confirms_comma = (
-                        record.metadata_series and
-                        series_candidate.lower().replace('ё', 'е') ==
-                        record.metadata_series.strip().lower().replace('ё', 'е')
-                    )
+                    _meta_lc = record.metadata_series.strip().lower().replace('ё', 'е') if record.metadata_series else ''
+                    _cand_lc = series_candidate.lower().replace('ё', 'е')
+                    # Для иерархической серии «Корень\Подсерия» также проверяем
+                    # совпадение подсерии с metadata (Остен Ард 1\Память, Скорбь и Шип)
+                    _sub_lc = _cand_lc.split(chr(92), 1)[1] if chr(92) in _cand_lc else ''
+                    _meta_confirms_comma = bool(_meta_lc and (
+                        _cand_lc == _meta_lc or _sub_lc == _meta_lc
+                    ))
                     if not _meta_confirms_comma:
                         # Считаем это списком авторов только если после каждой запятой
                         # идёт слово с заглавной буквы (или инициал)
@@ -1234,7 +1237,8 @@ class Pass2SeriesFilename:
             _m2 = _p2.search(_norm(Path(_rec.file_path).stem))
             if _m2:
                 _n2 = int(_m2.group(1))
-                if _n2 < 1900 and not _m2.group(1).startswith('0'):
+                _is_zero_padded2 = _m2.group(1).startswith('0') and len(_m2.group(1)) >= 2
+                if _n2 < 1900 and not _is_zero_padded2:
                     _ar_nums.setdefault((_ak2, _sn2), set()).add(_n2)
 
         for record in records:
@@ -1555,21 +1559,34 @@ class Pass2SeriesFilename:
                 _arc_norm_local = _norm(_arc_display_local)
                 _root_base_local = arc_entries[0][2]
 
+                _TOM_SORT_PAT = re.compile(
+                    r'\b(?:том|книга|часть|book|vol\.?|part)\s+(\d{1,4})\b',
+                    re.IGNORECASE | re.UNICODE,
+                )
+
                 def _arc_internal_pos(entry, _anl=_arc_norm_local):
                     _rec, _vn, _rb, _arc = entry
                     _stem_n = _norm(Path(_rec.file_path).stem)
                     _m = re.search(re.escape(_anl) + r'[\s.]+(\d{1,3})', _stem_n)
-                    if _m:
-                        return int(_m.group(1))
-                    _sn = (_rec.series_number or '').strip()
-                    try:
-                        return int(_sn) if _sn.isdigit() else 9999
-                    except Exception:
-                        return 9999
+                    _primary = int(_m.group(1)) if _m else 9999
+                    # Вторичный ключ — «Том/Книга N» в стеме надёжнее metadata sn
+                    _tm = _TOM_SORT_PAT.search(_stem_n)
+                    if _tm:
+                        _secondary = int(_tm.group(1))
+                    else:
+                        _sn = (_rec.series_number or '').strip()
+                        try:
+                            _secondary = int(_sn) if _sn.isdigit() else 9999
+                        except Exception:
+                            _secondary = 9999
+                    return (_primary, _secondary)
 
+                # Сохраняем иерархическую форму «Корень N\Арк» — подсерия видна в CSV.
+                # Compilation корректно сгруппирует через arc-root stripping.
+                _arc_vol_series = f'{_root_base_local} {_arc_vol}\\{_arc_display_local}'
                 _sorted_arc = sorted(arc_entries, key=_arc_internal_pos)
                 for _i, (_rec, _vn, _, _) in enumerate(_sorted_arc, 1):
-                    _rec.proposed_series = _root_base_local
+                    _rec.proposed_series = _arc_vol_series
                     _rec.series_number = f'{_arc_vol}.{_i}'
                     _rec.series_source = 'filename_named_arc'
                 continue
