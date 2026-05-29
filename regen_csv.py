@@ -221,8 +221,7 @@ class RegenCSVService:
         return False
     
     def _extract_series_from_folder_name(self, folder_name: str,
-                                         preserve_leading_number: bool = False,
-                                         _genre_prefixes: list = None) -> str:
+                                         preserve_leading_number: bool = False) -> str:
         """
         Извлечь название серии из имени папки, применяя паттерны.
 
@@ -238,22 +237,6 @@ class RegenCSVService:
         Returns:
             Название серии или исходное имя папки
         """
-        # ШАГ -1: убрать жанрово-издательский префикс «Фэнтези МИФ. », «Детектив МИФ. » и т.п.
-        # Эти значения явно перечислены в config.json → genre_folder_prefixes.
-        if _genre_prefixes is None:
-            _genre_prefixes = getattr(self, '_genre_folder_prefixes_cache', None)
-            if _genre_prefixes is None:
-                _genre_prefixes = [p.lower() for p in
-                                   (self.settings.settings.get('genre_folder_prefixes', [])
-                                    if hasattr(self.settings, 'settings') else [])]
-                self._genre_folder_prefixes_cache = _genre_prefixes
-        for _gp in _genre_prefixes:
-            if folder_name.lower().startswith(_gp + '.'):
-                rest = folder_name[len(_gp):].lstrip('. ').strip()
-                if rest:
-                    folder_name = rest
-                break
-
         # ШАГ 0: убрать ведущие номера ("1. ", "2) " и т.д.)
         # "1. Путь в Царьград" → "Путь в Царьград"
         # "2) Варяг" → "Варяг"
@@ -591,12 +574,29 @@ class RegenCSVService:
                     # Папка формата "Серия (Автор)" НЕ является чистой папкой автора —
                     # из неё нужно извлечь серию через _extract_series_from_folder_name.
                     subfolders = parent_parts[1:]
+                    # Загружаем жанрово-издательские метки один раз
+                    _gfp = getattr(self, '_genre_folder_prefixes_cache', None)
+                    if _gfp is None:
+                        _gfp = [p.lower() for p in
+                                (self.settings.settings.get('genre_folder_prefixes', [])
+                                 if hasattr(self.settings, 'settings') else [])]
+                        self._genre_folder_prefixes_cache = _gfp
+
                     series_folders = []
                     for _sf in subfolders:
                         if not author or not self._surnames_match_folder(author, _sf):
                             # Дополнительная проверка: папка = латинский логин/транслит автора
                             if self._folder_is_author_login(_sf, author):
                                 continue  # папка автора, не серия
+                            # Дополнительная проверка: папка начинается с жанрово-издательской метки
+                            # («Фэнтези МИФ. ...», «Детектив МИФ. ...») — это sub-collection,
+                            # а не серия. Серия извлекается из имени файла.
+                            _sf_lower = _sf.lower()
+                            _is_genre_collection = any(
+                                _sf_lower.startswith(_gp) for _gp in _gfp
+                            )
+                            if _is_genre_collection:
+                                continue  # жанровый sub-collection — не серия
                             series_folders.append(_sf)
                             continue
                         # Автор найден в имени подпапки.
@@ -1285,6 +1285,11 @@ class RegenCSVService:
                     stripped = stripped.rstrip() + '.'
                 return stripped
 
+            # Предкомпилируем publisher-prefix паттерны из series_cleanup_patterns
+            _cleanup_pats_raw = self.settings.settings.get('series_cleanup_patterns', []) \
+                if hasattr(self.settings, 'settings') else []
+            _publisher_prefix_pats = [p for p in _cleanup_pats_raw if p.startswith('^')]
+
             for rec in self.records:
                 if rec.proposed_series:
                     # First replace ':' with '. Capitalized'
@@ -1295,6 +1300,14 @@ class RegenCSVService:
                     # Capitalize first letter
                     if rec.proposed_series:
                         rec.proposed_series = rec.proposed_series[0].upper() + rec.proposed_series[1:]
+                    # Издательские префиксы МИФ: «Романы МИФ. Серия» → «Серия»
+                    # Применяем здесь (финальный шаг) чтобы охватить серии из metadata/Pass4.
+                    if rec.proposed_series:
+                        for _cpat in _publisher_prefix_pats:
+                            _cleaned = re.sub(_cpat, '', rec.proposed_series, flags=re.IGNORECASE).strip()
+                            if _cleaned and _cleaned != rec.proposed_series:
+                                rec.proposed_series = _cleaned[0].upper() + _cleaned[1:]
+                                break
                 if rec.proposed_author:
                     rec.proposed_author = _ILLEGAL_AUTHOR.sub('', rec.proposed_author).strip()
                     rec.proposed_author = _strip_trailing_dot(rec.proposed_author)

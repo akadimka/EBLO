@@ -89,6 +89,16 @@ class Pass3SeriesNormalize:
                     normalized = new_name
                     break
 
+            # Издательские префиксы из series_cleanup_patterns применяем ПОСЛЕ metadata guard:
+            # metadata может сама содержать издательскую метку («Романы МИФ. Серия»),
+            # и metadata guard её восстанавливал до очистки.
+            for _cpat in self.cleanup_patterns:
+                if _cpat.startswith('^'):  # только anchor-паттерны (префиксы)
+                    _after = re.sub(_cpat, '', normalized, flags=re.IGNORECASE).strip()
+                    if _after and _after != normalized:
+                        normalized = _after
+                        break
+
             # FOLDER-PREFIX GUARD: если серия вида «Коллекция. Подсерия»,
             # а «Коллекция» совпадает с именем одной из родительских папок —
             # оставляем только «Подсерия».
