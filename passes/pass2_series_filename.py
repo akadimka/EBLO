@@ -1498,7 +1498,7 @@ class Pass2SeriesFilename:
                     range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
                 else:
                     range_suffix = ''
-                series_root = entries[0][0].proposed_series  # исходное имя серии
+                series_root = re.sub(r'\s*\[[^\]]*\]\s*$', '', entries[0][0].proposed_series).strip()  # без [скобок]
                 new_series = f'{series_root}{range_suffix}\\{arc_canonical}'
                 for rec, vol_num, _ in arc_entries:
                     rec.proposed_series = new_series
