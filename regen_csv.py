@@ -1441,6 +1441,46 @@ class RegenCSVService:
             print(f"[POST-CHECK] Expanded {_meta_expand2_count} truncated metadata series via author group")
             self.logger.log(f"[OK] POST-CHECK: Expanded {_meta_expand2_count} truncated metadata series via author group")
 
+        # ===== Post-check: одиночная metadata-серия без подтверждения в пути =====
+        # Если у автора ровно ОДИН файл с данным значением серии из metadata,
+        # и это значение не встречается ни в имени файла, ни в именах папок пути,
+        # и series_number пустой — такую серию не принимаем.
+        # Цель: отсечь артефакты metadata вроде «The Pact - ru (версии)».
+        _meta_singleton_count = 0
+        from collections import defaultdict as _dd
+        import unicodedata as _ud_s
+        def _sn_norm(s: str) -> str:
+            return _ud_s.normalize('NFC', s or '').rstrip('. ').strip().lower().replace('ё', 'е')
+        _author_series_cnt: dict = _dd(lambda: _dd(int))
+        for _rec in self.records:
+            if not _rec.proposed_series or _rec.series_source != 'metadata':
+                continue
+            _author_series_cnt[_sn_norm(_rec.proposed_author or '')][_sn_norm(_rec.proposed_series)] += 1
+
+        for _rec in self.records:
+            if not _rec.proposed_series or _rec.series_source != 'metadata':
+                continue
+            if _rec.series_number:
+                continue  # есть номер тома — оставляем
+            _ak = _sn_norm(_rec.proposed_author or '')
+            _sk = _sn_norm(_rec.proposed_series)
+            if _author_series_cnt[_ak][_sk] > 1:
+                continue  # несколько файлов с этой серией — оставляем
+            # Проверяем вхождение значения серии в путь файла (папки + имя файла)
+            _ser_lc = _rec.proposed_series.lower().replace('ё', 'е')
+            _found_in_path = any(
+                _ser_lc in _part.lower().replace('ё', 'е')
+                for _part in Path(_rec.file_path).parts
+            )
+            if _found_in_path:
+                continue
+            _rec.proposed_series = ''
+            _rec.series_source = ''
+            _meta_singleton_count += 1
+        if _meta_singleton_count:
+            print(f"[POST-CHECK] Cleared {_meta_singleton_count} singleton metadata series not found in file path")
+            self.logger.log(f"[OK] POST-CHECK: Cleared {_meta_singleton_count} uncorroborated singleton metadata series")
+
         # Sort by file_path
         self.records.sort(key=lambda r: r.file_path)
         
