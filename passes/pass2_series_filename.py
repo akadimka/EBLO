@@ -1216,6 +1216,27 @@ class Pass2SeriesFilename:
             'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
             'folder_metadata_confirmed',
         }
+        # Pre-scan: собираем множество ненулевых-небез нуля чисел для каждой (ak, series_norm)
+        # группы. Если чисел > 1 — они разные (номера томов), добавлять к имени серии нельзя.
+        _ar_nums: dict = {}
+        for _rec in records:
+            if '\\' in (_rec.proposed_series or '') or not _rec.proposed_series:
+                continue
+            if _rec.series_source in _FOLDER_SRC_AR:
+                continue
+            _ak2 = _norm(_rec.proposed_author or '')
+            _sn2 = _norm(_rec.proposed_series.strip())
+            if _ak2 not in _author_roots or _sn2 not in _author_roots[_ak2]:
+                continue
+            _sn_norm = _norm(_rec.proposed_series.strip())
+            _esc2 = re.escape(_sn_norm)
+            _p2 = re.compile(_esc2 + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
+            _m2 = _p2.search(_norm(Path(_rec.file_path).stem))
+            if _m2:
+                _n2 = int(_m2.group(1))
+                if _n2 < 1900 and not _m2.group(1).startswith('0'):
+                    _ar_nums.setdefault((_ak2, _sn2), set()).add(_n2)
+
         for record in records:
             if '\\' in (record.proposed_series or ''):
                 continue  # уже подсерия
@@ -1244,6 +1265,9 @@ class Pass2SeriesFilename:
                         if not record.series_number:
                             record.series_number = str(n)
                     else:
+                        # Если числа варьируются по группе — это номера томов, не арков.
+                        if len(_ar_nums.get((ak, series_norm), set())) >= 2:
+                            continue
                         record.proposed_series = f'{record.proposed_series.strip()} {n}'
 
         # Дополнительный путь: metadata подтверждает серию → ищем «серия N.» в стеме.
@@ -1486,6 +1510,36 @@ class Pass2SeriesFilename:
                 continue
             vols = sorted(vol_num for _, vol_num, _, _ in arc_entries)
             lo, hi = vols[0], vols[-1]
+
+            # Когда ВСЕ книги арка имеют ОДИНАКОВЫЙ vol_num (lo == hi) — это
+            # «временная подсерия» (пример: «Такер Уэйн» входит в том 8 «Отряда Сигма»).
+            # Вместо иерархии «Серия 8\Такер Уэйн» присваиваем дробные sn:
+            # 1-я книга арка → sn='8.1', 2-я → '8.2', ... Flat серия сохраняется.
+            if lo == hi:
+                _arc_vol = lo
+                _arc_display_local = arc_entries[0][3]
+                _arc_norm_local = _norm(_arc_display_local)
+                _root_base_local = arc_entries[0][2]
+
+                def _arc_internal_pos(entry, _anl=_arc_norm_local):
+                    _rec, _vn, _rb, _arc = entry
+                    _stem_n = _norm(Path(_rec.file_path).stem)
+                    _m = re.search(re.escape(_anl) + r'[\s.]+(\d{1,3})', _stem_n)
+                    if _m:
+                        return int(_m.group(1))
+                    _sn = (_rec.series_number or '').strip()
+                    try:
+                        return int(_sn) if _sn.isdigit() else 9999
+                    except Exception:
+                        return 9999
+
+                _sorted_arc = sorted(arc_entries, key=_arc_internal_pos)
+                for _i, (_rec, _vn, _, _) in enumerate(_sorted_arc, 1):
+                    _rec.proposed_series = _root_base_local
+                    _rec.series_number = f'{_arc_vol}.{_i}'
+                    _rec.series_source = 'filename_named_arc'
+                continue
+
             # Диапазон нужен только когда дуга — подмножество серии.
             # Признак: дуга не начинается с тома 1 (lo > 1) — значит есть предшествующие тома.
             # Это надёжнее чем счётчик записей, который не видит плоские тома из других групп.
@@ -1564,6 +1618,10 @@ class Pass2SeriesFilename:
                 continue
             if record.series_number and record.series_number == str(fn_num2):
                 continue  # уже верное значение
+            # Не перезаписываем дробный sn вида «8.1» (временная подсерия):
+            # он уже точнее чем целый номер из имени файла.
+            if record.series_number and re.match(r'^\d+\.\d+$', record.series_number):
+                continue
             record.series_number = str(fn_num2)
 
         # Правило 4: голый диапазон в конце стема без скобок

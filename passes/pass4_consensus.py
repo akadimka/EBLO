@@ -782,7 +782,11 @@ class Pass4Consensus:
             fn_num = m.group(1)
             if int(fn_num) >= 1900:
                 continue
-            if (record.series_number or '').strip() != fn_num:
+            _cur_sn = (record.series_number or '').strip()
+            if _cur_sn != fn_num:
+                # Не перезаписываем дробный sn вида «8.1» (временная подсерия)
+                if re.match(r'^\d+\.\d+$', _cur_sn):
+                    continue
                 record.series_number = fn_num
                 fn_sn_refix_count += 1
 
