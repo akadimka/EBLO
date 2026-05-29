@@ -1661,6 +1661,23 @@ class Pass2SeriesFilename:
                 continue
             record.series_number = str(fn_numW)
 
+        # Правило 6: «Пролог» без series_number → sn=0, если в серии нет тома 0.
+        import unicodedata as _ud6
+        _norm6 = lambda s: _ud6.normalize('NFC', s).lower().replace('ё', 'е').strip()
+        _has_zero: set = set()
+        for rec in records:
+            if (_norm6(rec.series_number or '') == '0'
+                    and rec.proposed_series and rec.proposed_author):
+                _has_zero.add((_norm6(rec.proposed_author), _norm6(rec.proposed_series)))
+        for rec in records:
+            if rec.series_number or not rec.proposed_series:
+                continue
+            if _norm6(rec.file_title or '') != 'пролог':
+                continue
+            key = (_norm6(rec.proposed_author or ''), _norm6(rec.proposed_series))
+            if key not in _has_zero:
+                rec.series_number = '0'
+
     def _resolve_hierarchical_flat_mismatch(self, records: List[BookRecord]) -> None:
         """Нормализует рассогласование «A\\B» и «A» у одного автора.
 
