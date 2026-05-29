@@ -1251,7 +1251,9 @@ class Pass2SeriesFilename:
                 continue
             stem_norm = _norm(Path(record.file_path).stem)
             _escaped = re.escape(ps_norm)
-            _pat = re.compile(_escaped + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
+            # (?!\d) — не совпадать с версионным номером (2.0): точка за числом не должна
+            # предшествовать другой цифре. Пример: «Лесник поневоле 2.0» → пропустить.
+            _pat = re.compile(_escaped + r'\s+(\d{1,4})\s*[.\-–—](?!\d)', re.UNICODE)
             _m = _pat.search(stem_norm)
             if _m:
                 n_str = _m.group(1)
