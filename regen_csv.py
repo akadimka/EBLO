@@ -599,6 +599,12 @@ class RegenCSVService:
                                 continue  # жанровый sub-collection — не серия
                             series_folders.append(_sf)
                             continue
+                        # Даже если автор найден в имени подпапки — жанровая метка
+                        # имеет приоритет: «Fanzon. Кинжал и магия. Фэнтези Браста» — это
+                        # genre-collection несмотря на имя автора в названии.
+                        _sf_lower2 = _sf.lower()
+                        if any(_sf_lower2.startswith(_gp) for _gp in _gfp):
+                            continue  # жанровый sub-collection с упоминанием автора
                         # Автор найден в имени подпапки.
                         # Пробуем извлечь серию — если она непустая и не совпадает с автором,
                         # это формат "Серия (Автор)", используем её.
