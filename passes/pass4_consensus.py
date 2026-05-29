@@ -210,19 +210,29 @@ class Pass4Consensus:
                 if (not has_service_marker and record.series_source == "filename" and 
                     not is_confirmed_in_metadata and not has_pattern_evidence):
                     
-                    # EXCEPTION: If file is in a Series Collection folder (depth=2 with "Серия" in parent name),
-                    # Trust the extraction because it came from a reliable "Author - Series N. Title" pattern
+                    # Одиночный файл с X.Y в имени: X — серия только если X содержит цифру.
+                    # Без цифры («Злой» дворник. Чистая правда…) X является частью заголовка.
+                    _series_has_digit = bool(re.search(r'\d', record.proposed_series or ''))
+                    if _series_has_digit:
+                        # Есть цифра в имени серии → может быть настоящей серией, не трогаем
+                        pass
+                    else:
+                        # Нет цифры → сбрасываем как часть заголовка (игнорируем исключение коллекций)
+                        record.proposed_series = ""
+                        record.series_source = ""
+                        false_series_count += 1
+                        continue
+
                     is_series_collection_folder = False
                     if record.file_path:
                         file_path_parts = Path(record.file_path).parts
                         if len(file_path_parts) >= 1:
                             parent_folder = file_path_parts[0]
-                            # Check if parent folder is a Series Collection
                             is_series_collection_folder = (
                                 parent_folder.startswith('Серия') or
                                 'Серия' in parent_folder
                             )
-                    
+
                     # Only clear if it's NOT in a Series Collection folder
                     if not is_series_collection_folder:
                         # Clear it
