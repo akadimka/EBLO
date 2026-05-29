@@ -344,8 +344,9 @@ class FB2CompilerService:
             # filename_named_arc с «\»: группируем по базовому имени серии (без номера/диапазона
             # и без подсерии). «Пожиратель 7-8\Город воров» → ключ «пожиратель», чтобы
             # слиться с плоскими томами «Пожиратель 1-6, 9-11» в одну компиляцию.
-            # Остальные источники (folder_hierarchy и т.д.) используют стандартную логику.
-            if '\\' in series and (rec.series_source or '') == 'filename_named_arc':
+            # Применяем для ЛЮБЫХ иерархических серий (не только filename_named_arc),
+            # т.к. folder_dataset тоже может давать «Хроники Дебила\Возвращение в Тооредаан».
+            if '\\' in series:
                 _arc_root = series.split('\\')[0].strip()
                 _arc_base = re.sub(r'\s+\d{1,4}(?:\s*[-–—]\s*\d{1,4})?\s*$', '', _arc_root).strip()
                 sk = _punct_norm(_arc_base if _arc_base else _arc_root)
