@@ -1881,6 +1881,16 @@ class FB2CompilerService:
                 _root_m = _root_re.search(stem)
                 _c = int(_root_m.group(1)) if _root_m else 0
                 parent_num = _c if _c and _c < 1900 else 0
+            # Если корень не дал числа — пробуем ведущее число ПОДСЕРИИ:
+            # «Отзвуки серебряного ветра\1. Мы — были!» → '1' из начала подсерии.
+            # Это позиция подсерии в родительской серии.
+            if not parent_num and '\\' in (rec.proposed_series or ''):
+                _sub_leading_part = (rec.proposed_series or '').split('\\', 1)[1].strip()
+                _sub_lead_m = re.match(r'^(\d{1,4})[.\s\-–—]', _sub_leading_part)
+                if _sub_lead_m:
+                    _pl = int(_sub_lead_m.group(1))
+                    if _pl < 1900:
+                        parent_num = _pl
 
             # secondary: номер подсерии внутри позиции родителя
             # Пример: "Последний король Светлого Арда **1**. Корона" → sub_ordinal=1
@@ -1904,7 +1914,7 @@ class FB2CompilerService:
             # Проверяем ДО метаданных: stem авторитетнее ошибочного sn.
             # Пример: "5. Ближний круг" sn='4' (неверно) → берём 5 из стема, не 4 из sn.
             # Пример: "4. Перелом" sn='' → берём 4 из стема.
-            if is_subseries and not parent_num and not sub_ordinal and not inline:
+            if is_subseries and not sub_ordinal and not inline:
                 _fn_m = self._STEM_NUM_RE.match(stem)
                 if _fn_m:
                     _fn_n = int(next(g for g in _fn_m.groups() if g is not None))
