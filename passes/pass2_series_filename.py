@@ -1762,7 +1762,7 @@ class Pass2SeriesFilename:
         # Правило 5: «Слово N» в имени файла — «Свиток 1», «Том 3», «Книга 4» и т.п.
         # Применяется только когда series_number ещё не задан (нет метаданных и нет префикса).
         _WORD_NUM_RE = re.compile(
-            r'(?:свиток|том|книга|часть|выпуск|арка|vol\.?|part)\s+(\d{1,4})\b',
+            r'\b(?:свиток|том|книга|часть|выпуск|арка|vol\.?|part)\s+(\d{1,4})\b',
             re.IGNORECASE | re.UNICODE,
         )
         for record in records:
@@ -1888,7 +1888,7 @@ class Pass2SeriesFilename:
         from collections import defaultdict
 
         _TOM_RE = re.compile(
-            r'(?:том|книга|часть|выпуск|арка|book|vol\.?|part)\s+(\d{1,4})\b',
+            r'\b(?:том|книга|часть|выпуск|арка|book|vol\.?|part)\s+(\d{1,4})\b',
             re.IGNORECASE | re.UNICODE,
         )
         _norm = lambda s: re.sub(r'\s+', ' ', re.sub(r'[.,:;!?]+', ' ', unicodedata.normalize('NFC', s).lower().replace('ё', 'е'))).strip()
