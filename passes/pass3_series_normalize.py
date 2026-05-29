@@ -94,12 +94,7 @@ class Pass3SeriesNormalize:
             # оставляем только «Подсерия».
             # Пример: «Артефакт - детектив. Астра Ельцова»,
             #   папка «Артефакт & Детектив» → серия «Астра Ельцова»
-            # ИСКЛЮЧЕНИЕ: folder_dataset — серия уже взята из имени реальной папки,
-            # обрезать её префикс не имеет смысла (папка и есть источник).
-            if ('. ' in normalized and '\\' not in normalized and record.file_path
-                    and (record.series_source or '') not in (
-                        'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
-                        'folder_metadata_confirmed')):
+            if '. ' in normalized and '\\' not in normalized and record.file_path:
                 import re as _re2
                 from pathlib import Path as _P
                 prefix, suffix = normalized.split('. ', 1)
