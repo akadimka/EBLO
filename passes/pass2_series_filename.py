@@ -33,6 +33,12 @@ try:
 except ImportError:
     from ..extraction_constants import FILE_EXTENSION_FOLDER_NAMES, is_no_series_folder
 
+try:
+    from series_normalizer import _nfc_lower_yo
+except ImportError:
+    def _nfc_lower_yo(s: str) -> str:  # type: ignore[misc]
+        return unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
+
 
 def _author_matches_folder(proposed_author: str, folder_part: str) -> bool:
     """Проверить, является ли folder_part папкой автора proposed_author.
@@ -1201,8 +1207,7 @@ class Pass2SeriesFilename:
         # proposed_series = «Брия N», чтобы позиция была видна в CSV и компиляторе.
         # Условие безопасности: применяем только если у того же автора есть хотя бы один
         # файл с подсерией, корень которой совпадает с proposed_series данного файла.
-        import unicodedata as _ud
-        _norm = lambda s: _ud.normalize('NFC', s).lower().replace('ё', 'е')
+        _norm = _nfc_lower_yo
 
         # Собираем корни подсерий по автору: {proposed_author: {root_norm: root_display}}
         _author_roots: dict = {}
@@ -1394,10 +1399,9 @@ class Pass2SeriesFilename:
           «Флибер 05. Джони, о-е! Или назад в СССР 2» → Флибер\\Джони, о-е! Или назад в СССР  sn=5
           «Флибер 01. Изменить будущее»                → Флибер  sn=1  (title уникален — не дуга)
         """
-        import unicodedata as _ud
         from collections import defaultdict
 
-        _norm = lambda s: _ud.normalize('NFC', s).lower().replace('ё', 'е').strip()
+        def _norm(s): return _nfc_lower_yo(s).strip()
 
         # Zero-padded паттерн: «SeriesRoot 0N. ArcTitle»
         # Захватываем серию, номер тома (zero-padded) и arc candidate.
@@ -1833,8 +1837,7 @@ class Pass2SeriesFilename:
             record.series_number = str(fn_numW)
 
         # Правило 6: «Пролог» без series_number → sn=0, если в серии нет тома 0.
-        import unicodedata as _ud6
-        _norm6 = lambda s: _ud6.normalize('NFC', s).lower().replace('ё', 'е').strip()
+        _norm6 = lambda s: _nfc_lower_yo(s).strip()
         _has_zero: set = set()
         for rec in records:
             if (_norm6(rec.series_number or '') == '0'
@@ -2883,7 +2886,7 @@ class Pass2SeriesFilename:
         _name_after_dash = name_for_parsing
         if ' - ' in name_for_parsing:
             _name_after_dash = name_for_parsing.split(' - ', 1)[1]
-        _meta_norm = lambda s: unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
+        _meta_norm = _nfc_lower_yo
         def _word_overlap(a: str, b: str) -> int:
             wa = {w for w in a.split() if len(w) >= 4}
             wb = {w for w in b.split() if len(w) >= 4}

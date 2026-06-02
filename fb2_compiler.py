@@ -22,16 +22,13 @@ import html as _html
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-
-
-def _norm_key(s: str) -> str:
-    """Нормализовать строку для сравнения: NFC + lower + ё→е.
-
-    NFC нужна потому что ё может быть в NFD-форме (е + U+0308),
-    при которой обычный replace('ё','е') не работает.
-    """
-    return unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
 from typing import List, Tuple, Optional, Dict
+
+try:
+    from series_normalizer import _nfc_lower_yo as _norm_key
+except ImportError:
+    def _norm_key(s: str) -> str:
+        return unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
 
 try:
     from passes.pass1_read_files import BookRecord

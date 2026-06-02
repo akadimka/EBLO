@@ -7,6 +7,13 @@ import re
 from typing import List
 
 try:
+    from series_normalizer import _nfc_lower_yo
+except ImportError:
+    import unicodedata
+    def _nfc_lower_yo(s):
+        return unicodedata.normalize("NFC", s).lower().replace("ё", "е")
+
+try:
     from BookRecord import BookRecord
 except ImportError:
     # Если прямой импорт не работает, попробовать относительный
@@ -60,10 +67,6 @@ class Pass3SeriesNormalize:
         - Привести к стандартному capitalizations
         - Применить преобразования из config.json
         """
-        def _nfc_lower_yo(s: str) -> str:
-            import unicodedata
-            return unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
-
         for record in records:
             if not record.proposed_series:
                 continue

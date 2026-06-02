@@ -8,12 +8,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 
-def _nfc_lower_yo(s: str) -> str:
-    """NFC-нормализация + lower + ё→е.
-
-    NFC нужна: если строка в NFD-форме, ё = е + U+0308, и replace('ё','е') не работает.
-    """
-    return unicodedata.normalize('NFC', s).lower().replace('\u0451', '\u0435')
+from series_normalizer import _nfc_lower_yo
 
 
 from author_normalizer_extended import AuthorNormalizer
