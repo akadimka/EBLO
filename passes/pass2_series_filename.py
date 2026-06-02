@@ -40,6 +40,14 @@ except ImportError:
         return unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
 
 
+# Паттерн «том/книга/часть/... N» — компилируется один раз для всего модуля.
+# Полный набор слов (свиток, выпуск, арка — СИ-специфика).
+_TOM_WORD_RE = re.compile(
+    r'\b(?:свиток|том|книга|часть|выпуск|арка|book|vol\.?|part)\s+(\d{1,4})\b',
+    re.IGNORECASE | re.UNICODE,
+)
+
+
 def _author_matches_folder(proposed_author: str, folder_part: str) -> bool:
     """Проверить, является ли folder_part папкой автора proposed_author.
 
@@ -1568,10 +1576,7 @@ class Pass2SeriesFilename:
                 _arc_norm_local = _norm(_arc_display_local)
                 _root_base_local = arc_entries[0][2]
 
-                _TOM_SORT_PAT = re.compile(
-                    r'\b(?:том|книга|часть|book|vol\.?|part)\s+(\d{1,4})\b',
-                    re.IGNORECASE | re.UNICODE,
-                )
+                _TOM_SORT_PAT = _TOM_WORD_RE
 
                 def _arc_internal_pos(entry, _anl=_arc_norm_local):
                     _rec, _vn, _rb, _arc = entry
@@ -1817,10 +1822,7 @@ class Pass2SeriesFilename:
 
         # Правило 5: «Слово N» в имени файла — «Свиток 1», «Том 3», «Книга 4» и т.п.
         # Применяется только когда series_number ещё не задан (нет метаданных и нет префикса).
-        _WORD_NUM_RE = re.compile(
-            r'\b(?:свиток|том|книга|часть|выпуск|арка|vol\.?|part)\s+(\d{1,4})\b',
-            re.IGNORECASE | re.UNICODE,
-        )
+        _WORD_NUM_RE = _TOM_WORD_RE
         for record in records:
             if record.series_number:
                 continue
@@ -1940,10 +1942,7 @@ class Pass2SeriesFilename:
         """
         from collections import defaultdict
 
-        _TOM_RE = re.compile(
-            r'\b(?:том|книга|часть|выпуск|арка|book|vol\.?|part)\s+(\d{1,4})\b',
-            re.IGNORECASE | re.UNICODE,
-        )
+        _TOM_RE = _TOM_WORD_RE
         _norm = lambda s: re.sub(r'\s+', ' ', re.sub(r'[.,:;!?]+', ' ', unicodedata.normalize('NFC', s).lower().replace('ё', 'е'))).strip()
 
         # Regex для извлечения числа из стема файла когда series_number пуст.
