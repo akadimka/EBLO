@@ -1866,97 +1866,10 @@ class FB2CompilerService:
             if fn_num_from_sn < 1900:
                 return (0, fn_num_from_sn, 0, 0), 'series_number', False, sn
 
-        # Для подсерий: позиция (primary=родитель, secondary=подсерия, tertiary=том).
-        # Порядок: сначала sub_ordinal (номер подсерии в группе родителя), потом том.
-        # Пример: "Остен Ард 3. Последний 1. Корона. Том 1" → (0, 3, 1, 1).
         if is_subseries:
-            # primary: номер родительской серии из proposed_series или из стема
-            _root_part = (rec.proposed_series or '').split('\\')[0].strip()
-            _parent_num_m = re.search(r'\s(\d{1,4})\s*$', _root_part)
-            if _parent_num_m:
-                parent_num = int(_parent_num_m.group(1))
-            else:
-                _root_re = re.compile(re.escape(_root_part) + r'\s+(\d{1,4})', re.IGNORECASE | re.UNICODE)
-                _root_m = _root_re.search(stem)
-                _c = int(_root_m.group(1)) if _root_m else 0
-                parent_num = _c if _c and _c < 1900 else 0
-            # Если корень не дал числа — пробуем ведущее число ПОДСЕРИИ:
-            # «Отзвуки серебряного ветра\1. Мы — были!» → '1' из начала подсерии.
-            # Это позиция подсерии в родительской серии.
-            if not parent_num and '\\' in (rec.proposed_series or ''):
-                _sub_leading_part = (rec.proposed_series or '').split('\\', 1)[1].strip()
-                _sub_lead_m = re.match(r'^(\d{1,4})[.\s\-–—]', _sub_leading_part)
-                if _sub_lead_m:
-                    _pl = int(_sub_lead_m.group(1))
-                    if _pl < 1900:
-                        parent_num = _pl
-
-            # secondary: номер подсерии внутри позиции родителя
-            # Пример: "Последний король Светлого Арда **1**. Корона" → sub_ordinal=1
-            sub_ordinal = 0
-            subseries_name = (rec.proposed_series or '').split('\\')[-1].strip()
-            if subseries_name:
-                _sub_re = re.compile(
-                    re.escape(subseries_name) + r'\s+(\d{1,4})',
-                    re.IGNORECASE | re.UNICODE,
-                )
-                _sm = _sub_re.search(stem) or _sub_re.search(rec.file_title or '')
-                if _sm:
-                    _sc = int(_sm.group(1))
-                    if _sc < 1900:
-                        sub_ordinal = _sc
-
-            # tertiary: номер тома внутри подсерии («Том N», «Книга N»)
-            inline = self._extract_inline_volume_number(rec.file_title or stem, stem) or 0
-
-            # Fallback для подсерий без числа в корне: ведущее число stem — позиция подсерии.
-            # Проверяем ДО метаданных: stem авторитетнее ошибочного sn.
-            # Пример: "5. Ближний круг" sn='4' (неверно) → берём 5 из стема, не 4 из sn.
-            # Пример: "4. Перелом" sn='' → берём 4 из стема.
-            if is_subseries and not sub_ordinal and not inline:
-                _fn_m = self._STEM_NUM_RE.match(stem)
-                if _fn_m:
-                    _fn_n = int(next(g for g in _fn_m.groups() if g is not None))
-                    if _fn_n and _fn_n < 1900:
-                        sub_ordinal = _fn_n
-
-            # Метаданные как fallback для sub_ordinal (только если stem не дал результата)
-            if not sub_ordinal and not inline and sn:
-                meta_s_low = (rec.metadata_series or '').strip().lower().replace('ё', 'е')
-                sub_name_low = subseries_name.lower().replace('ё', 'е')
-                if meta_s_low and sub_name_low and (
-                    meta_s_low == sub_name_low
-                    or meta_s_low in sub_name_low
-                    or sub_name_low in meta_s_low
-                ):
-                    if re.match(r'^\d+$', sn):
-                        sub_ordinal = int(sn)
-
-            # Если в имени подсерии есть диапазон «(Слово N-M)» или «(N-M)» и корень серии
-            # не имеет собственного числа (parent_num==0), используем lo диапазона как
-            # реальную позицию в родительской серии.
-            # Пример: «Хроники Дебила\Возвращение в Тооредаан (Хроники 7-8)», sub_ordinal=1
-            #   → effective_pos = 7 + 1 - 1 = 7  (вместо (0,0,1,0) даёт (0,7,0,0))
-            if not parent_num and sub_ordinal:
-                _sub_range_m = re.search(
-                    r'\(\s*(?:\w+\s+)?(\d{1,4})\s*[-–—]\s*(\d{1,4})\s*\)',
-                    subseries_name,
-                )
-                if _sub_range_m:
-                    _lo_r = int(_sub_range_m.group(1))
-                    if _lo_r and _lo_r < 1900:
-                        _eff_pos = _lo_r + sub_ordinal - 1
-                        return (0, _eff_pos, 0, 0), 'subseries_range', False, str(_eff_pos)
-
-            if parent_num or sub_ordinal or inline:
-                _lbl = str(parent_num)
-                if sub_ordinal:
-                    _lbl += f'.{sub_ordinal}'
-                if inline:
-                    _lbl += f'.{inline}'
-                _src = 'subseries_number' if sub_ordinal else ('inline_title' if inline else 'parent_num')
-                return (0, parent_num, sub_ordinal, inline), _src, False, _lbl
-
+            result = self._sort_key_for_subseries(rec, sn, stem)
+            if result is not None:
+                return result
         # Источник Б: число в начале/конце имени файла.
         # При многоуровневой нумерации ("Серия N. Подсерия M. ... Том K") извлекаем
         # secondary и tertiary, чтобы избежать коллизий sort_key между подсериями.
@@ -2059,6 +1972,95 @@ class FB2CompilerService:
 
         # Порядок не определён
         return (9, 0, 0, 0), 'unknown', True, ''
+
+    def _sort_key_for_subseries(
+        self, rec, sn: str, stem: str
+    ) -> Optional[Tuple]:
+        """Подсерия: позиция (primary=родитель, secondary=подсерия, tertiary=том).
+
+        Пример: «Остен Ард 3\\Последний 1\\Корона. Том 1» → (0, 3, 1, 1).
+        Возвращает sort_key tuple если удалось определить позицию, иначе None.
+        """
+        # primary: номер родительской серии из proposed_series или из стема
+        _root_part = (rec.proposed_series or '').split('\\')[0].strip()
+        _parent_num_m = re.search(r'\s(\d{1,4})\s*$', _root_part)
+        if _parent_num_m:
+            parent_num = int(_parent_num_m.group(1))
+        else:
+            _root_re = re.compile(re.escape(_root_part) + r'\s+(\d{1,4})', re.IGNORECASE | re.UNICODE)
+            _root_m = _root_re.search(stem)
+            _c = int(_root_m.group(1)) if _root_m else 0
+            parent_num = _c if _c and _c < 1900 else 0
+        # Если корень не дал числа — пробуем ведущее число ПОДСЕРИИ:
+        # «Отзвуки серебряного ветра\1. Мы — были!» → '1' из начала подсерии.
+        if not parent_num and '\\' in (rec.proposed_series or ''):
+            _sub_leading_part = (rec.proposed_series or '').split('\\', 1)[1].strip()
+            _sub_lead_m = re.match(r'^(\d{1,4})[.\s\-–—]', _sub_leading_part)
+            if _sub_lead_m:
+                _pl = int(_sub_lead_m.group(1))
+                if _pl < 1900:
+                    parent_num = _pl
+
+        # secondary: номер подсерии внутри позиции родителя
+        sub_ordinal = 0
+        subseries_name = (rec.proposed_series or '').split('\\')[-1].strip()
+        if subseries_name:
+            _sub_re = re.compile(
+                re.escape(subseries_name) + r'\s+(\d{1,4})',
+                re.IGNORECASE | re.UNICODE,
+            )
+            _sm = _sub_re.search(stem) or _sub_re.search(rec.file_title or '')
+            if _sm:
+                _sc = int(_sm.group(1))
+                if _sc < 1900:
+                    sub_ordinal = _sc
+
+        # tertiary: номер тома внутри подсерии («Том N», «Книга N»)
+        inline = self._extract_inline_volume_number(rec.file_title or stem, stem) or 0
+
+        # Fallback для подсерий без числа в корне: ведущее число stem — позиция подсерии.
+        if not parent_num and not sub_ordinal and not inline:
+            _fn_m = self._STEM_NUM_RE.match(stem)
+            if _fn_m:
+                _fn_n = int(next(g for g in _fn_m.groups() if g is not None))
+                if _fn_n and _fn_n < 1900:
+                    sub_ordinal = _fn_n
+
+        # Метаданные как fallback для sub_ordinal
+        if not sub_ordinal and not inline and sn:
+            meta_s_low = (rec.metadata_series or '').strip().lower().replace('ё', 'е')
+            sub_name_low = subseries_name.lower().replace('ё', 'е')
+            if meta_s_low and sub_name_low and (
+                meta_s_low == sub_name_low
+                or meta_s_low in sub_name_low
+                or sub_name_low in meta_s_low
+            ):
+                if re.match(r'^\d+$', sn):
+                    sub_ordinal = int(sn)
+
+        # Если в имени подсерии есть диапазон «(Слово N-M)» и корень серии
+        # не имеет собственного числа, используем lo диапазона как реальную позицию.
+        if not parent_num and sub_ordinal:
+            _sub_range_m = re.search(
+                r'\(\s*(?:\w+\s+)?(\d{1,4})\s*[-–—]\s*(\d{1,4})\s*\)',
+                subseries_name,
+            )
+            if _sub_range_m:
+                _lo_r = int(_sub_range_m.group(1))
+                if _lo_r and _lo_r < 1900:
+                    _eff_pos = _lo_r + sub_ordinal - 1
+                    return (0, _eff_pos, 0, 0), 'subseries_range', False, str(_eff_pos)
+
+        if parent_num or sub_ordinal or inline:
+            _lbl = str(parent_num)
+            if sub_ordinal:
+                _lbl += f'.{sub_ordinal}'
+            if inline:
+                _lbl += f'.{inline}'
+            _src = 'subseries_number' if sub_ordinal else ('inline_title' if inline else 'parent_num')
+            return (0, parent_num, sub_ordinal, inline), _src, False, _lbl
+
+        return None
 
     def _extract_date_from_fb2(self, path: Path, section: str = 'title-info') -> Optional[str]:
         """Извлечь дату из <date> внутри указанной секции FB2.
