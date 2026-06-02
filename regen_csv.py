@@ -420,7 +420,6 @@ class RegenCSVService:
             _t25 = time.perf_counter()
             # Случай: папка "Войлошниковы", proposed_author="Войлошниковы" (filename),
             # но metadata_authors стабильно содержит полные имена авторов. Расширяем.
-            import re as _re25
 
             # Перестраиваем группы по папкам после Pass 2
             _folder_groups2: dict = {}
@@ -433,7 +432,7 @@ class RegenCSVService:
                 # "Войлошниковы" → "Войлошников" → "Войлошник"
                 s = s.lower().replace('ё', 'е')
                 for _ in range(2):
-                    s2 = _re25.sub(r'(?:ова|ева|ов|ев|ин|ина|ий|ая|ый|ых|ы|а|я)$', '', s)
+                    s2 = re.sub(r'(?:ова|ева|ов|ев|ин|ина|ий|ая|ый|ых|ы|а|я)$', '', s)
                     if s2 == s:
                         break
                     s = s2
@@ -457,9 +456,8 @@ class RegenCSVService:
 
                 # Проверяем стабильность metadata_authors (≥ 60% файлов согласны)
                 # Нормализуем: разбиваем на авторов и сортируем, чтобы порядок не важен
-                import re as _re25b
                 def _meta_key(m):
-                    authors = frozenset(a.strip().lower() for a in _re25b.split(r'[;,]+', m) if a.strip())
+                    authors = frozenset(a.strip().lower() for a in re.split(r'[;,]+', m) if a.strip())
                     return authors
 
                 meta_counts: dict = {}
@@ -486,7 +484,7 @@ class RegenCSVService:
                 if len(proposed_stem) < 4:
                     continue
 
-                meta_authors_list = [a.strip() for a in _re25.split(r'[;,]+', dominant_meta) if a.strip()]
+                meta_authors_list = [a.strip() for a in re.split(r'[;,]+', dominant_meta) if a.strip()]
                 matched = any(
                     # bidirectional: either stem contains the other
                     (proposed_stem in _stem25(part) or _stem25(part) in proposed_stem)
@@ -793,9 +791,8 @@ class RegenCSVService:
             # ===== Post-check: series must never equal author =====
             # Normalize both sides for comparison: strip trailing periods, lowercase.
             def _norm_for_cmp(s: str) -> str:
-                import re as _re_cmp
                 s = s.rstrip('. ').strip().lower().replace('ё', 'е')
-                s = _re_cmp.sub(r'[«»""„"‹›]', '', s)
+                s = re.sub(r'[«»""„"‹›]', '', s)
                 return s
 
             _series_eq_author_cleared = 0
