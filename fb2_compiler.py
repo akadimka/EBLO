@@ -385,15 +385,20 @@ class FB2CompilerService:
                     aw1 = _author_words(ak1)
                     aw2 = _author_words(ak2)
 
-                    # Автор: определяем направление подмножества
+                    # Автор: определяем направление подмножества.
+                    # Лишние токены допустимы только если выглядят как инициалы/аббревиатуры
+                    # (длина ≤3 символов или содержат точку). Иначе — соавтор, не сливаем.
+                    def _is_abbrev_only(extra: set) -> bool:
+                        return all(len(t) <= 3 or '.' in t for t in extra)
+
                     if aw1 == aw2:
                         author_dir = 0        # равны
-                    elif aw1 < aw2:
+                    elif aw1 < aw2 and _is_abbrev_only(aw2 - aw1):
                         author_dir = 12       # ak1 короче, ak2 — канонический
-                    elif aw2 < aw1:
+                    elif aw2 < aw1 and _is_abbrev_only(aw1 - aw2):
                         author_dir = 21       # ak2 короче, ak1 — канонический
                     else:
-                        continue              # пересекаются, но не подмножество
+                        continue              # пересекаются или лишние токены — соавтор
 
                     # Серия: определяем направление суффикса
                     if sk1 == sk2:

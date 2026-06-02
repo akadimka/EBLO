@@ -1191,13 +1191,13 @@ class RegenCSVService:
             if len(grp) < 2:
                 continue
             # Извлечь часть имени файла после автора (Author. Title → Title)
-            def _title_part(rec, _author=author):
+            def _title_part(rec, _author=author, _self=self):
                 stem = Path(rec.file_path).stem
-                _a_norm = _norm_for_cmp(_author)
+                _a_norm = _self._norm_for_series_cmp(_author)
                 for sep in ('. ', ' - '):
                     if sep in stem:
                         before, after = stem.split(sep, 1)
-                        if _norm_for_cmp(before) == _a_norm or _norm_for_cmp(before) in _a_norm:
+                        if _self._norm_for_series_cmp(before) == _a_norm or _self._norm_for_series_cmp(before) in _a_norm:
                             return after.strip()
                 return stem.strip()
 
@@ -1230,11 +1230,11 @@ class RegenCSVService:
             for rec_a, title_a in titled:
                 if not title_a:
                     continue
-                ta_norm = _norm_for_cmp(title_a)
+                ta_norm = self._norm_for_series_cmp(title_a)
                 for rec_b, title_b in titled:
                     if rec_b is rec_a or not title_b:
                         continue
-                    tb_norm = _norm_for_cmp(title_b)
+                    tb_norm = self._norm_for_series_cmp(title_b)
                     if _is_prefix_match(ta_norm, tb_norm):
                         # Canonical series name: prefer existing proposed_series (e.g. from "filename")
                         canonical = rec_a.proposed_series or rec_b.proposed_series or title_a
@@ -1250,10 +1250,6 @@ class RegenCSVService:
         if _prefix_series_count:
             print(f"[POST-CHECK] Assigned series via filename prefix pattern: {_prefix_series_count} records")
             self.logger.log(f"[OK] POST-CHECK: filename prefix pattern → {_prefix_series_count} series assigned")
-
-        # ===== Clear series for collections/compilations =====
-        if progress_callback:
-            progress_callback(90, 100, "Финальная обработка")
 
     def _postcheck_clear_large_numbers(self) -> None:
         """Очищает series_number >= 100 (год, номер главы, фрагмент заголовка)."""
