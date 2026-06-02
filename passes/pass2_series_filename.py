@@ -40,6 +40,11 @@ except ImportError:
         return unicodedata.normalize('NFC', s).lower().replace('ё', 'е')
 
 
+def _norm_s(s: str) -> str:
+    """Нормализация строки для сравнения: NFC + lower + ё→е + схлопывание пробелов."""
+    return re.sub(r'\s+', ' ', _nfc_lower_yo(s)).strip()
+
+
 # Паттерн «том/книга/часть/... N» — компилируется один раз для всего модуля.
 # Полный набор слов (свиток, выпуск, арка — СИ-специфика).
 _TOM_WORD_RE = re.compile(
@@ -1224,8 +1229,8 @@ class Pass2SeriesFilename:
             root = rec.proposed_series.split('\\')[0].strip()
             # Убираем число из корня, чтобы сравнивать «Брия» == «Брия» (без "1" или "3")
             root_base = re.sub(r'\s+\d+\s*$', '', root).strip()
-            ak = _norm(rec.proposed_author or '')
-            _author_roots.setdefault(ak, {})[_norm(root_base)] = root_base
+            ak = _norm_s(rec.proposed_author or '')
+            _author_roots.setdefault(ak, {})[_norm_s(root_base)] = root_base
 
         _FOLDER_SRC_AR = {
             'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
@@ -1239,14 +1244,14 @@ class Pass2SeriesFilename:
                 continue
             if _rec.series_source in _FOLDER_SRC_AR:
                 continue
-            _ak2 = _norm(_rec.proposed_author or '')
-            _sn2 = _norm(_rec.proposed_series.strip())
+            _ak2 = _norm_s(_rec.proposed_author or '')
+            _sn2 = _norm_s(_rec.proposed_series.strip())
             if _ak2 not in _author_roots or _sn2 not in _author_roots[_ak2]:
                 continue
-            _sn_norm = _norm(_rec.proposed_series.strip())
+            _sn_norm = _norm_s(_rec.proposed_series.strip())
             _esc2 = re.escape(_sn_norm)
             _p2 = re.compile(_esc2 + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
-            _m2 = _p2.search(_norm(Path(_rec.file_path).stem))
+            _m2 = _p2.search(_norm_s(Path(_rec.file_path).stem))
             if _m2:
                 _n2 = int(_m2.group(1))
                 _is_zero_padded2 = _m2.group(1).startswith('0') and len(_m2.group(1)) >= 2
@@ -1260,13 +1265,13 @@ class Pass2SeriesFilename:
                 continue
             if record.series_source in _FOLDER_SRC_AR:
                 continue  # папочная серия авторитетна — не дополняем числами
-            ak = _norm(record.proposed_author or '')
-            series_norm = _norm(record.proposed_series.strip())
+            ak = _norm_s(record.proposed_author or '')
+            series_norm = _norm_s(record.proposed_series.strip())
             # Только если этот же автор имеет подсерии с тем же корнем
             if ak not in _author_roots or series_norm not in _author_roots[ak]:
                 continue
             stem = Path(record.file_path).stem
-            stem_norm = _norm(stem)
+            stem_norm = _norm_s(stem)
             _escaped = re.escape(series_norm)
             _pat = re.compile(_escaped + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
             _m = _pat.search(stem_norm)
@@ -1306,11 +1311,11 @@ class Pass2SeriesFilename:
                 continue
             if record.series_source in _FOLDER_SRC_AR:
                 continue
-            ms_norm = _norm(record.metadata_series.replace('…', '...').strip())
-            ps_norm = _norm(record.proposed_series.strip())
+            ms_norm = _norm_s(record.metadata_series.replace('…', '...').strip())
+            ps_norm = _norm_s(record.proposed_series.strip())
             if ms_norm != ps_norm:
                 continue
-            ak = _norm(record.proposed_author or '')
+            ak = _norm_s(record.proposed_author or '')
             key = (ak, ps_norm)
             if key not in _meta_arc_pat:
                 _escaped = re.escape(ps_norm)
@@ -1318,7 +1323,7 @@ class Pass2SeriesFilename:
                     _escaped + r'\s+(\d{1,4})\s*[.\-–—](?!\d)', re.UNICODE
                 )
                 _meta_arc_map[key] = set()
-            stem_norm = _norm(Path(record.file_path).stem)
+            stem_norm = _norm_s(Path(record.file_path).stem)
             _m = _meta_arc_pat[key].search(stem_norm)
             if _m:
                 n = int(_m.group(1))
@@ -1332,7 +1337,7 @@ class Pass2SeriesFilename:
                 continue  # числа варьируются → это номера томов, не арк
             n = next(iter(nums))
             n_str = str(n)
-            stem_norm = _norm(Path(record.file_path).stem)
+            stem_norm = _norm_s(Path(record.file_path).stem)
             _m = _meta_arc_pat[key].search(stem_norm)
             if not _m:
                 continue
@@ -1351,10 +1356,10 @@ class Pass2SeriesFilename:
                 continue
             if record.series_source in _FOLDER_SRC_AR:
                 continue
-            ps_norm = _norm(record.proposed_series.strip())
+            ps_norm = _norm_s(record.proposed_series.strip())
             if not re.search(r'\s+\d+$', ps_norm):
                 continue  # серия без числа — пропускаем
-            stem_norm = _norm(Path(record.file_path).stem)
+            stem_norm = _norm_s(Path(record.file_path).stem)
             _escaped_ps = re.escape(ps_norm)
             # Паттерн: «Серия N. ArcTitle M.» — извлекаем M
             _sn_pat = re.compile(
@@ -1408,8 +1413,6 @@ class Pass2SeriesFilename:
         """
         from collections import defaultdict
 
-        def _norm(s): return _nfc_lower_yo(s).strip()
-
         # Zero-padded паттерн: «SeriesRoot 0N. ArcTitle»
         # Захватываем серию, номер тома (zero-padded) и arc candidate.
         # Допускаем многосоставный arc title с точками внутри: «Другая жизнь. Назад в СССР»
@@ -1443,14 +1446,14 @@ class Pass2SeriesFilename:
                 m = _ARC_RE_ANY.match(stem)
             if not m:
                 continue
-            series_in_stem = _norm(m.group(1))
-            series_rec = _norm(rec.proposed_series)
+            series_in_stem = _norm_s(m.group(1))
+            series_rec = _norm_s(rec.proposed_series)
             # Проверяем что корень в стеме совпадает с proposed_series.
             # Если нет — возможно в стеме есть авторский префикс «Автор. Серия N. Арк».
             # Ищем series_rec в нормализованном стеме; принимаем только если он
             # стоит сразу после '. ' или '- ' (авторский разделитель, не внутри слова).
             if series_in_stem != series_rec and not series_rec.startswith(series_in_stem):
-                _stem_n = _norm(stem)
+                _stem_n = _norm_s(stem)
                 _idx = _stem_n.find(series_rec)
                 if _idx <= 0:
                     continue
@@ -1460,7 +1463,7 @@ class Pass2SeriesFilename:
                 m2 = _ARC_RE_ANY.match(stem[_idx:])
                 if not m2:
                     continue
-                _sin2 = _norm(m2.group(1))
+                _sin2 = _norm_s(m2.group(1))
                 if _sin2 != series_rec and not series_rec.startswith(_sin2):
                     continue
                 m = m2
@@ -1471,10 +1474,10 @@ class Pass2SeriesFilename:
             # Берём первую секцию до '. ' — общий arc-prefix без подзаголовка.
             # «Пилот ракетоносца. Выбор курса» → «Пилот ракетоносца»
             arc_display = re.split(r'\.\s+', arc_display)[0].strip()
-            arc_norm = _norm(arc_display)
+            arc_norm = _norm_s(arc_display)
             if not arc_norm or len(arc_norm) < 4:
                 continue
-            key = (_norm(rec.proposed_author or ''), series_rec)
+            key = (_norm_s(rec.proposed_author or ''), series_rec)
             groups[key].append((rec, vol_num, arc_norm, arc_display))
 
         # 2. По каждой группе: arc titles с 2+ вхождениями → подсерия
@@ -1546,18 +1549,18 @@ class Pass2SeriesFilename:
             # потому что «другая жизнь» не встречается в его стеме.
             # Для Чинцова («Нагнуть Европу 1. Сокровища тамплиеров») «нагнуть европу»
             # присутствует в стеме → правильно включается.
-            arc_norm_ps = _norm(arc.strip())
-            if arc_norm_ps and arc_norm_ps not in _norm(stem):
+            arc_norm_ps = _norm_s(arc.strip())
+            if arc_norm_ps and arc_norm_ps not in _norm_s(stem):
                 continue
             # Пропускаем если арк = корень серии (нормализованно без точек/многоточий).
             # «Пункт назначения..\Пункт назначения» — это ложный арк, не реальная подсерия.
             # Также пропускаем если корень содержится в имени арка:
             # «Хоттабыч\Позывной Хоттабыч» — «хоттабыч» ⊂ «позывной хоттабыч» → ложный арк.
-            _root_base_stripped = _norm(re.sub(r'[.…]+$', '', root_base.strip()))
+            _root_base_stripped = _norm_s(re.sub(r'[.…]+$', '', root_base.strip()))
             if arc_norm_ps and (arc_norm_ps == _root_base_stripped
                                 or (_root_base_stripped and _root_base_stripped in arc_norm_ps)):
                 continue
-            key = (_norm(rec.proposed_author or ''), _norm(root_base), _norm(arc))
+            key = (_norm_s(rec.proposed_author or ''), _norm_s(root_base), _norm_s(arc))
             existing_arcs[key].append((rec, vol_num, root_base, arc))
 
         for (_ak, _rk, _srk), arc_entries in existing_arcs.items():
@@ -1573,14 +1576,14 @@ class Pass2SeriesFilename:
             if lo == hi:
                 _arc_vol = lo
                 _arc_display_local = arc_entries[0][3]
-                _arc_norm_local = _norm(_arc_display_local)
+                _arc_norm_local = _norm_s(_arc_display_local)
                 _root_base_local = arc_entries[0][2]
 
                 _TOM_SORT_PAT = _TOM_WORD_RE
 
                 def _arc_internal_pos(entry, _anl=_arc_norm_local):
                     _rec, _vn, _rb, _arc = entry
-                    _stem_n = _norm(Path(_rec.file_path).stem)
+                    _stem_n = _norm_s(Path(_rec.file_path).stem)
                     _m = re.search(re.escape(_anl) + r'[\s.]+(\d{1,3})', _stem_n)
                     _primary = int(_m.group(1)) if _m else 9999
                     # Вторичный ключ — «Том/Книга N» в стеме надёжнее metadata sn
@@ -1645,7 +1648,7 @@ class Pass2SeriesFilename:
             _root_r, _arc_r = _s_r.split('\\', 1)
             _root_base_r = re.sub(r'\s+\d+[-–—]\d+\s*$', '', _root_r).strip()
             _root_base_r = re.sub(r'\s+\d+\s*$', '', _root_base_r).strip()
-            _key_r = (_norm(rec.proposed_author or ''), _norm(_root_base_r), _norm(_arc_r.strip()))
+            _key_r = (_norm_s(rec.proposed_author or ''), _norm_s(_root_base_r), _norm_s(_arc_r.strip()))
             _arc_registry[_key_r].append((rec, int(_sn_r), _root_base_r, _arc_r.strip()))
 
         for rec in records:
@@ -1663,15 +1666,15 @@ class Pass2SeriesFilename:
             _arc_raw_f = _m_f.group(3).strip()
             # Первая секция до '. ' — кандидат в арки (без подзаголовка)
             _arc_cand_f = re.split(r'\.\s+', _arc_raw_f)[0].strip()
-            _arc_norm_f = _norm(_arc_cand_f)
+            _arc_norm_f = _norm_s(_arc_cand_f)
             if not _arc_norm_f or len(_arc_norm_f) < 4:
                 continue
             _root_ps_f = rec.proposed_series
             # Пробуем ключ с зачисткой числового суффикса из proposed_series и без
-            _root_norm_f = _norm(re.sub(r'\s+\d+[-–—]?\d*\s*$', '', _root_ps_f).strip())
-            _key_f = (_norm(rec.proposed_author or ''), _root_norm_f, _arc_norm_f)
+            _root_norm_f = _norm_s(re.sub(r'\s+\d+[-–—]?\d*\s*$', '', _root_ps_f).strip())
+            _key_f = (_norm_s(rec.proposed_author or ''), _root_norm_f, _arc_norm_f)
             if _key_f not in _arc_registry:
-                _key_f = (_norm(rec.proposed_author or ''), _norm(_root_ps_f), _arc_norm_f)
+                _key_f = (_norm_s(rec.proposed_author or ''), _norm_s(_root_ps_f), _arc_norm_f)
             if _key_f not in _arc_registry:
                 continue
             _arc_recs_f = _arc_registry[_key_f]
@@ -1863,8 +1866,6 @@ class Pass2SeriesFilename:
         Условие безопасности: плоские записи включаются только если их стем содержит
         имя подсерии непосредственно перед номером («Приквелы 2.»).
         """
-        def _norm(s): return re.sub(r'\s+', ' ', _nfc_lower_yo(s)).strip()
-
         # 1. Собираем иерархические записи: (author_norm, root_base_norm) → [(root_display, sub_display, rec)]
         from collections import defaultdict
         hier_map: dict = defaultdict(list)
@@ -1877,7 +1878,7 @@ class Pass2SeriesFilename:
             if not sub:
                 continue
             root_base = re.sub(r'\s+\d+\s*$', '', root).strip()
-            key = (_norm(rec.proposed_author or ''), _norm(root_base))
+            key = (_norm_s(rec.proposed_author or ''), _norm_s(root_base))
             hier_map[key].append((root_base, sub, rec))
 
         if not hier_map:
@@ -1886,7 +1887,7 @@ class Pass2SeriesFilename:
         # 2. Для каждого ключа: если ровно одна подсерия — ищем плоские записи того же автора
         for (author_k, root_k), entries in hier_map.items():
             # Проверяем, что все иерархические записи имеют одну и ту же подсерию
-            subs = {_norm(e[1]) for e in entries}
+            subs = {_norm_s(e[1]) for e in entries}
             if len(subs) != 1:
                 continue  # Несколько разных подсерий — не трогаем
             sub_norm = next(iter(subs))
@@ -1900,14 +1901,14 @@ class Pass2SeriesFilename:
                 re.UNICODE,
             )
             for rec in records:
-                if _norm(rec.proposed_author or '') != author_k:
+                if _norm_s(rec.proposed_author or '') != author_k:
                     continue
                 if '\\' in (rec.proposed_series or ''):
                     # Это иерархическая запись — нормализуем ниже
                     continue
-                if _norm(rec.proposed_series or '') != root_k:
+                if _norm_s(rec.proposed_series or '') != root_k:
                     continue
-                stem_norm = _norm(Path(rec.file_path).stem)
+                stem_norm = _norm_s(Path(rec.file_path).stem)
                 if _sub_re.search(stem_norm):
                     rec.proposed_series = flat_series_display
 
@@ -1976,7 +1977,7 @@ class Pass2SeriesFilename:
                 continue
             if not _sn_from_stem(rec):
                 continue
-            key = (_norm(rec.proposed_author or ''), _norm(rec.proposed_series))
+            key = (_norm_s(rec.proposed_author or ''), _norm_s(rec.proposed_series))
             groups[key].append(rec)
 
         for (_author_k, _series_k), group in groups.items():
@@ -2033,7 +2034,7 @@ class Pass2SeriesFilename:
                     for r in fn_recs:
                         _qm = _qual_re.search(Path(r.file_path).stem)
                         if _qm:
-                            _quals.add(_norm(_qm.group(1)))
+                            _quals.add(_norm_s(_qm.group(1)))
                     if len(_quals) >= 2:
                         _qualifier_collision = True
                         break
@@ -2065,8 +2066,8 @@ class Pass2SeriesFilename:
                         if 'filename' not in rec.series_source:
                             continue
                         # Пропускаем если метаданные уже подтверждают серию без квалификатора
-                        _ms_norm = _norm(rec.metadata_series or '')
-                        _ps_norm = _norm(rec.proposed_series or '')
+                        _ms_norm = _norm_s(rec.metadata_series or '')
+                        _ps_norm = _norm_s(rec.proposed_series or '')
                         if _ms_norm and _ms_norm == _ps_norm:
                             continue
                         _qm = _qual_re.search(Path(rec.file_path).stem)
@@ -2090,8 +2091,7 @@ class Pass2SeriesFilename:
             re.IGNORECASE | re.UNICODE,
         )
 
-        def _norm(s: str) -> str:
-            return re.sub(r'\s+', ' ', _nfc_lower_yo(s)).strip()
+
 
         from collections import defaultdict
         # Группируем по (автор, серия, номер_в_серии)
@@ -2099,7 +2099,7 @@ class Pass2SeriesFilename:
         for rec in records:
             if not rec.proposed_series or not rec.series_number:
                 continue
-            key = (_norm(rec.proposed_author or ''), _norm(rec.proposed_series), rec.series_number)
+            key = (_norm_s(rec.proposed_author or ''), _norm_s(rec.proposed_series), rec.series_number)
             groups[key].append(rec)
 
         marked = 0
