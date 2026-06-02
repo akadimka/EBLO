@@ -902,8 +902,7 @@ class Pass2SeriesFilename:
                 # а metadata_series подтверждает полное название — восстанавливаем из metadata.
                 # Условие: clean является префиксом metadata_series И кандидат начинался с metadata_series.
                 if clean and record.metadata_series:
-                    import unicodedata as _ud2
-                    def _nyo(s): return _ud2.normalize('NFC', s).lower().replace('ё', 'е')
+                    _nyo = _nfc_lower_yo
                     _meta = record.metadata_series.strip()
                     if (_nyo(_meta).startswith(_nyo(clean) + ' ')
                             and _nyo(series_candidate).startswith(_nyo(_meta))):
@@ -1699,6 +1698,8 @@ class Pass2SeriesFilename:
           «2024_SomeBook.fb2»                      → НЕ трогаем (год, не порядковый №)
         """
         _PREFIX_RE = re.compile(r'^(\d{1,3})[_\-\.]')
+        # Правило 1.5: дробный префикс «N.M.» или «N.M_»
+        _FRAC_PREFIX_RE = re.compile(r'^(\d{1,3}\.\d{1,4})[\._\s]', re.UNICODE)
         # Правило 3: диапазон томов в скобках имени файла
         # «Автор - Серия (т. 4-7).fb2» → series_number='4-7'
         # Перекрывает metadata-диапазон «1-4» (относительные номера глав внутри файла)
@@ -1717,8 +1718,7 @@ class Pass2SeriesFilename:
 
         def _br_series_match(prefix_raw: str, proposed: str) -> bool:
             """Prefix ≈ proposed_series root (нечувствительно к знакам и регистру)."""
-            import unicodedata as _ud2
-            _n = lambda s: re.sub(r'[\W_]+', ' ', _ud2.normalize('NFC', s).lower().replace('ё', 'е')).strip()
+            _n = lambda s: re.sub(r'[\W_]+', ' ', _nfc_lower_yo(s)).strip()
             p = _n(prefix_raw)
             root = _n(proposed.split('\\')[0])
             root = re.sub(r'\s*\d+\s*$', '', root).strip()  # убираем хвостовые цифры
@@ -1749,7 +1749,6 @@ class Pass2SeriesFilename:
             # Правило 1.5: дробный префикс «N.M.» или «N.M_»
             # «0.1. Двигатель (рассказ).fb2» → series_number='0.1'
             # Проверяем ДО Правила 1, иначе _PREFIX_RE съест только «0».
-            _FRAC_PREFIX_RE = re.compile(r'^(\d{1,3}\.\d{1,4})[\._\s]', re.UNICODE)
             mf = _FRAC_PREFIX_RE.match(stem)
             if mf:
                 fn_frac = mf.group(1)
@@ -1862,9 +1861,7 @@ class Pass2SeriesFilename:
         Условие безопасности: плоские записи включаются только если их стем содержит
         имя подсерии непосредственно перед номером («Приквелы 2.»).
         """
-        import unicodedata as _ud
-        _norm = lambda s: re.sub(r'\s+', ' ', _ud.normalize('NFC', s).lower()
-                                 .replace('ё', 'е')).strip()
+        def _norm(s): return re.sub(r'\s+', ' ', _nfc_lower_yo(s)).strip()
 
         # 1. Собираем иерархические записи: (author_norm, root_base_norm) → [(root_display, sub_display, rec)]
         from collections import defaultdict
@@ -2088,7 +2085,6 @@ class Pass2SeriesFilename:
         «новая версия», «new version», «revised», «updated».
         Файл С таким маркером — новый, БЕЗ маркера — старый → delete_flag=True.
         """
-        import unicodedata as _ud
         _NEW_MARKERS = re.compile(
             r'нов(?:ый|ая|ое)\s+(?:вариант|редакци|версия|издани)|'
             r'new\s+(?:version|edition|variant)|revised|updated',
@@ -2096,7 +2092,7 @@ class Pass2SeriesFilename:
         )
 
         def _norm(s: str) -> str:
-            return re.sub(r'\s+', ' ', _ud.normalize('NFC', s).lower().replace('ё', 'е')).strip()
+            return re.sub(r'\s+', ' ', _nfc_lower_yo(s)).strip()
 
         from collections import defaultdict
         # Группируем по (автор, серия, номер_в_серии)
