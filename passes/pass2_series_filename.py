@@ -319,7 +319,13 @@ class BlockLevelPatternSelector:
 
 class Pass2SeriesFilename:
     """Извлечение серий из имён файлов."""
-    
+
+    # Источники серий, которые считаются «папочными» (приоритет над filename/metadata)
+    _FOLDER_SOURCES = frozenset({
+        'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+        'folder_metadata_confirmed', 'no_series_folder',
+    })
+
     def __init__(self, logger: Logger = None, male_names: set = None, female_names: set = None):
         self.logger = logger or Logger()
         self.settings = SettingsManager('config.json')
@@ -399,32 +405,22 @@ class Pass2SeriesFilename:
 
         return folder_name.strip()
     
-    def execute(self, records: List[BookRecord]) -> None:
+    def _prepass_folder_setup(self, records: List[BookRecord]) -> None:
+        """PRE-PASS: подготовка авторов и серий из папок до основного цикла.
+
+        1. Распространяет автора из папки-предка (_propagate_ancestor_folder_authors).
+        2. Применяет паттерны «Серия (Автор)» из config к именам папок.
+        3. Унифицирует автора внутри папок (_unify_series_folder_authors).
         """
-        ПРОСТАЯ И ПРАВИЛЬНАЯ ЛОГИКА - независима от папок!
-        ===================================================
-        Логика:
-        1. Если series_source == "folder_dataset" → skip (папка дала series)
-        2. Если proposed_series не пусто → skip (уже выбрана)  
-        3. ВСЕГДА пробовать паттерны (неважно file_depth!)
-        4. Fallback на metadata только если паттерны не дали
-        """
-        # 🔑 СНАЧАЛА: Распространяем автора из папки-предка ДО основного цикла серий.
-        # Это необходимо чтобы основной цикл мог корректно сопоставить папку автора
-        # даже для файлов у которых proposed_author был "Соавторство"/"Сборник".
+        # Шаг 1: авторы из папок-предков — нужно до основного цикла, чтобы
+        # сопоставление author_folder работало даже для "Соавторство"/"Сборник".
         self._propagate_ancestor_folder_authors(records)
 
-        _FOLDER_SOURCES_P2 = {
-            'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
-            'folder_metadata_confirmed', 'no_series_folder',
-        }
-
-        # PRE-PASS: Применяем паттерны папок (author_series_patterns_in_folders).
-        # Исправляет случаи "Серия (Автор)" где папка классифицирована как авторская,
-        # но на самом деле является серией с автором в скобках.
+        # Шаг 2: паттерны «Серия (Автор)» — исправляет случаи когда папка
+        # классифицирована как авторская, но на самом деле является серийной.
         # Пример: "Князь Игорь (Аксеничев Олег)" → author="Аксеничев Олег", series="Князь Игорь"
         if self.compiled_folder_patterns:
-            _folder_pattern_count = 0
+            _count = 0
             _FOLDER_AUTHOR_SRC = {
                 'folder_dataset', 'folder_hierarchy',
                 'metadata_folder_confirmed', 'folder_multiauthor',
@@ -433,7 +429,7 @@ class Pass2SeriesFilename:
                 if record.author_source not in _FOLDER_AUTHOR_SRC:
                     continue
                 path_parts = Path(record.file_path).parts
-                for part in path_parts[:-1]:  # все папки, не файл
+                for part in path_parts[:-1]:
                     for _p_str, _p_re, _p_groups in self.compiled_folder_patterns:
                         if 'series' not in _p_groups or 'author' not in _p_groups:
                             continue
@@ -451,17 +447,16 @@ class Pass2SeriesFilename:
                         ext_author_norm = extracted_author.lower().replace('ё', 'е')
 
                         # Case A: папка взята как автор вместо серии — исправить автора.
-                        # Требуем что extracted_author выглядит как «Фамилия Имя» (≥2 слова):
-                        # если в скобках одно слово («Базилио»), скорее всего это псевдоним,
-                        # а папка «Риддер Аристарх (Базилио)» — авторская, не серийная.
+                        # Требуем ≥2 слов в extracted_author: одно слово («Базилио») —
+                        # псевдоним, папка «Риддер Аристарх (Базилио)» — авторская.
                         _ext_author_words = [w for w in re.sub(r'[^\w]', ' ', ext_author_norm).split() if w]
                         author_was_series = (
                             cur_author_norm == ext_series_norm
                             and len(_ext_author_words) >= 2
                         )
 
-                        # Case B: автор уже верный (совпадает по фамилии с extracted_author)
-                        # Проверка: длинное слово из extracted_author есть в proposed_author
+                        # Case B: автор уже верный — длинное слово из extracted_author
+                        # присутствует в proposed_author.
                         _ext_words = [w for w in re.sub(r'[^\w]', ' ', ext_author_norm).split() if len(w) > 3]
                         author_matches = bool(_ext_words) and any(w in cur_author_norm for w in _ext_words)
 
@@ -475,17 +470,29 @@ class Pass2SeriesFilename:
                             record.proposed_author = canonical_author
                             record.author_source = 'folder_dataset'
 
-                        # Ставим серию из папки (апгрейд с metadata → folder_dataset)
-                        if not record.proposed_series or record.series_source not in _FOLDER_SOURCES_P2:
+                        if not record.proposed_series or record.series_source not in self._FOLDER_SOURCES:
                             record.proposed_series = extracted_series
                             record.series_source = 'folder_dataset'
-                        _folder_pattern_count += 1
-                        break  # один паттерн на папку достаточно
-            if _folder_pattern_count:
-                self.logger.log(f"[PASS 2] Applied folder patterns to {_folder_pattern_count} records")
-                print(f"[PASS 2] Applied folder Series(Author) patterns to {_folder_pattern_count} records")
+                        _count += 1
+                        break
+            if _count:
+                self.logger.log(f"[PASS 2] Applied folder patterns to {_count} records")
+                print(f"[PASS 2] Applied folder Series(Author) patterns to {_count} records")
 
+        # Шаг 3: унификация автора внутри папок
         self._unify_series_folder_authors(records)
+
+    def execute(self, records: List[BookRecord]) -> None:
+        """
+        ПРОСТАЯ И ПРАВИЛЬНАЯ ЛОГИКА - независима от папок!
+        ===================================================
+        Логика:
+        1. Если series_source == "folder_dataset" → skip (папка дала series)
+        2. Если proposed_series не пусто → skip (уже выбрана)  
+        3. ВСЕГДА пробовать паттерны (неважно file_depth!)
+        4. Fallback на metadata только если паттерны не дали
+        """
+        self._prepass_folder_setup(records)
 
         # Кэш Path.parts: один и тот же file_path встречается в нескольких проходах
         _parts_cache: dict = {}
@@ -541,7 +548,7 @@ class Pass2SeriesFilename:
 
                     # Если VARIANT B уже установил серию из папки — не перезаписываем.
                     # Только обновление author_source выше допустимо.
-                    if record.series_source in _FOLDER_SOURCES_P2 and record.proposed_series:
+                    if record.series_source in self._FOLDER_SOURCES and record.proposed_series:
                         pass  # серия уже определена папочной структурой
 
                     # Найдена папка автора на позиции i
@@ -638,7 +645,7 @@ class Pass2SeriesFilename:
                                         record.proposed_series = subseries_name or series_folder
 
                                 record.series_source = "folder_hierarchy"
-                    elif not (record.series_source in _FOLDER_SOURCES_P2 and record.proposed_series):
+                    elif not (record.series_source in self._FOLDER_SOURCES and record.proposed_series):
                         # Папка i содержит автора И является папкой серии одновременно
                         # (формат: "Сборник\Серия (Автор)\Файл.fb2" — нет подпапки серии)
                         # Папка имеет ВЫСШИЙ приоритет. Но если metadata_series — вариация
@@ -732,7 +739,7 @@ class Pass2SeriesFilename:
             # ИСКЛЮЧЕНИЕ: folder_dataset и folder_hierarchy — это имена реальных папок,
             # созданных пользователем; они авторитетны и blacklist к ним не применяем.
             if record.proposed_series and self.filename_blacklist and \
-                    record.series_source not in _FOLDER_SOURCES_P2:
+                    record.series_source not in self._FOLDER_SOURCES:
                 _fs_lower = record.proposed_series.lower().replace('ё', 'е')
                 _folder_series_bl = False
                 for _bl in self.filename_blacklist:
