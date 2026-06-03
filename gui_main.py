@@ -71,6 +71,7 @@ try:
     from fb2_utils import fb2_rglob, fb2_count as _fb2_count
     from archiving_service import archive_fb2_files
     from scan_service import scan_fb2_genres
+    from auto_compile_service import auto_compile_library
 
 except Exception as e:
     from .genres_manager import GenresManager
@@ -960,48 +961,12 @@ class MainWindow(tk.Tk):
             self._status_bar.set('Автокомпиляция после синхронизации…', 'busy')
 
         def worker():
-            import os
             try:
-                import importlib
-                import regen_csv as _rc
-                importlib.reload(_rc)
-                from regen_csv import RegenCSVService
-            except ImportError:
-                from .regen_csv import RegenCSVService
-            try:
-                import importlib
-                import fb2_compiler as _fc
-                importlib.reload(_fc)
-                from fb2_compiler import FB2CompilerService
-            except ImportError:
-                from .fb2_compiler import FB2CompilerService
+                def _on_group(author, series, success):
+                    self.logger.log(f"[AUTO-COMPILE] {'OK' if success else 'ERR'}: {author} / {series}")
 
-            try:
-                _devnull = open(os.devnull, 'w', encoding='utf-8')
-                import sys
-                _old_out, _old_err = sys.stdout, sys.stderr
-                sys.stdout = sys.stderr = _devnull
-
-                svc_csv = RegenCSVService()
-                records = svc_csv.generate_csv(library_path, output_csv_path=None)
-                if not records:
-                    records = getattr(svc_csv, 'records', []) or []
-
-                sys.stdout, sys.stderr = _old_out, _old_err
-                _devnull.close()
-
-                compiler = FB2CompilerService()
-                groups = compiler.find_groups(records, library_path)
-
-                ok_cnt = 0
-                fail_cnt = 0
-                for g in groups:
-                    r = compiler.compile_group(g, None, delete_sources=True)
-                    if r.success:
-                        ok_cnt += 1
-                    else:
-                        fail_cnt += 1
-                    self.logger.log(f"[AUTO-COMPILE] {'OK' if r.success else 'ERR'}: {g.author} / {g.series}")
+                result = auto_compile_library(library_path, on_group=_on_group)
+                ok_cnt, fail_cnt = result['ok'], result['fail']
 
                 def done():
                     if self._status_bar:
