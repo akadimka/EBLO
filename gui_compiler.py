@@ -711,7 +711,7 @@ class CompilerDialog:
             sc = group.series_complete
             if has_subseries and n_top_arcs and n_top_arcs >= 2:
                 suffix = self._service._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes,
-                                                      series_complete=sc)
+                                                      series_complete=sc, use_parts=True)
             else:
                 suffix  = self._service._series_suffix(n_volumes, top_lo, top_hi, part_count,
                                                        series_complete=sc)

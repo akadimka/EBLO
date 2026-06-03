@@ -237,7 +237,7 @@ class FB2CompilerService:
 
     @classmethod
     def _series_suffix(cls, n_volumes: int, lo: int, hi: int = None, part_count: int = 0,
-                       series_complete: bool = True) -> str:
+                       series_complete: bool = True, use_parts: bool = False) -> str:
         """Вернуть суффикс для имени файла компиляции.
 
         n_volumes       — число логических томов в run'е
@@ -272,10 +272,11 @@ class FB2CompilerService:
                 if lo == hi:
                     return f'книга {lo}'
                 return f'книги {lo}-{hi}'
-        # Частичный run — указываем диапазон томов
+        # Частичный run — указываем диапазон томов/частей
+        _lbl = 'ч.' if use_parts else 'т.'
         if lo == hi:
-            return f'т. {lo}'
-        return f'т. {lo}-{hi}'
+            return f'{_lbl} {lo}'
+        return f'{_lbl} {lo}-{hi}'
 
     def __init__(self, logger=None):
         self.logger = logger
@@ -479,6 +480,7 @@ class FB2CompilerService:
                     series = _plain
 
             books = [self._make_book(rec, work_dir) for rec in recs]
+            duplicate_paths: List[Path] = []
 
             # --- Если все книги в группе — уже предкомпиляции с разными series_number,
             # это отдельные скомпилированные подсерии — не объединяем их дальше.
@@ -528,6 +530,56 @@ class FB2CompilerService:
                         book.volume_label = f'{lo}-{hi}'
                         book.sort_source = 'filename_range'
                         book.order_ambiguous = False
+
+            # --- Коррекция «Сборника»: книга с «Сборник» в имени без подсерии,
+            # чьё название совпадает с именем дуги группы → ставим её на позицию
+            # этой дуги, а отдельные книги дуги помечаем в дубликаты.
+            # Пример: «Ветер и сталь (Мир Алекса Королёва. Сборник)» + дуга
+            # «2. Ветер и сталь» с книгами 1-3 → сборник занимает arc 2,
+            # книги 1-3 дуги → duplicate_paths.
+            _SBORNIK_RE = re.compile(r'\bсборник\b', re.IGNORECASE)
+            # Карта дуг: arc_num → {'name': str, 'books': [CompilationBook]}
+            # Только книги с sub-позицией (sort_key[2] > 0) — они внутри дуги.
+            _arc_map2: dict = {}
+            for _b in books:
+                if _b.sort_key[0] != 0 or _b.sort_key[1] == 0 or _b.sort_key[2] == 0:
+                    continue
+                _arc_num = _b.sort_key[1]
+                if _arc_num not in _arc_map2:
+                    _sub = (_b.record.proposed_series or '').split('\\')
+                    _arc_part = _sub[1].strip() if len(_sub) >= 2 else ''
+                    _arc_name = re.sub(r'^\d+\.\s*', '', _arc_part).lower().replace('ё', 'е')
+                    _arc_map2[_arc_num] = {'name': _arc_name, 'books': []}
+                _arc_map2[_arc_num]['books'].append(_b)
+
+            if _arc_map2:
+                _sbornik_arcs: set = set()
+                for _book in list(books):
+                    if self._RANGE_NUM_RE.match(_book.volume_label or ''):
+                        continue
+                    if not _SBORNIK_RE.search(_book.abs_path.stem):
+                        continue
+                    if '\\' in (_book.record.proposed_series or ''):
+                        continue
+                    _stem_n = _book.abs_path.stem.lower().replace('ё', 'е')
+                    _best_arc, _best_score = None, 0
+                    for _arc_num, _arc_info in _arc_map2.items():
+                        _words = [w for w in _arc_info['name'].split() if len(w) >= 3]
+                        _score = sum(1 for w in _words if w in _stem_n)
+                        if _score > _best_score:
+                            _best_score, _best_arc = _score, _arc_num
+                    if _best_arc and _best_score >= 2 and _best_arc not in _sbornik_arcs:
+                        _sbornik_arcs.add(_best_arc)
+                        _book.sort_key = (0, _best_arc, 0, 0)
+                        _book.volume_label = str(_best_arc)
+                        _book.sort_source = 'inferred_sbornik'
+                        _book.order_ambiguous = False
+                        # Отдельные книги этой дуги → дубликаты
+                        for _arc_book in _arc_map2[_best_arc]['books']:
+                            duplicate_paths.append(_arc_book.abs_path)
+                        books = [b for b in books
+                                 if b.abs_path not in
+                                 {ab.abs_path for ab in _arc_map2[_best_arc]['books']}]
 
             # --- Групповая коррекция: если большинство книг группы используют
             # series_number из метаданных, то книги где filename перебил метаданные
@@ -589,8 +641,6 @@ class FB2CompilerService:
                         book.volume_label = f'{lo2}-{hi2}'
                         book.sort_source = 'filename_range'
                         book.order_ambiguous = False
-
-            duplicate_paths: List[Path] = []
 
             # --- Фильтр 1: обработка заранее скомпилированных файлов ----------
             # Признак: stem/title содержит сервисное слово (Трилогия …) или
@@ -2487,7 +2537,7 @@ class FB2CompilerService:
             # Если группа содержит подсерии, слово выбирается по числу верхних дуг (n_top_arcs),
             # а не по общему числу книг, чтобы «Пенталогия» (5 дуг) + «в 9 книгах» (9 файлов).
             if has_subseries and n_top_arcs and n_top_arcs >= 2:
-                suffix = self._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes)
+                suffix = self._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes, use_parts=True)
             else:
                 suffix = self._series_suffix(n_volumes, top_lo, top_hi, part_count)
             output_xml = self._build_fb2(
