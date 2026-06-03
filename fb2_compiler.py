@@ -208,7 +208,13 @@ class FB2CompilerService:
                     top_hi_vals.append(int(m.group(2)) if m else b.sort_key[1])
             top_hi = max(top_hi_vals)
 
-            has_subseries = any(b.sort_key[2] != 0 for b in level0)
+            _top_pos_list = [b.sort_key[1] for b in level0]
+        # has_subseries: либо у кого-то sort_key[2]!=0, либо несколько файлов
+        # занимают одну и ту же top-позицию (разные подсерии одной дуги).
+        has_subseries = (
+            any(b.sort_key[2] != 0 for b in level0)
+            or len(_top_pos_list) > len(set(_top_pos_list))
+        )
 
         # dot_part: «Том N Книга M» — secondary = номер книги внутри тома.
         # n_volumes = число различных томов (sort_key[1]), не число файлов.
