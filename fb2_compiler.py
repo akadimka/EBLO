@@ -735,7 +735,7 @@ class FB2CompilerService:
                             min(remaining_known_positions) == best_hi + 1
                         )
 
-                        if covered_individually and not remaining_extends_pre and not remaining_has_unknown:
+                        if covered_individually and not remaining_extends_pre and not remaining_has_unknown and not other_precompiled:
                             # Оставшиеся книги не продолжают предкомпиляцию и нет книг
                             # с неизвестной позицией → cleanup_only: предкомп остаётся,
                             # покрытые тома — на удаление; оставшиеся обрабатываются отдельно.
