@@ -70,6 +70,7 @@ try:
 
     from fb2_utils import fb2_rglob, fb2_count as _fb2_count
     from archiving_service import archive_fb2_files
+    from scan_service import scan_fb2_genres
 
 except Exception as e:
     from .genres_manager import GenresManager
@@ -621,46 +622,19 @@ class MainWindow(tk.Tk):
 
         def _scan_worker():
             try:
-                try:
-                    from fb2_author_extractor import FB2AuthorExtractor
-                except ImportError:
-                    from .fb2_author_extractor import FB2AuthorExtractor
+                def _on_progress(n, t, pct):
+                    self.after(0, lambda p=pct, n=n, t=t:
+                        self.progress_var.set(f'Сканирование... {n}/{t} ({p}%)'))
 
-                extractor = FB2AuthorExtractor(self.settings.config_path)
-                results: Dict[str, list] = {}
-                errors: list = []
-                folder_path = Path(folder)
-                fb2_files = fb2_rglob(folder_path)
-                total = len(fb2_files)
-
-                for idx, fb2_file in enumerate(fb2_files, 1):
-                    try:
-                        genre_str = extractor._extract_genres_from_fb2(fb2_file)
-                        if genre_str and genre_str.strip():
-                            key = genre_str.strip()
-                        else:
-                            key = 'Не определено'
-                        try:
-                            rel_path = str(fb2_file.relative_to(folder_path))
-                        except ValueError:
-                            rel_path = str(fb2_file)
-                        results.setdefault(key, []).append(rel_path)
-                    except Exception as e:
-                        errors.append(f'{fb2_file.name}: {e}')
-
-                    if idx % 20 == 0 or idx == total:
-                        pct = int(idx * 100 / total) if total else 100
-                        self.after(0, lambda p=pct, n=idx, t=total:
-                            self.progress_var.set(f'Сканирование... {n}/{t} ({p}%)'))
-
-                self.after(0, lambda: _update_ui(results, errors, total))
+                data = scan_fb2_genres(Path(folder), self.settings.config_path, _on_progress)
+                self.after(0, lambda: _update_ui(data['results'], data['errors'], data['total']))
             except Exception as e:
                 import traceback
                 err_text = traceback.format_exc()
                 self.after(0, lambda err=e, tb=err_text: (
                     self.logger.log(f'Ошибка сканирования: {tb}'),
                     self.progress_var.set(f'Ошибка сканирования: {err}'),
-                    self._status_bar.set(f'Ошибка сканирования', 'error') if self._status_bar else None,
+                    self._status_bar.set('Ошибка сканирования', 'error') if self._status_bar else None,
                     messagebox.showerror('Ошибка сканирования', str(err))
                 ))
 
