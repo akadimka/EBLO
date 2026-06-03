@@ -133,7 +133,52 @@ class Pass3SeriesNormalize:
 
             if normalized != record.proposed_series:
                 record.proposed_series = normalized
-    
+
+        # --- Унификация по punct-нормализованному ключу ---
+        # Если несколько вариантов одной серии отличаются только пунктуацией
+        # (напр. "Ревизор. Возвращение в СССР" и "Ревизор возвращение в СССР"),
+        # выбираем каноническое название по приоритету источника.
+        _SRC_PRIORITY = {
+            'folder_dataset': 6, 'folder_hierarchy': 5,
+            'folder_meta_consensus': 4, 'folder_metadata_confirmed': 3,
+            'filename': 2, 'metadata': 1,
+        }
+
+        def _punct_key(s: str) -> str:
+            s = _nfc_lower_yo(s.strip())
+            return re.sub(r'\s+', ' ', re.sub(r'[^\w\s]', ' ', s)).strip()
+
+        # Собираем: punct_key → список (priority, series_value)
+        from collections import defaultdict
+        _key_variants: dict = defaultdict(list)
+        for rec in records:
+            if not rec.proposed_series:
+                continue
+            pk = _punct_key(rec.proposed_series)
+            pri = _SRC_PRIORITY.get(rec.series_source or '', 0)
+            _key_variants[pk].append((pri, rec.proposed_series))
+
+        # Для каждого ключа с несколькими вариантами — берём вариант с высшим приоритетом
+        # При равном приоритете — более длинный (с пунктуацией)
+        _canonical: dict = {}
+        for pk, variants in _key_variants.items():
+            best = max(variants, key=lambda x: (x[0], len(x[1])))
+            _canonical[pk] = best[1]
+
+        # Применяем канонические имена
+        unified = 0
+        for rec in records:
+            if not rec.proposed_series:
+                continue
+            pk = _punct_key(rec.proposed_series)
+            canon = _canonical.get(pk)
+            if canon and canon != rec.proposed_series:
+                rec.proposed_series = canon
+                unified += 1
+
+        if unified:
+            print(f'[SERIES PASS 3] Unified {unified} series names by punct-normalization')
+
     def _normalize_series_name(self, series: str) -> str:
         """Нормализовать формат названия серии."""
         
