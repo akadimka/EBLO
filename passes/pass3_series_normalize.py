@@ -115,13 +115,19 @@ class Pass3SeriesNormalize:
                 if suffix:
                     prefix_words = set(_re2.sub(r'[^\w]', ' ', prefix.lower()).split())
                     prefix_words.discard('')
-                    for folder in _P(record.file_path).parts[:-1]:
+                    parts = _P(record.file_path).parts[:-1]
+                    # Серийная папка (откуда взята серия) — последняя в пути.
+                    # Не проверяем её: prefix может быть частью самого имени серийной папки.
+                    series_folder = parts[-1] if parts else ''
+                    for folder in parts:
+                        if folder == series_folder:
+                            continue
                         folder_words = set(_re2.sub(r'[^\w]', ' ', folder.lower()).split())
                         folder_words.discard('')
                         if prefix_words and folder_words:
                             overlap = prefix_words & folder_words
                             ratio = len(overlap) / len(prefix_words)
-                            if ratio >= 0.6:  # ≥60% слов префикса есть в имени папки
+                            if ratio >= 0.6:
                                 normalized = suffix
                                 break
 
