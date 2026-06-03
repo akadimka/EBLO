@@ -75,6 +75,16 @@ Test3/
 # Cache files
 .library_cache.db
 metadata_cache.db
+metadata_cache.db-shm
+metadata_cache.db-wal
+
+# Analysis/research files (not part of source)
+TECHNICAL_SPEC.md
+series_analysis.md
+make_analysis.py
+
+# FB2 test files in root
+*.fb2
 
 # Tool/extension service folders
 .neteragen/
