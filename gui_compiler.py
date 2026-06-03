@@ -676,13 +676,17 @@ class CompilerDialog:
         for book in group.books:
             m = re.match(r'^(\d+)-(\d+)$', book.volume_label or '')
             if m:
-                range_books.append((int(m.group(1)), int(m.group(2)), book.abs_path.name))
+                series_name = (book.record.proposed_series or '').strip()
+                range_books.append((int(m.group(1)), int(m.group(2)), book.abs_path.name, series_name))
         if len(range_books) >= 2:
             overlaps = []
             for i in range(len(range_books)):
                 for j in range(i + 1, len(range_books)):
-                    lo1, hi1, n1 = range_books[i]
-                    lo2, hi2, n2 = range_books[j]
+                    lo1, hi1, n1, s1 = range_books[i]
+                    lo2, hi2, n2, s2 = range_books[j]
+                    # Разные подсерии — диапазоны локальные, пересечения нет
+                    if s1 != s2:
+                        continue
                     shared = set(range(lo1, hi1 + 1)) & set(range(lo2, hi2 + 1))
                     if shared:
                         nums = ', '.join(str(x) for x in sorted(shared))
