@@ -502,13 +502,15 @@ class CompilerDialog:
                         tag = 'overlap'
                         break
 
+        dup_count = len(g.duplicate_paths) if g.duplicate_paths else 0
+        books_txt = f'{len(g.books)} (удалить: {dup_count})' if dup_count else str(len(g.books))
         self._tree.insert(
             '', tk.END,
             iid=iid,
             values=(
                 g.author,
                 g.series,
-                len(g.books),
+                books_txt,
                 order_txt,
                 g.volume_range or '—',
             ),
