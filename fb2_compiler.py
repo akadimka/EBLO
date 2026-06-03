@@ -2337,14 +2337,43 @@ class FB2CompilerService:
             collected_binaries: List[str] = []
             seen_binary_ids: set = set()
 
-            for book in group.books:
-                # Собираем бинари из каждого исходника (дедупликация по id)
+            cover_image_id: Optional[str] = None  # ID бинаря обложки первой книги
+
+            for book_idx, book in enumerate(group.books, 1):
+                # Префикс для бинарей этой книги — исключает коллизии ID между томами
+                vol_prefix = f'vol{book_idx}_'
+
+                # Собираем бинари: переименовываем id в vol_N_<orig_id>
+                id_remap: dict = {}  # orig_id -> new_id
                 for bin_block in self._extract_binaries(book):
-                    id_m = re.search(r'<binary[^>]+id=["\']([^"\']+)["\']', bin_block, re.IGNORECASE)
-                    bin_id = id_m.group(1) if id_m else bin_block[:40]
-                    if bin_id not in seen_binary_ids:
-                        seen_binary_ids.add(bin_id)
-                        collected_binaries.append(bin_block)
+                    id_m = re.search(r'<binary([^>]+)id=["\']([^"\']+)["\']', bin_block, re.IGNORECASE)
+                    if not id_m:
+                        continue
+                    orig_id = id_m.group(2)
+                    new_id = vol_prefix + orig_id
+                    id_remap[orig_id] = new_id
+                    # Заменяем id в теге <binary>
+                    new_block = re.sub(
+                        r'(<binary[^>]+id=["\'])' + re.escape(orig_id) + r'(["\'])',
+                        lambda m, nid=new_id: m.group(1) + nid + m.group(2),  # noqa: B023
+                        bin_block, count=1, flags=re.IGNORECASE,
+                    )
+                    collected_binaries.append(new_block)
+
+                # Запоминаем ID обложки первой книги (для <coverpage> в description)
+                if book_idx == 1 and id_remap:
+                    cover_orig = self._extract_coverpage_id(book)
+                    if cover_orig and cover_orig in id_remap:
+                        cover_image_id = id_remap[cover_orig]
+
+                def _remap_image_refs(xml: str, remap: dict = id_remap) -> str:
+                    """Обновить все <image l:href="#orig"> → <image l:href="#new">."""
+                    def _sub(m):
+                        ref = m.group(1)
+                        bare = ref.lstrip('#')
+                        new = remap.get(bare)
+                        return m.group(0).replace(ref, '#' + new) if new else m.group(0)
+                    return re.sub(r'l:href="(#?[^"]+)"', _sub, xml, flags=re.IGNORECASE)
 
                 rng_m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', book.volume_label or '')
                 if rng_m:
@@ -2369,12 +2398,12 @@ class FB2CompilerService:
                             f"берём {len(to_add)} томов начиная с {first_new}"
                         )
                     for _vol, sec_title, sec_body in to_add:
-                        bodies.append((sec_title, sec_body))
+                        bodies.append((sec_title, _remap_image_refs(sec_body)))
                     covered_hi = max(covered_hi, b_hi)
                 else:
                     # Обычная книга — берём целиком
                     title, body_xml = self._extract_body(book)
-                    bodies.append((title, body_xml))
+                    bodies.append((title, _remap_image_refs(body_xml)))
                     sn = book.sort_key[1] if book.sort_key[0] == 0 else 0
                     if sn:
                         covered_hi = max(covered_hi, sn)
@@ -2409,6 +2438,7 @@ class FB2CompilerService:
                 genre=meta.get('genre', ''),
                 bodies=bodies,
                 binaries=collected_binaries,
+                cover_image_id=cover_image_id,
             )
 
             # --- Имя выходного файла ---
@@ -2698,6 +2728,20 @@ class FB2CompilerService:
             for i, (_, t, bx) in enumerate(detected)
         ]
 
+    def _extract_coverpage_id(self, book: CompilationBook) -> Optional[str]:
+        """Извлечь ID бинаря обложки из <coverpage><image l:href="#id"/>."""
+        if not book.abs_path.exists():
+            return None
+        try:
+            text = self._read_file_text(book.abs_path)
+        except Exception:
+            return None
+        m = re.search(
+            r'<coverpage>.*?<image[^>]+l:href=["\']#([^"\']+)["\']',
+            text, re.DOTALL | re.IGNORECASE,
+        )
+        return m.group(1) if m else None
+
     def _extract_binaries(self, book: CompilationBook) -> List[str]:
         """Извлечь все <binary>...</binary> блоки из файла.
 
@@ -2728,6 +2772,7 @@ class FB2CompilerService:
         genre: str,
         bodies: List[Tuple[str, str]],
         binaries: Optional[List[str]] = None,
+        cover_image_id: Optional[str] = None,
     ) -> str:
         """Собрать итоговый FB2 XML из компонентов."""
         # Разбиваем автора на фамилию и имя
@@ -2755,6 +2800,11 @@ class FB2CompilerService:
         seq_range = '1' if n_books == 1 else f'1-{n_books}'
         sequence_attr = f'name="{safe_series}" number="{seq_range}"'
 
+        coverpage_tag = ''
+        if cover_image_id:
+            safe_cover_id = _html.escape(cover_image_id)
+            coverpage_tag = f'<coverpage><image l:href="#{safe_cover_id}"/></coverpage>\n'
+
         # Описание
         description = (
             '<?xml version="1.0" encoding="utf-8"?>\n'
@@ -2766,12 +2816,13 @@ class FB2CompilerService:
             f'<author>\n  <last-name>{last_name}</last-name>\n'
             f'  <first-name>{first_name}</first-name>\n</author>\n'
             f'<book-title>{book_title}</book-title>\n'
+            f'{coverpage_tag}'
             f'<sequence {sequence_attr}/>\n'
             '</title-info>\n'
             '</description>\n'
         )
 
-        # Тела книг — каждая книга в отдельном <body> с <title>
+        # Тела книг — каждая книга в отдельном <body id="vol_N"> с <title>
         body_parts = []
         for idx, (title, body_xml) in enumerate(bodies, 1):
             safe_title = _html.escape(title)
@@ -2792,14 +2843,30 @@ class FB2CompilerService:
             body_content = re.sub(r'</fb:', '</', body_content)
 
             body_parts.append(
-                f'<body>\n'
+                f'<body id="vol_{idx}">\n'
                 f'<title><p>{idx}. {safe_title}</p></title>\n'
                 f'{body_content.strip()}\n'
                 f'</body>'
             )
 
+        # Страница оглавления — только если томов больше одного
+        toc_body = ''
+        if n_books > 1:
+            toc_lines = []
+            for idx, (title, _) in enumerate(bodies, 1):
+                safe_title = _html.escape(title)
+                toc_lines.append(f'<p><a l:href="#vol_{idx}">{idx}. {safe_title}</a></p>')
+            toc_body = (
+                '<body>\n'
+                '<section>\n'
+                '<title><p>Содержание</p></title>\n'
+                + '\n'.join(toc_lines) +
+                '\n</section>\n'
+                '</body>\n'
+            )
+
         binary_section = ('\n' + '\n'.join(binaries)) if binaries else ''
-        return description + '\n'.join(body_parts) + binary_section + '\n</FictionBook>\n'
+        return description + toc_body + '\n'.join(body_parts) + binary_section + '\n</FictionBook>\n'
 
     # ------------------------------------------------------------------
     # Удаление исходников
