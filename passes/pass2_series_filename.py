@@ -367,6 +367,21 @@ class Pass2SeriesFilename:
         # (MainSeries N из "MainSeries N. SubSeries M-K") — не убирать trailing number
         self._last_was_hierarchical = False
     
+    @staticmethod
+    def _is_strong_match(author: str, folder: str) -> bool:
+        """Строгое совпадение автора с именем папки (подстрока или совпадение слов)."""
+        a = author.lower().replace('ё', 'е')
+        f = folder.lower().replace('ё', 'е')
+        if a in f or f in a:
+            return True
+        f_words = set(re.sub(r'[^\w]', ' ', f).split())
+        if f_words:
+            for single_author in re.split(r'[;,]', a):
+                sa_words = set(single_author.strip().split())
+                if sa_words and f_words == sa_words:
+                    return True
+        return False
+
     def _extract_series_from_folder_name(self, folder_name: str, author_hint: str = '') -> str:
         """
         Извлечь название серии из имени папки.
@@ -710,8 +725,8 @@ class Pass2SeriesFilename:
                 if n < 1900 and str(n) != (record.series_number or ''):
                     record.series_number = str(n)
 
-    def _process_single_record(self, record, parts_cache: dict) -> None:
-        """Обработать одну запись: определить серию из папки, filename или metadata."""
+    def _apply_folder_series(self, record, parts_cache: dict) -> None:
+        """Определить серию из структуры папок и записать в record."""
         # Приоритет из config.json: FOLDER_STRUCTURE=3 > FILENAME=2 > FB2_METADATA=1
         # Поиск по папкам применяется всегда, используя любой известный автор:
         # proposed_author (из папки или файла) или metadata_authors (из FB2).
@@ -729,7 +744,7 @@ class Pass2SeriesFilename:
 
             author_folder_idx = None
             for i, part in enumerate(path_parts[:-1]):
-                if _is_strong_match(author_name, part):
+                if self._is_strong_match(author_name, part):
                     author_folder_idx = i
                     break
             if author_folder_idx is None:
@@ -918,6 +933,10 @@ class Pass2SeriesFilename:
                                 record.proposed_series = series_name
                                 record.series_source = "folder_hierarchy"
         
+
+    def _process_single_record(self, record, parts_cache: dict) -> None:
+        """Обработать одну запись: определить серию из папки, filename или metadata."""
+        self._apply_folder_series(record, parts_cache)
         # Special case: depth==4 without series subfolder
         # Pass 1 wrongly sets folder_dataset for depth==4, allowing Pass 2 to override it
         file_depth = len(Path(record.file_path).parts)
@@ -1107,65 +1126,67 @@ class Pass2SeriesFilename:
             if series_candidate:
                 record.extracted_series_candidate = series_candidate
 
-        # Если прошел базовые фильтры → валидация
-        if series_candidate:
-            clean = self._clean_series_name(
-                series_candidate,
-                keep_trailing_number=self._last_was_hierarchical
-            )
+        if not self._apply_filename_candidate(record, series_candidate):
+            self._apply_metadata_fallback_single(record, series_candidate)
+        
 
-            # ✅ НОВОЕ: Удалить слова из blacklist вместо полного отвергания
-            clean = self._remove_blacklist_words(clean)
+    def _apply_filename_candidate(self, record, series_candidate) -> bool:
+        """Валидировать и применить filename series_candidate к record.
 
-            # Guard: если _clean_series_name отстрипала служебное слово (напр. "трилогия"),
-            # а metadata_series подтверждает полное название — восстанавливаем из metadata.
-            # Условие: clean является префиксом metadata_series И кандидат начинался с metadata_series.
-            if clean and record.metadata_series:
-                _nyo = _nfc_lower_yo
-                _meta = record.metadata_series.strip()
-                if (_nyo(_meta).startswith(_nyo(clean) + ' ')
-                        and _nyo(series_candidate).startswith(_nyo(_meta))):
-                    clean = _meta
+        Возвращает True если серия успешно применена, False — нужен metadata fallback.
+        """
+        if not series_candidate:
+            return False
+        clean = self._clean_series_name(
+            series_candidate,
+            keep_trailing_number=self._last_was_hierarchical
+        )
+        clean = self._remove_blacklist_words(clean)
 
-            if clean:  # Проверяем что что-то осталось после очистки
-                author_for_validation = record.proposed_author or None
+        # Guard: если _clean_series_name убрала служебное слово, но metadata подтверждает
+        # полное название — восстанавливаем из metadata.
+        if clean and record.metadata_series:
+            _nyo = _nfc_lower_yo
+            _meta = record.metadata_series.strip()
+            if (_nyo(_meta).startswith(_nyo(clean) + ' ')
+                    and _nyo(series_candidate).startswith(_nyo(_meta))):
+                clean = _meta
 
-                if self._is_valid_series(clean, extracted_author=author_for_validation):
-                    # Мета используется ТОЛЬКО для подтверждения серии из имени файла,
-                    # но НЕ для её расширения. Если из файла извлечено "Чингисхан",
-                    # а мета говорит "Чингисхан. Хроники завоевателя" — оставляем "Чингисхан".
-                    # Исправляем грамматику русского языка (добавляем запятую перед "что")
-                    clean = self._fix_russian_grammar(clean)
-                    record.proposed_series = clean
-                    record.series_source = "filename"
-                    if (record.metadata_series and
-                            record.metadata_series.strip().lower() == clean.lower()):
-                        record.series_source = "filename+meta_confirmed"
-                    # Если иерархический root содержит trailing number, а metadata_series
-                    # совпадает с root БЕЗ числа — число является позицией книги, не частью
-                    # названия серии. Пример: «Север и Юг 01\Великая сага» + meta «Север и Юг»
-                    # → proposed_series = «Север и Юг» (иначе каждая книга в отдельной группе).
-                    if record.metadata_series and '\\' in (record.proposed_series or ''):
-                        _root_h, _sub_h = record.proposed_series.split('\\', 1)
-                        _root_h = _root_h.strip()
-                        _root_no_num = re.sub(r'\s+\d+\s*$', '', _root_h).strip()
-                        _meta_s = record.metadata_series.strip()
-                        if (_root_no_num and _root_no_num != _root_h and
-                                _root_no_num.lower().replace('ё', 'е') ==
-                                _meta_s.lower().replace('ё', 'е')):
-                            _sub_stripped = _sub_h.strip()
-                            _sub_is_num_only = bool(re.match(r'^\d+$', _sub_stripped))
-                            _sub_is_meta_dup = (_sub_stripped.lower().replace('ё', 'е') ==
-                                                _meta_s.lower().replace('ё', 'е'))
-                            if _sub_is_num_only or _sub_is_meta_dup:
-                                # Подсерия — чисто цифровая или дублирует metadata:
-                                # «Север и Юг 01\12» или «Серия 1\Серия» → стираем до metadata
-                                record.proposed_series = _meta_s
-                                record.series_source = "filename+meta_confirmed"
-                            # else: подсерия — реальное название («Аспект-Император»);
-                            # оставляем proposed_series без изменений (с числом в root)
-                    return
+        if not clean:
+            return False
 
+        if not self._is_valid_series(clean, extracted_author=record.proposed_author or None):
+            return False
+
+        clean = self._fix_russian_grammar(clean)
+        record.proposed_series = clean
+        record.series_source = "filename"
+        if (record.metadata_series and
+                record.metadata_series.strip().lower() == clean.lower()):
+            record.series_source = "filename+meta_confirmed"
+
+        # Если иерархический root содержит trailing number, а metadata совпадает с root
+        # БЕЗ числа — число является позицией книги, не частью названия серии.
+        if record.metadata_series and '\\' in (record.proposed_series or ''):
+            _root_h, _sub_h = record.proposed_series.split('\\', 1)
+            _root_h = _root_h.strip()
+            _root_no_num = re.sub(r'\s+\d+\s*$', '', _root_h).strip()
+            _meta_s = record.metadata_series.strip()
+            if (_root_no_num and _root_no_num != _root_h and
+                    _root_no_num.lower().replace('ё', 'е') ==
+                    _meta_s.lower().replace('ё', 'е')):
+                _sub_stripped = _sub_h.strip()
+                if (bool(re.match(r'^\d+$', _sub_stripped)) or
+                        _sub_stripped.lower().replace('ё', 'е') ==
+                        _meta_s.lower().replace('ё', 'е')):
+                    record.proposed_series = _meta_s
+                    record.series_source = "filename+meta_confirmed"
+        return True
+
+    def _apply_metadata_fallback_single(self, record, series_candidate) -> None:
+        """Metadata fallback: если filename не дал серию, ищем из metadata.
+        Также применяет найденный series_candidate если он найден в этом методе.
+        """
         # Fallback: metadata ТОЛЬКО если паттерны не дали
         if not series_candidate:
             file_name = Path(record.file_path).stem  # Имя без расширения
@@ -1345,7 +1366,6 @@ class Pass2SeriesFilename:
                         
                         # 🔑 Папка уже была проверена выше. Если мы здесь → это просто metadata series (не совпадает с папкой)
                         record.series_source = "metadata"
-        
 
     def _detect_named_arcs(self, records: List[BookRecord]) -> None:
         """Обнаружить именованные дуги в серии и создать подсерии через '\\'.
