@@ -769,6 +769,35 @@ class FB2CompilerService:
             else:
                 books = regular_books
 
+            # --- Фильтр 1.5: приоритет доминирующей папки --------------------
+            # Если большинство томов группы сосредоточено в одной папке,
+            # файлы из неё получают приоритет: дубли тех же томов из других
+            # папок помечаются к удалению. Тома, которых нет в доминирующей
+            # папке, берутся из других папок как обычно.
+            if books:
+                # Считаем сколько уникальных позиций томов покрывает каждая папка
+                from collections import Counter as _Counter
+                folder_vol_sets: Dict[str, set] = {}
+                for b in books:
+                    folder = str(b.abs_path.parent)
+                    vol = b.sort_key[1] if b.sort_key[0] == 0 and b.sort_key[1] else None
+                    folder_vol_sets.setdefault(folder, set())
+                    if vol:
+                        folder_vol_sets[folder].add(vol)
+                if len(folder_vol_sets) > 1:
+                    dominant_folder = max(folder_vol_sets, key=lambda f: len(folder_vol_sets[f]))
+                    dominant_vols = folder_vol_sets[dominant_folder]
+                    if dominant_vols:
+                        new_books = []
+                        for b in books:
+                            folder = str(b.abs_path.parent)
+                            vol = b.sort_key[1] if b.sort_key[0] == 0 and b.sort_key[1] else None
+                            if folder != dominant_folder and vol and vol in dominant_vols:
+                                duplicate_paths.append(b.abs_path)
+                            else:
+                                new_books.append(b)
+                        books = new_books
+
             # --- Фильтр 2: дедупликация по title (нормализованному) ----------
             # Из дублей оставляем более позднюю редакцию (по году в имени файла),
             # при равенстве — первый по алфавиту путь (детерминированный выбор).
