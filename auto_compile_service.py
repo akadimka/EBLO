@@ -38,7 +38,8 @@ def auto_compile_library(
         _devnull.close()
 
     compiler = FB2CompilerService()
-    groups = compiler.find_groups(records, library_path)
+    from pathlib import Path
+    groups = compiler.find_groups(records, Path(library_path))
 
     ok_cnt = 0
     fail_cnt = 0

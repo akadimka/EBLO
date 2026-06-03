@@ -733,14 +733,14 @@ class Pass2SeriesFilename:
         # Это гарантирует соблюдение приоритета независимо от author_source.
         author_name = record.proposed_author or record.metadata_authors or None
         if author_name:
-            path_parts = _parts_cache.get(record.file_path)
+            path_parts = parts_cache.get(record.file_path)
             if path_parts is None:
                 raw = Path(record.file_path).parts
                 path_parts = tuple(
                     p for i, p in enumerate(raw)
                     if i == len(raw) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
                 )
-                _parts_cache[record.file_path] = path_parts
+                parts_cache[record.file_path] = path_parts
 
             author_folder_idx = None
             for i, part in enumerate(path_parts[:-1]):
