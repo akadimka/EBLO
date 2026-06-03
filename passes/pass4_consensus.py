@@ -1352,6 +1352,46 @@ class Pass4Consensus:
 
         self.logger.log(f"[PASS 4] Hierarchical series conversions (dot→backslash): {hier_count}")
 
+        # Унификация автора по серии с общим соавтором.
+        # Если у всех записей одной серии есть хотя бы один общий автор-токен,
+        # но proposed_author различается → назначаем автора большинства.
+        # Пример: "Ревизор. Возвращение в СССР":
+        #   17 записей → "Винтеркей Серж" (folder_dataset)
+        #   52 записи  → "Винтеркей Серж, Шумилин Артем" (filename)
+        #   Общий токен: "винтеркей" → большинство: "Винтеркей Серж, Шумилин Артем"
+        from collections import defaultdict as _dd, Counter as _Cnt
+        _series_author_groups: dict = _dd(list)
+        for rec in records:
+            if rec.proposed_series and rec.proposed_author:
+                _series_author_groups[_nfc_lower_yo(rec.proposed_series.strip())].append(rec)
+
+        _author_unified = 0
+        for _series_key, _recs in _series_author_groups.items():
+            _author_counts = _Cnt(rec.proposed_author.strip() for rec in _recs)
+            if len(_author_counts) <= 1:
+                continue  # все одинаковые — нечего делать
+            # Токены каждого варианта автора
+            def _atokens(a):
+                return {t.lower().replace('ё', 'е')
+                        for t in re.split(r'[\s,;]+', a) if len(t) > 2}
+            _variants = {a: _atokens(a) for a in _author_counts}
+            # Ищем хотя бы один общий токен во ВСЕХ вариантах
+            _all_token_sets = list(_variants.values())
+            _common = _all_token_sets[0].copy()
+            for ts in _all_token_sets[1:]:
+                _common &= ts
+            if not _common:
+                continue  # нет общего автора — не трогаем
+            # Победитель — вариант с наибольшим числом записей
+            _majority_author = _author_counts.most_common(1)[0][0]
+            for rec in _recs:
+                if rec.proposed_author.strip() != _majority_author:
+                    rec.proposed_author = _majority_author
+                    _author_unified += 1
+
+        if _author_unified:
+            print(f"[PASS 4] Unified {_author_unified} author values by series+common-author consensus")
+
         # Финальная нормализация ё→е во всех proposed_series.
         # Pass3SeriesNormalize делает это до Pass4, но Pass4 может перезаписать
         # proposed_series значениями с ё (через консенсус). Делаем NFC + ё→е здесь,
