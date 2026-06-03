@@ -785,10 +785,14 @@ class FB2CompilerService:
                 folder_vol_sets: Dict[str, set] = {}
                 for b in books:
                     folder = str(b.abs_path.parent)
-                    vol = b.sort_key[1] if b.sort_key[0] == 0 and b.sort_key[1] else None
                     folder_vol_sets.setdefault(folder, set())
-                    if vol:
-                        folder_vol_sets[folder].add(vol)
+                    rng_m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', b.volume_label or '')
+                    if rng_m:
+                        # Предкомпиляция — добавляем весь диапазон, не только lo
+                        lo_r, hi_r = int(rng_m.group(1)), int(rng_m.group(2))
+                        folder_vol_sets[folder].update(range(lo_r, hi_r + 1))
+                    elif b.sort_key[0] == 0 and b.sort_key[1]:
+                        folder_vol_sets[folder].add(b.sort_key[1])
                 if len(folder_vol_sets) > 1:
                     dominant_folder = max(folder_vol_sets, key=lambda f: len(folder_vol_sets[f]))
                     dominant_vols = folder_vol_sets[dominant_folder]
