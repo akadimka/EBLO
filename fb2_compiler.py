@@ -531,20 +531,20 @@ class FB2CompilerService:
                         book.sort_source = 'filename_range'
                         book.order_ambiguous = False
 
-            # --- Коррекция «Сборника»: книга с «Сборник» в имени без подсерии,
-            # чьё название совпадает с именем дуги группы → ставим её на позицию
-            # этой дуги, а отдельные книги дуги помечаем в дубликаты.
-            # Пример: «Ветер и сталь (Мир Алекса Королёва. Сборник)» + дуга
-            # «2. Ветер и сталь» с книгами 1-3 → сборник занимает arc 2,
-            # книги 1-3 дуги → duplicate_paths.
+            # --- Коррекция «Сборника»: книга с «Сборник» в имени без подсерии.
+            # Читаем <annotation> сборника и сопоставляем имена всех дуг группы
+            # с её текстом — так один сборник может покрывать несколько подсерий.
+            # Все совпавшие дуги: отдельные книги → duplicate_paths.
             _SBORNIK_RE = re.compile(r'\bсборник\b', re.IGNORECASE)
             # Карта дуг: arc_num → {'name': str, 'books': [CompilationBook]}
-            # Только книги с sub-позицией (sort_key[2] > 0) — они внутри дуги.
+            # Все книги с подсерией в proposed_series (содержат '\\').
             _arc_map2: dict = {}
             for _b in books:
-                if _b.sort_key[0] != 0 or _b.sort_key[1] == 0 or _b.sort_key[2] == 0:
+                if '\\' not in (_b.record.proposed_series or ''):
                     continue
-                _arc_num = _b.sort_key[1]
+                _arc_num = _b.sort_key[1] if _b.sort_key[0] == 0 and _b.sort_key[1] else 0
+                if not _arc_num:
+                    continue
                 if _arc_num not in _arc_map2:
                     _sub = (_b.record.proposed_series or '').split('\\')
                     _arc_part = _sub[1].strip() if len(_sub) >= 2 else ''
@@ -553,7 +553,6 @@ class FB2CompilerService:
                 _arc_map2[_arc_num]['books'].append(_b)
 
             if _arc_map2:
-                _sbornik_arcs: set = set()
                 for _book in list(books):
                     if self._RANGE_NUM_RE.match(_book.volume_label or ''):
                         continue
@@ -561,25 +560,44 @@ class FB2CompilerService:
                         continue
                     if '\\' in (_book.record.proposed_series or ''):
                         continue
-                    _stem_n = _book.abs_path.stem.lower().replace('ё', 'е')
-                    _best_arc, _best_score = None, 0
+                    # Приоритет: аннотация из файла, запасной — имя файла
+                    _search_text = self._extract_annotation_text(_book)
+                    if not _search_text:
+                        _search_text = _book.abs_path.stem.lower().replace('ё', 'е')
+                    # Ищем ВСЕ совпавшие дуги:
+                    # 1) по названию дуги (≥2 слов совпадают)
+                    # 2) по названиям книг дуги (хотя бы одна книга упомянута)
+                    _matched_arcs = []
                     for _arc_num, _arc_info in _arc_map2.items():
+                        # Критерий 1: название дуги
                         _words = [w for w in _arc_info['name'].split() if len(w) >= 3]
-                        _score = sum(1 for w in _words if w in _stem_n)
-                        if _score > _best_score:
-                            _best_score, _best_arc = _score, _arc_num
-                    if _best_arc and _best_score >= 2 and _best_arc not in _sbornik_arcs:
-                        _sbornik_arcs.add(_best_arc)
-                        _book.sort_key = (0, _best_arc, 0, 0)
-                        _book.volume_label = str(_best_arc)
-                        _book.sort_source = 'inferred_sbornik'
-                        _book.order_ambiguous = False
-                        # Отдельные книги этой дуги → дубликаты
-                        for _arc_book in _arc_map2[_best_arc]['books']:
+                        _score = sum(1 for w in _words if w in _search_text)
+                        if _score >= 2:
+                            _matched_arcs.append(_arc_num)
+                            continue
+                        # Критерий 2: хотя бы одна книга дуги упомянута в тексте
+                        for _ab in _arc_info['books']:
+                            _btitle = (_ab.record.file_title or _ab.abs_path.stem).lower().replace('ё', 'е')
+                            _btitle = re.sub(r'^\d+\.\s*', '', _btitle).strip()
+                            _bwords = [w for w in _btitle.split() if len(w) >= 4]
+                            if _bwords and sum(1 for w in _bwords if w in _search_text) >= min(2, len(_bwords)):
+                                _matched_arcs.append(_arc_num)
+                                break
+                    if not _matched_arcs:
+                        continue
+                    _matched_arcs.sort()
+                    # Сборник занимает позицию наименьшей дуги
+                    _book.sort_key = (0, _matched_arcs[0], 0, 0)
+                    _book.volume_label = str(_matched_arcs[0])
+                    _book.sort_source = 'inferred_sbornik'
+                    _book.order_ambiguous = False
+                    # Все книги совпавших дуг → дубликаты
+                    _all_arc_books_to_remove: set = set()
+                    for _arc_num in _matched_arcs:
+                        for _arc_book in _arc_map2[_arc_num]['books']:
                             duplicate_paths.append(_arc_book.abs_path)
-                        books = [b for b in books
-                                 if b.abs_path not in
-                                 {ab.abs_path for ab in _arc_map2[_best_arc]['books']}]
+                            _all_arc_books_to_remove.add(_arc_book.abs_path)
+                    books = [b for b in books if b.abs_path not in _all_arc_books_to_remove]
 
             # --- Групповая коррекция: если большинство книг группы используют
             # series_number из метаданных, то книги где filename перебил метаданные
@@ -2837,6 +2855,22 @@ class FB2CompilerService:
             (b_lo + i, t, bx)
             for i, (_, t, bx) in enumerate(detected)
         ]
+
+    def _extract_annotation_text(self, book: CompilationBook) -> str:
+        """Извлечь текст <annotation> из FB2 (без тегов, нижний регистр, ё→е)."""
+        if not book.abs_path.exists():
+            return ''
+        try:
+            text = self._read_file_text(book.abs_path)
+        except Exception:
+            return ''
+        # Читаем только до <body> — annotation всегда в <description>
+        body_pos = text.lower().find('<body')
+        head = text[:body_pos] if body_pos >= 0 else text
+        m = re.search(r'<annotation>(.*?)</annotation>', head, re.DOTALL | re.IGNORECASE)
+        if not m:
+            return ''
+        return re.sub(r'<[^>]+>', ' ', m.group(1)).lower().replace('ё', 'е')
 
     def _extract_coverpage_id(self, book: CompilationBook) -> Optional[str]:
         """Извлечь ID бинаря обложки из <coverpage><image l:href="#id"/>."""
