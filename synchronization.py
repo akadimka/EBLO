@@ -701,18 +701,38 @@ class SynchronizationService:
         # ── Одиночные тома и неопределённые ──────────────────────────
         author = _safe((record.proposed_author or '').strip())
         series = (record.proposed_series or '').strip()
-        title  = _safe((record.file_title or Path(record.file_path).stem).strip())
+        raw_title = (record.file_title or Path(record.file_path).stem).strip()
 
         # series_number: используем только если это число или простой диапазон
         sn = (getattr(record, 'series_number', '') or '').strip()
-        if sn and re.match(r'^\d+(?:\s*[-–]\s*\d+)?$', sn):
+        has_tome_in_title = bool(re.search(r'[тТ]\.\s*\d', raw_title))
+        if sn and re.match(r'^\d+(?:\s*[-–]\s*\d+)?$', sn) and not has_tome_in_title:
             tome = f' т. {sn}'
         else:
             tome = ''
 
         if series:
-            return f"{author} - {_safe(series)}. {title}{tome}.fb2"
+            def _norm_cmp(s):
+                return s.lower().replace('ё', 'е').strip()
+
+            series_nc = _norm_cmp(series)
+            title_nc = _norm_cmp(raw_title)
+
+            if title_nc == series_nc:
+                # title полностью совпадает с серией — включать его нет смысла
+                return f"{author} - {_safe(series)}{tome}.fb2"
+
+            if title_nc.startswith(series_nc):
+                # title начинается с серии — убираем префикс
+                raw_title = raw_title[len(series):].lstrip('. \t')
+
+            title = _safe(raw_title)
+            if title:
+                return f"{author} - {_safe(series)}. {title}{tome}.fb2"
+            else:
+                return f"{author} - {_safe(series)}{tome}.fb2"
         else:
+            title = _safe(raw_title)
             return f"{author} - {title}{tome}.fb2"
 
     def _move_files(
