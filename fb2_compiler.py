@@ -2337,7 +2337,8 @@ class FB2CompilerService:
             collected_binaries: List[str] = []
             seen_binary_ids: set = set()
 
-            cover_image_id: Optional[str] = None  # ID бинаря обложки первой книги
+            cover_image_id: Optional[str] = None  # ID бинаря обложки первой книги (для <coverpage>)
+            book_cover_ids: List[Optional[str]] = []  # ID обложки каждой книги (по порядку)
 
             for book_idx, book in enumerate(group.books, 1):
                 # Префикс для бинарей этой книги — исключает коллизии ID между томами
@@ -2360,11 +2361,15 @@ class FB2CompilerService:
                     )
                     collected_binaries.append(new_block)
 
-                # Запоминаем ID обложки первой книги (для <coverpage> в description)
-                if book_idx == 1 and id_remap:
+                # Запоминаем ID обложки каждой книги (для вставки в начало тела)
+                book_cover_id: Optional[str] = None
+                if id_remap:
                     cover_orig = self._extract_coverpage_id(book)
                     if cover_orig and cover_orig in id_remap:
-                        cover_image_id = id_remap[cover_orig]
+                        book_cover_id = id_remap[cover_orig]
+                book_cover_ids.append(book_cover_id)
+                if book_idx == 1:
+                    cover_image_id = book_cover_id
 
                 def _remap_image_refs(xml: str, remap: dict = id_remap) -> str:
                     """Обновить все <image l:href="#orig"> → <image l:href="#new">."""
@@ -2439,6 +2444,7 @@ class FB2CompilerService:
                 bodies=bodies,
                 binaries=collected_binaries,
                 cover_image_id=cover_image_id,
+                book_cover_ids=book_cover_ids,
             )
 
             # --- Имя выходного файла ---
@@ -2773,6 +2779,7 @@ class FB2CompilerService:
         bodies: List[Tuple[str, str]],
         binaries: Optional[List[str]] = None,
         cover_image_id: Optional[str] = None,
+        book_cover_ids: Optional[List[Optional[str]]] = None,
     ) -> str:
         """Собрать итоговый FB2 XML из компонентов."""
         # Разбиваем автора на фамилию и имя
@@ -2842,9 +2849,21 @@ class FB2CompilerService:
             body_content = re.sub(r'<fb:', '<', body_content)
             body_content = re.sub(r'</fb:', '</', body_content)
 
+            # Обложка тома — центрированная секция перед содержимым
+            cover_section = ''
+            vol_cover_id = (book_cover_ids[idx - 1] if book_cover_ids and idx - 1 < len(book_cover_ids) else None)
+            if vol_cover_id:
+                safe_cid = _html.escape(vol_cover_id)
+                cover_section = (
+                    f'<section>\n'
+                    f'<image l:href="#{safe_cid}"/>\n'
+                    f'</section>\n'
+                )
+
             body_parts.append(
                 f'<body id="vol_{idx}">\n'
                 f'<title><p>{idx}. {safe_title}</p></title>\n'
+                f'{cover_section}'
                 f'{body_content.strip()}\n'
                 f'</body>'
             )
