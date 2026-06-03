@@ -478,10 +478,15 @@ class FB2CompilerService:
             # это отдельные скомпилированные подсерии — не объединяем их дальше.
             # Пример: "Вселенная Сафари 2. Егерь (Трилогия)" + "Вселенная Сафари 3.
             # Чёрный археолог (Трилогия)" → оба уже готовы, merge не нужен.
-            _all_precompiled = all(self._RANGE_NUM_RE.match(b.volume_label or '') for b in books)
+            # volume_label может быть ещё "2"/"3" (до контекстной коррекции),
+            # поэтому проверяем через _precompiled_range напрямую.
+            _all_precompiled = all(self._precompiled_range(b, series)[1] > 0 for b in books)
             if _all_precompiled and len(books) >= 2:
-                _sn_vals = [b.record.series_number for b in books]
-                if len(set(_sn_vals)) == len(_sn_vals):  # все series_number различны
+                _sn_vals = [b.record.series_number or '' for b in books]
+                # Только если series_number — простые целые числа (arc-номера: 2, 3…),
+                # а не диапазоны ("1-3") и не пустые значения.
+                _plain_ints = all(re.match(r'^\d+$', sn) for sn in _sn_vals)
+                if _plain_ints and len(set(_sn_vals)) == len(_sn_vals):
                     continue  # пропускаем — каждая предкомпиляция самодостаточна
 
             # --- Контекстная коррекция: книги с сервисным словом (Трилогия…)
