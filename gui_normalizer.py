@@ -1269,27 +1269,7 @@ class CSVNormalizerApp:
             male_set = set(n.lower() for n in settings.get_male_names())
             female_set = set(n.lower() for n in settings.get_female_names())
 
-            def is_female_author(author_str: str) -> bool:
-                """Автор женщина: ни одно слово не мужское, хотя бы одно женское."""
-                parts = author_str.split()
-                if not parts:
-                    return False
-                for word in parts:
-                    if word.lower() in male_set:
-                        return False
-                for word in parts:
-                    if word.lower() in female_set:
-                        return True
-                return False
-
-            rows = []
-            for rec in records:
-                combined = rec.proposed_author or ""
-                if not combined or combined == "Сборник":
-                    continue
-                authors = [a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()]
-                if authors and all(is_female_author(a) for a in authors):
-                    rows.append((rec.file_path, combined))
+            rows = self._filter_female_rows(records, male_set, female_set)
 
             self.root.after(0, lambda: self.progress_var.set("Готово"))
             self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows, work_dir, settings_manager=self.settings_manager))
@@ -1313,27 +1293,8 @@ class CSVNormalizerApp:
             male_set   = set(n.lower() for n in settings.get_male_names())
             female_set = set(n.lower() for n in settings.get_female_names())
 
-            def is_female_author(author_str: str) -> bool:
-                parts = author_str.split()
-                if not parts:
-                    return False
-                for word in parts:
-                    if word.lower() in male_set:
-                        return False
-                for word in parts:
-                    if word.lower() in female_set:
-                        return True
-                return False
-
             self.root.after(0, lambda: self.progress_var.set("Фильтрация авторов…"))
-            rows = []
-            for rec in records:
-                combined = rec.proposed_author or ""
-                if not combined or combined in ("Сборник", "Соавторство", "[unknown]"):
-                    continue
-                authors = [a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()]
-                if authors and all(is_female_author(a) for a in authors):
-                    rows.append((rec.file_path, combined))
+            rows = self._filter_female_rows(records, male_set, female_set)
 
             work_dir = self.folder_path.get()
             self.root.after(0, lambda: self.progress_var.set(f"Найдено: {len(rows)} файлов"))
@@ -1343,6 +1304,37 @@ class CSVNormalizerApp:
             tb = traceback.format_exc()
             self.root.after(0, lambda: messagebox.showerror("Ошибка", f"{e}\n\n{tb}"))
             self.root.after(0, lambda: self.progress_var.set("ОШИБКА"))
+
+    @staticmethod
+    def _is_female_author(author_str: str, male_set: set, female_set: set) -> bool:
+        """Автор женщина: ни одно слово не мужское, хотя бы одно женское."""
+        parts = author_str.split()
+        if not parts:
+            return False
+        for word in parts:
+            if word.lower() in male_set:
+                return False
+        for word in parts:
+            if word.lower() in female_set:
+                return True
+        return False
+
+    @staticmethod
+    def _filter_female_rows(records, male_set: set, female_set: set) -> list:
+        """Вернуть список (file_path, author) для записей где все авторы — женщины."""
+        import re as _re
+        _SKIP = {"Сборник", "Соавторство", "[unknown]"}
+        rows = []
+        for rec in records:
+            combined = rec.proposed_author or ""
+            if not combined or combined in _SKIP:
+                continue
+            authors = [a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()]
+            if authors and all(
+                CSVNormalizerApp._is_female_author(a, male_set, female_set) for a in authors
+            ):
+                rows.append((rec.file_path, combined))
+        return rows
 
     def apply_changes(self):
         messagebox.showinfo("Информация", "Применение изменений")
