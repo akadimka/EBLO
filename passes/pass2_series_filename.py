@@ -326,6 +326,12 @@ class Pass2SeriesFilename:
         'folder_metadata_confirmed', 'no_series_folder',
     })
 
+    # Папочные источники для arc-нумерации (без no_series_folder — там серии нет)
+    _FOLDER_SOURCES_ARC = frozenset({
+        'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
+        'folder_metadata_confirmed',
+    })
+
     def __init__(self, logger: Logger = None, male_names: set = None, female_names: set = None):
         self.logger = logger or Logger()
         self.settings = SettingsManager('config.json')
@@ -1169,222 +1175,9 @@ class Pass2SeriesFilename:
         self._unify_folder_series_source(records)
         self._split_umbrella_folder_series(records)
 
-        # (автор из папки уже распространён в начале execute(), до основного цикла)
+        self._postpass_metadata_fallback(records)
 
-        # ✅ ПОСЛЕДНИЙ ШАНС: если proposed_series пусто, metadata_series задана,
-        # не совпадает с автором и не содержит чисто blacklist-слов — использовать напрямую.
-        # Покрывает случаи, когда валидация отвергла серию из-за отсутствия контекста автора
-        # или когда имя серии выглядит как формат "(Фамилия (Имя))", но НЕ является автором.
-        for record in records:
-            if record.proposed_series or not record.metadata_series:
-                continue
-            meta = record.metadata_series.strip()
-            # Пропускаем если значение совпадает с именем автора
-            if record.proposed_author and meta.lower() == record.proposed_author.lower():
-                continue
-            # Word-boundary blacklist check (как в основном блоке)
-            meta_lower = meta.lower()
-            _has_bl = False
-            for bl in self.filename_blacklist:
-                bl_lower = bl.lower().strip()
-                if not bl_lower:
-                    continue
-                pat = r'(?<![а-яёa-z])' + re.escape(bl_lower) + r'(?![а-яёa-z])'
-                if re.search(pat, meta_lower):
-                    _has_bl = True
-                    break
-            if _has_bl:
-                continue
-            # Применяем те же серийные паттерны и валидацию что и в основном блоке
-            series = self._extract_series_from_metadata(meta)
-            series = self._remove_blacklist_words(series)
-            if not series:
-                continue
-            author_for_validation = record.proposed_author or None
-            if not self._is_valid_series(series, extracted_author=author_for_validation):
-                continue
-            series = self._fix_russian_grammar(series)
-            # Используем как серию с источником "metadata"
-            record.proposed_series = series
-            record.series_source = "metadata"
-
-        # ✅ ФИНАЛЬНОЕ: Восстановить парные кавычки во всех series
-        # Если в series_кандидате есть открывающиеся кавычки без закрывающихся,
-        # автоматически добавляем закрывающиеся
-        for record in records:
-            if record.proposed_series:
-                record.proposed_series = self._balance_quotes(record.proposed_series)
-                
-                # ✅ ФИНАЛЬНОЕ: Удалить завершающий backslash
-                # Некоторые значения могут заканчиваться на "\", это ошибка обработки иерархий
-                # Пример: "Мир Алекса Королева\" должно быть "Мир Алекса Королева"
-                record.proposed_series = record.proposed_series.rstrip('\\')
-        
-        # ✅ ФИНАЛЬНОЕ: если файл имеет плоскую серию «Брия», а другие файлы того же
-        # автора уже имеют подсерии «Брия 1\...», «Брия 3\...» — значит «Брия» является
-        # корнем иерархии. Для такого файла ищем «Брия N.» в имени и обновляем
-        # proposed_series = «Брия N», чтобы позиция была видна в CSV и компиляторе.
-        # Условие безопасности: применяем только если у того же автора есть хотя бы один
-        # файл с подсерией, корень которой совпадает с proposed_series данного файла.
-        _norm = _nfc_lower_yo
-
-        # Собираем корни подсерий по автору: {proposed_author: {root_norm: root_display}}
-        _author_roots: dict = {}
-        for rec in records:
-            if '\\' not in (rec.proposed_series or ''):
-                continue
-            root = rec.proposed_series.split('\\')[0].strip()
-            # Убираем число из корня, чтобы сравнивать «Брия» == «Брия» (без "1" или "3")
-            root_base = re.sub(r'\s+\d+\s*$', '', root).strip()
-            ak = _norm_s(rec.proposed_author or '')
-            _author_roots.setdefault(ak, {})[_norm_s(root_base)] = root_base
-
-        _FOLDER_SRC_AR = {
-            'folder_dataset', 'folder_hierarchy', 'folder_meta_consensus',
-            'folder_metadata_confirmed',
-        }
-        # Pre-scan: собираем множество ненулевых-небез нуля чисел для каждой (ak, series_norm)
-        # группы. Если чисел > 1 — они разные (номера томов), добавлять к имени серии нельзя.
-        _ar_nums: dict = {}
-        for _rec in records:
-            if '\\' in (_rec.proposed_series or '') or not _rec.proposed_series:
-                continue
-            if _rec.series_source in _FOLDER_SRC_AR:
-                continue
-            _ak2 = _norm_s(_rec.proposed_author or '')
-            _sn2 = _norm_s(_rec.proposed_series.strip())
-            if _ak2 not in _author_roots or _sn2 not in _author_roots[_ak2]:
-                continue
-            _sn_norm = _norm_s(_rec.proposed_series.strip())
-            _esc2 = re.escape(_sn_norm)
-            _p2 = re.compile(_esc2 + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
-            _m2 = _p2.search(_norm_s(Path(_rec.file_path).stem))
-            if _m2:
-                _n2 = int(_m2.group(1))
-                _is_zero_padded2 = _m2.group(1).startswith('0') and len(_m2.group(1)) >= 2
-                if _n2 < 1900 and not _is_zero_padded2:
-                    _ar_nums.setdefault((_ak2, _sn2), set()).add(_n2)
-
-        for record in records:
-            if '\\' in (record.proposed_series or ''):
-                continue  # уже подсерия
-            if not record.proposed_series:
-                continue
-            if record.series_source in _FOLDER_SRC_AR:
-                continue  # папочная серия авторитетна — не дополняем числами
-            ak = _norm_s(record.proposed_author or '')
-            series_norm = _norm_s(record.proposed_series.strip())
-            # Только если этот же автор имеет подсерии с тем же корнем
-            if ak not in _author_roots or series_norm not in _author_roots[ak]:
-                continue
-            stem = Path(record.file_path).stem
-            stem_norm = _norm_s(stem)
-            _escaped = re.escape(series_norm)
-            _pat = re.compile(_escaped + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
-            _m = _pat.search(stem_norm)
-            if _m:
-                n_str = _m.group(1)
-                n = int(n_str)
-                if n < 1900:
-                    if n_str.startswith('0') and len(n_str) >= 2:
-                        # Zero-padded номер («01», «07») — это порядковый номер тома,
-                        # а не суффикс названия серии. Записываем в series_number,
-                        # название серии оставляем как есть («Флибер», не «Флибер 1»).
-                        if not record.series_number:
-                            record.series_number = str(n)
-                    else:
-                        # Если числа варьируются по группе — это номера томов, не арков.
-                        if len(_ar_nums.get((ak, series_norm), set())) >= 2:
-                            continue
-                        record.proposed_series = f'{record.proposed_series.strip()} {n}'
-
-        # Дополнительный путь: metadata подтверждает серию → ищем «серия N.» в стеме.
-        # Не требует наличия иерархических записей у того же автора.
-        # Пример: metadata='Хоттабыч', filename='Author. Хоттабыч 1. Позывной Хоттабыч 2'
-        #   → proposed_series = 'Хоттабыч 1'
-        #
-        # Условие безопасности: число N добавляется в имя серии ТОЛЬКО если оно одинаково
-        # у всех файлов той же author+series группы (дуга/сезон, а не номер тома).
-        # Пример: Хоттабыч — у всех файлов «Хоттабыч 1.» → N=1 везде → добавляем.
-        # Пластуны — «Пластуны 3.», «Пластуны 6.» → N варьируется → не добавляем.
-        from collections import defaultdict as _dfl
-        _meta_arc_map: dict = {}  # (author_norm, ps_norm) → set of matched numbers
-        _meta_arc_pat: dict = {}  # (author_norm, ps_norm) → compiled pattern
-        _meta_arc_recs: list = []  # список записей подходящих под критерии
-        for record in records:
-            if '\\' in (record.proposed_series or ''):
-                continue
-            if not record.proposed_series or not record.metadata_series:
-                continue
-            if record.series_source in _FOLDER_SRC_AR:
-                continue
-            ms_norm = _norm_s(record.metadata_series.replace('…', '...').strip())
-            ps_norm = _norm_s(record.proposed_series.strip())
-            if ms_norm != ps_norm:
-                continue
-            ak = _norm_s(record.proposed_author or '')
-            key = (ak, ps_norm)
-            if key not in _meta_arc_pat:
-                _escaped = re.escape(ps_norm)
-                _meta_arc_pat[key] = re.compile(
-                    _escaped + r'\s+(\d{1,4})\s*[.\-–—](?!\d)', re.UNICODE
-                )
-                _meta_arc_map[key] = set()
-            stem_norm = _norm_s(Path(record.file_path).stem)
-            _m = _meta_arc_pat[key].search(stem_norm)
-            if _m:
-                n = int(_m.group(1))
-                if n < 1900:
-                    _meta_arc_map[key].add(n)
-            _meta_arc_recs.append((record, key))
-
-        for record, key in _meta_arc_recs:
-            nums = _meta_arc_map.get(key, set())
-            if len(nums) != 1:
-                continue  # числа варьируются → это номера томов, не арк
-            n = next(iter(nums))
-            n_str = str(n)
-            stem_norm = _norm_s(Path(record.file_path).stem)
-            _m = _meta_arc_pat[key].search(stem_norm)
-            if not _m:
-                continue
-            if n_str.startswith('0') and len(n_str) >= 2:
-                if not record.series_number:
-                    record.series_number = str(n_str.lstrip('0') or '0')
-            else:
-                record.proposed_series = f'{record.proposed_series.strip()} {n}'
-
-        # После установки серии с числом («Хоттабыч 1») ищем series_number как второе число:
-        # «Хоттабыч 1. Позывной Хоттабыч 6. Аватар Х» → sn=6 (не sn=1 из metadata).
-        for record in records:
-            if '\\' in (record.proposed_series or ''):
-                continue
-            if not record.proposed_series:
-                continue
-            if record.series_source in _FOLDER_SRC_AR:
-                continue
-            ps_norm = _norm_s(record.proposed_series.strip())
-            if not re.search(r'\s+\d+$', ps_norm):
-                continue  # серия без числа — пропускаем
-            stem_norm = _norm_s(Path(record.file_path).stem)
-            _escaped_ps = re.escape(ps_norm)
-            # Паттерн: «Серия N. ArcTitle M.» — извлекаем M
-            _sn_pat = re.compile(
-                _escaped_ps + r'\s*\.\s*[а-яёa-zA-ZЀ-ӿ][^\d.]*\s+(\d{1,3})\s*[.\-–—]',
-                re.UNICODE,
-            )
-            _sm = _sn_pat.search(stem_norm)
-            if _sm:
-                n = int(_sm.group(1))
-                if n < 1900 and str(n) != (record.series_number or ''):
-                    record.series_number = str(n)
-
-        # Commented out: folder pattern consensus was also causing issues
-        # self._apply_series_folder_pattern_consensus(records)
-
-        # Commented out: consensus logic was overwriting properly extracted series
-        # TODO: Review and fix consensus logic before re-enabling
-        # self._apply_cross_file_consensus(records)
+        self._postpass_arc_numbering(records)
 
         # Нормализуем рассогласование «Серия\Подсерия» vs «Серия» у одного автора
         self._resolve_hierarchical_flat_mismatch(records)
@@ -1405,6 +1198,166 @@ class Pass2SeriesFilename:
         # ВАЖНО: вызываем до _unify_folder_series_source повторно, потому что
         # при первом вызове авторы были разные → guard "len(authors)>1" пропустил папку.
         self._fix_multiauthor_folders(records)
+
+    def _postpass_metadata_fallback(self, records: List[BookRecord]) -> None:
+        """Последний шанс: назначить серию из metadata_series если proposed_series пусто.
+
+        Применяет валидацию как в основном цикле. Также балансирует кавычки
+        и убирает завершающий backslash из всех series.
+        """
+        for record in records:
+            if record.proposed_series or not record.metadata_series:
+                continue
+            meta = record.metadata_series.strip()
+            if record.proposed_author and meta.lower() == record.proposed_author.lower():
+                continue
+            meta_lower = meta.lower()
+            _has_bl = False
+            for bl in self.filename_blacklist:
+                bl_lower = bl.lower().strip()
+                if not bl_lower:
+                    continue
+                pat = r'(?<![а-яёa-z])' + re.escape(bl_lower) + r'(?![а-яёa-z])'
+                if re.search(pat, meta_lower):
+                    _has_bl = True
+                    break
+            if _has_bl:
+                continue
+            series = self._extract_series_from_metadata(meta)
+            series = self._remove_blacklist_words(series)
+            if not series:
+                continue
+            if not self._is_valid_series(series, extracted_author=record.proposed_author or None):
+                continue
+            record.proposed_series = self._fix_russian_grammar(series)
+            record.series_source = "metadata"
+
+        for record in records:
+            if record.proposed_series:
+                record.proposed_series = self._balance_quotes(record.proposed_series).rstrip('\\')
+
+    def _postpass_arc_numbering(self, records: List[BookRecord]) -> None:
+        """Дополняет proposed_series числом дуги/сезона из имени файла.
+
+        Два пути:
+        A) Автор имеет подсерии «Серия N\\...» — для плоских записей той же серии
+           ищем «Серия N.» в стеме и добавляем N к proposed_series.
+        B) metadata подтверждает серию — если у ВСЕХ файлов группы одинаковый N
+           в стеме (не номер тома), добавляем N к proposed_series.
+        """
+        # --- Путь A: author_roots ---
+        _author_roots: dict = {}
+        for rec in records:
+            if '\\' not in (rec.proposed_series or ''):
+                continue
+            root = rec.proposed_series.split('\\')[0].strip()
+            root_base = re.sub(r'\s+\d+\s*$', '', root).strip()
+            ak = _norm_s(rec.proposed_author or '')
+            _author_roots.setdefault(ak, {})[_norm_s(root_base)] = root_base
+
+        _ar_nums: dict = {}
+        for _rec in records:
+            if '\\' in (_rec.proposed_series or '') or not _rec.proposed_series:
+                continue
+            if _rec.series_source in self._FOLDER_SOURCES_ARC:
+                continue
+            _ak2 = _norm_s(_rec.proposed_author or '')
+            _sn2 = _norm_s(_rec.proposed_series.strip())
+            if _ak2 not in _author_roots or _sn2 not in _author_roots[_ak2]:
+                continue
+            _p2 = re.compile(re.escape(_sn2) + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
+            _m2 = _p2.search(_norm_s(Path(_rec.file_path).stem))
+            if _m2:
+                _n2 = int(_m2.group(1))
+                _is_zero_padded2 = _m2.group(1).startswith('0') and len(_m2.group(1)) >= 2
+                if _n2 < 1900 and not _is_zero_padded2:
+                    _ar_nums.setdefault((_ak2, _sn2), set()).add(_n2)
+
+        for record in records:
+            if '\\' in (record.proposed_series or '') or not record.proposed_series:
+                continue
+            if record.series_source in self._FOLDER_SOURCES_ARC:
+                continue
+            ak = _norm_s(record.proposed_author or '')
+            series_norm = _norm_s(record.proposed_series.strip())
+            if ak not in _author_roots or series_norm not in _author_roots[ak]:
+                continue
+            _pat = re.compile(re.escape(series_norm) + r'\s+(\d{1,4})\s*[.\-–—]', re.UNICODE)
+            _m = _pat.search(_norm_s(Path(record.file_path).stem))
+            if _m:
+                n_str = _m.group(1)
+                n = int(n_str)
+                if n < 1900:
+                    if n_str.startswith('0') and len(n_str) >= 2:
+                        if not record.series_number:
+                            record.series_number = str(n)
+                    else:
+                        if len(_ar_nums.get((ak, series_norm), set())) >= 2:
+                            continue
+                        record.proposed_series = f'{record.proposed_series.strip()} {n}'
+
+        # --- Путь B: metadata-confirmed arc ---
+        _meta_arc_map: dict = {}
+        _meta_arc_pat: dict = {}
+        _meta_arc_recs: list = []
+        for record in records:
+            if '\\' in (record.proposed_series or ''):
+                continue
+            if not record.proposed_series or not record.metadata_series:
+                continue
+            if record.series_source in self._FOLDER_SOURCES_ARC:
+                continue
+            ms_norm = _norm_s(record.metadata_series.replace('…', '...').strip())
+            ps_norm = _norm_s(record.proposed_series.strip())
+            if ms_norm != ps_norm:
+                continue
+            ak = _norm_s(record.proposed_author or '')
+            key = (ak, ps_norm)
+            if key not in _meta_arc_pat:
+                _meta_arc_pat[key] = re.compile(
+                    re.escape(ps_norm) + r'\s+(\d{1,4})\s*[.\-–—](?!\d)', re.UNICODE
+                )
+                _meta_arc_map[key] = set()
+            _m = _meta_arc_pat[key].search(_norm_s(Path(record.file_path).stem))
+            if _m:
+                n = int(_m.group(1))
+                if n < 1900:
+                    _meta_arc_map[key].add(n)
+            _meta_arc_recs.append((record, key))
+
+        for record, key in _meta_arc_recs:
+            nums = _meta_arc_map.get(key, set())
+            if len(nums) != 1:
+                continue
+            n = next(iter(nums))
+            n_str = str(n)
+            _m = _meta_arc_pat[key].search(_norm_s(Path(record.file_path).stem))
+            if not _m:
+                continue
+            if n_str.startswith('0') and len(n_str) >= 2:
+                if not record.series_number:
+                    record.series_number = str(n_str.lstrip('0') or '0')
+            else:
+                record.proposed_series = f'{record.proposed_series.strip()} {n}'
+
+        # --- Финал: series_number из второго числа в стеме ---
+        for record in records:
+            if '\\' in (record.proposed_series or '') or not record.proposed_series:
+                continue
+            if record.series_source in self._FOLDER_SOURCES_ARC:
+                continue
+            ps_norm = _norm_s(record.proposed_series.strip())
+            if not re.search(r'\s+\d+$', ps_norm):
+                continue
+            _sn_pat = re.compile(
+                re.escape(ps_norm) + r'\s*\.\s*[а-яёa-zA-ZЀ-ӿ][^\d.]*\s+(\d{1,3})\s*[.\-–—]',
+                re.UNICODE,
+            )
+            _sm = _sn_pat.search(_norm_s(Path(record.file_path).stem))
+            if _sm:
+                n = int(_sm.group(1))
+                if n < 1900 and str(n) != (record.series_number or ''):
+                    record.series_number = str(n)
 
     def _detect_named_arcs(self, records: List[BookRecord]) -> None:
         """Обнаружить именованные дуги в серии и создать подсерии через '\\'.
