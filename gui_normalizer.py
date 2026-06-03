@@ -9,9 +9,11 @@ from io import StringIO
 try:
     from regen_csv import RegenCSVService
     from fb2_utils import fb2_count as _fb2_count
+    from author_pipeline_service import run_author_only_pipeline, collect_unknown_gender_authors
 except ImportError:
     from .regen_csv import RegenCSVService
     from .fb2_utils import fb2_count as _fb2_count
+    from .author_pipeline_service import run_author_only_pipeline, collect_unknown_gender_authors
 
 
 class _Tooltip:
@@ -1148,61 +1150,24 @@ class CSVNormalizerApp:
             )
 
             # ── Фильтрация + стриминг строк в диалог ─────────────────────────
-            import re as _re
             settings = self.settings_manager if self.settings_manager else self.csv_service.settings
             male_set   = {n.lower() for n in settings.get_male_names()}
             female_set = {n.lower() for n in settings.get_female_names()}
 
+            unknown_authors = collect_unknown_gender_authors(records, male_set, female_set)
+
             BATCH_SIZE = 25
-            batch: list = []
-            seen:  set  = set()
 
             def _flush(b):
                 d = dialog_ref[0]
                 if d and d.top.winfo_exists():
                     d.add_rows(b)
 
-            for rec in records:
-                combined  = rec.proposed_author or ""
-                source    = rec.author_source   or ""
-                file_path = rec.file_path       or ""
-                if not combined or combined == "Сборник":
-                    continue
-
-                authors = [a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()]
-                for author in authors:
-                    if author in seen:
-                        continue
-                    seen.add(author)
-
-                    parts = author.split()
-                    first_name = parts[1] if len(parts) >= 2 else ""
-
-                    gender = ""
-                    for word in parts:
-                        w = word.lower()
-                        if w in male_set:
-                            gender = "Муж."
-                            break
-                        if w in female_set:
-                            gender = "Жен."
-                            break
-
-                    # Показываем только тех, чьё имя ещё не в списках
-                    if gender:
-                        continue
-
-                    batch.append((source, author, first_name, gender, file_path))
-                    if len(batch) >= BATCH_SIZE:
-                        chunk = batch[:]
-                        self.root.after(0, lambda c=chunk: _flush(c))
-                        batch = []
-
-            if batch:
-                chunk = batch[:]
+            for i in range(0, len(unknown_authors), BATCH_SIZE):
+                chunk = unknown_authors[i:i + BATCH_SIZE]
                 self.root.after(0, lambda c=chunk: _flush(c))
 
-            total_sent = len(seen)
+            total_sent = len(unknown_authors)
             self.root.after(0, lambda: self.progress_var.set(
                 f"Готово — найдено {total_sent} уникальных авторов"
             ))
@@ -1219,58 +1184,24 @@ class CSVNormalizerApp:
     def _run_female_pipeline(self, folder_path: str):
         """Найти файлы, у которых все авторы — женщины."""
         original_stdout = sys.stdout
-        try:
-            from pathlib import Path as _Path
-            from precache import Precache
-            from passes.pass1_read_files import Pass1ReadFiles
-            from passes.pass2_filename import Pass2Filename
-            from passes.pass2_fallback import Pass2Fallback
-            from fb2_author_extractor import FB2AuthorExtractor
-            from logger import Logger
-        except ImportError:
-            from pathlib import Path as _Path
-            from .precache import Precache
-            from .passes.pass1_read_files import Pass1ReadFiles
-            from .passes.pass2_filename import Pass2Filename
-            from .passes.pass2_fallback import Pass2Fallback
-            from .fb2_author_extractor import FB2AuthorExtractor
-            from .logger import Logger
-
         redirector = StdoutRedirector(self.progress_var, self.root, original_stdout,
                                       log_callback=self._add_log)
         sys.stdout = redirector
         try:
-            import re as _re
-            work_dir = _Path(folder_path)
             settings = self.settings_manager if self.settings_manager else self.csv_service.settings
-            logger = self.csv_service.logger
-            folder_parse_limit = self.csv_service.folder_parse_limit
-            extractor = FB2AuthorExtractor()
+            self.root.after(0, lambda: self.progress_var.set("Кеширование и чтение файлов..."))
 
-            self.root.after(0, lambda: self.progress_var.set("Кеширование папок..."))
-            precache = Precache(work_dir, settings, logger, folder_parse_limit)
-            precache.execute()
+            records = run_author_only_pipeline(
+                folder_path, settings,
+                self.csv_service.logger,
+                self.csv_service.folder_parse_limit,
+            )
 
-            self.root.after(0, lambda: self.progress_var.set("Чтение файлов..."))
-            pass1 = Pass1ReadFiles(work_dir, precache.author_folder_cache,
-                                   extractor, logger, folder_parse_limit)
-            records = pass1.execute()
-
-            self.root.after(0, lambda: self.progress_var.set("Извлечение авторов..."))
-            pass2 = Pass2Filename(settings, logger, work_dir,
-                                  male_names=precache.male_names,
-                                  female_names=precache.female_names)
-            pass2.prebuild_author_cache(records)
-            pass2.execute(records)
-
-            pass2_fallback = Pass2Fallback(logger, settings=settings)
-            pass2_fallback.execute(records)
-
-            male_set = set(n.lower() for n in settings.get_male_names())
-            female_set = set(n.lower() for n in settings.get_female_names())
-
+            male_set = {n.lower() for n in settings.get_male_names()}
+            female_set = {n.lower() for n in settings.get_female_names()}
             rows = self._filter_female_rows(records, male_set, female_set)
 
+            work_dir = Path(folder_path)
             self.root.after(0, lambda: self.progress_var.set("Готово"))
             self.root.after(0, lambda: FemaleAuthorsDialog(self.root, rows, work_dir, settings_manager=self.settings_manager))
         except Exception as e:
