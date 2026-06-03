@@ -502,657 +502,8 @@ class Pass2SeriesFilename:
 
         # Кэш Path.parts: один и тот же file_path встречается в нескольких проходах
         _parts_cache: dict = {}
-
-        def _is_strong_match(author: str, folder: str) -> bool:
-            a = author.lower().replace('ё', 'е')
-            f = folder.lower().replace('ё', 'е')
-            if a in f or f in a:
-                return True
-            # Handle name-order variation (metadata "Имя Фамилия" vs folder "Фамилия Имя")
-            # and multi-author strings: check if all folder words match any single author
-            f_words = set(re.sub(r'[^\w]', ' ', f).split())
-            if f_words:
-                for single_author in re.split(r'[;,]', a):
-                    sa_words = set(single_author.strip().split())
-                    if sa_words and f_words == sa_words:
-                        return True
-            return False
-
         for record in records:
-            # Приоритет из config.json: FOLDER_STRUCTURE=3 > FILENAME=2 > FB2_METADATA=1
-            # Поиск по папкам применяется всегда, используя любой известный автор:
-            # proposed_author (из папки или файла) или metadata_authors (из FB2).
-            # Это гарантирует соблюдение приоритета независимо от author_source.
-            author_name = record.proposed_author or record.metadata_authors or None
-            if author_name:
-                path_parts = _parts_cache.get(record.file_path)
-                if path_parts is None:
-                    raw = Path(record.file_path).parts
-                    path_parts = tuple(
-                        p for i, p in enumerate(raw)
-                        if i == len(raw) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
-                    )
-                    _parts_cache[record.file_path] = path_parts
-
-                author_folder_idx = None
-                for i, part in enumerate(path_parts[:-1]):
-                    if _is_strong_match(author_name, part):
-                        author_folder_idx = i
-                        break
-                if author_folder_idx is None:
-                    for i, part in enumerate(path_parts[:-1]):
-                        if _author_matches_folder(author_name, part):
-                            author_folder_idx = i
-                            break
-
-                if author_folder_idx is not None:
-                    i = author_folder_idx
-                    part = path_parts[i]
-                    # Папка подтвердила автора — если источник был только мета, обновляем
-                    if record.author_source == "metadata":
-                        record.author_source = "metadata_folder_confirmed"
-
-                    # Если VARIANT B уже установил серию из папки — не перезаписываем.
-                    # Только обновление author_source выше допустимо.
-                    if record.series_source in self._FOLDER_SOURCES and record.proposed_series:
-                        pass  # серия уже определена папочной структурой
-
-                    # Найдена папка автора на позиции i
-                    # Следующая папка (i+1) это серия (если это не файл)
-                    elif i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
-                        series_folder = path_parts[i + 1]
-                        if not series_folder.endswith('.fb2'):
-                            # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии
-                            if is_no_series_folder(series_folder, self.no_series_names):
-                                record.proposed_series = ""
-                                record.series_source = "no_series_folder"
-
-                            # Если подпапка — это "вариант" / "альт. перевод" / "СИ" и т.п.,
-                            # она НЕ является названием серии — серия берётся из папки автора.
-                            elif self._is_variant_folder(series_folder):
-                                series_name = self._extract_series_from_folder_name(part)
-                                if series_name:
-                                    record.proposed_series = series_name
-                                    record.series_source = "folder_hierarchy"
-
-                            else:
-                                # Проверяем: папка-автор сама является циклом?
-                                # Признак: "Серия (Автор)" — _extract_series_from_folder_name вернёт
-                                # что-то отличное от исходного имени папки.
-                                # НО: если скобки содержат псевдоним/псевдоним автора
-                                # ("Гоблин (MeXXanik)") — это НЕ "Серия (Автор)", а папка автора.
-                                author_folder_series = self._extract_series_from_folder_name(part)
-                                _parens_match = re.search(r'\(([^)]+)\)\s*$', part)
-                                _parens_content = _parens_match.group(1).strip() if _parens_match else ''
-
-                                # Если скобки содержат "и др" / "et al" — это многоавторный хинт,
-                                # а НЕ дизамбигуатор автора: папка является серийной, не авторской.
-                                _ET_AL_RE = re.compile(
-                                    r'(?:и\s+др\.?|и\s+другие|et\s+al\.?|and\s+others)\s*$',
-                                    re.IGNORECASE
-                                )
-                                _is_multiauthor_hint = bool(_parens_content) and bool(_ET_AL_RE.search(_parens_content))
-
-                                _parens_is_author = (
-                                    bool(_parens_content)
-                                    and not _is_multiauthor_hint
-                                    and _author_matches_folder(author_name, _parens_content)
-                                )
-                                has_parent_series = (
-                                    bool(author_folder_series) and
-                                    author_folder_series.strip().lower() != part.strip().lower() and
-                                    not _parens_is_author
-                                )
-
-                                if has_parent_series:
-                                    # Б) Иерархия: {цикл}\{Подсерия}
-                                    # Убираем суффикс "(Автор)", но сохраняем:
-                                    # - числовой префикс "N. " — порядковый номер подсерии
-                                    # - скобочный суффикс с цифрами "(Хроники 7-8)" — глобальный контекст
-                                    _par_m = re.search(r'\s*\(([^)]*)\)\s*$', series_folder)
-                                    if _par_m and any(c.isdigit() for c in _par_m.group(1)):
-                                        # Содержит цифры — это контекст нумерации, не имя автора
-                                        subfolder_display = series_folder.strip()
-                                    else:
-                                        subfolder_display = re.sub(r'\s*\([^)]*\)\s*$', '', series_folder).strip()
-                                    record.proposed_series = f"{author_folder_series}\\{subfolder_display}"
-
-                                    # Костыль для многоавторных папок: "Серия (Фамилия и др)" →
-                                    # ищем полное имя в metadata и ставим "Фамилия Имя и другие".
-                                    if _is_multiauthor_hint:
-                                        hint_surname = _ET_AL_RE.sub('', _parens_content).strip().rstrip(',').strip()
-                                        hint_lower = hint_surname.lower().replace('ё', 'е')
-                                        # Ищем полное нормализованное имя в proposed_author (уже "Фамилия Имя")
-                                        full_name = None
-                                        for pa_part in re.split(r'\s*,\s*', record.proposed_author or ''):
-                                            if any(hint_lower in w.lower().replace('ё', 'е') for w in pa_part.split()):
-                                                full_name = pa_part.strip()
-                                                break
-                                        # Fallback: поиск в metadata_authors
-                                        if not full_name:
-                                            for meta_a in re.split(r'[;,]', record.metadata_authors or ''):
-                                                meta_a = meta_a.strip()
-                                                if any(hint_lower in w.lower().replace('ё', 'е') for w in meta_a.split()):
-                                                    full_name = meta_a
-                                                    break
-                                        if full_name:
-                                            record.proposed_author = f"{full_name} и другие"
-                                            record.author_source = 'folder_multiauthor'
-                                else:
-                                    # Обычная папка автора → серия из папки i+1
-                                    # Если есть ещё папка i+2 (подсерия) — строим "Серия\Подсерия",
-                                    # сохраняя числовой префикс "N." в имени подсерии (порядок внутри серии).
-                                    if i + 2 < len(path_parts) - 1:
-                                        parent_series_name = self._extract_series_from_folder_name(series_folder, record.proposed_author or '')
-                                        subseries_folder = path_parts[i + 2]
-                                        record.proposed_series = f"{parent_series_name or series_folder}\\{subseries_folder}"
-                                    else:
-                                        subseries_name = self._extract_series_from_folder_name(series_folder, record.proposed_author or '')
-                                        record.proposed_series = subseries_name or series_folder
-
-                                record.series_source = "folder_hierarchy"
-                    elif not (record.series_source in self._FOLDER_SOURCES and record.proposed_series):
-                        # Папка i содержит автора И является папкой серии одновременно
-                        # (формат: "Сборник\Серия (Автор)\Файл.fb2" — нет подпапки серии)
-                        # Папка имеет ВЫСШИЙ приоритет. Но если metadata_series — вариация
-                        # того же названия (напр. "Барраярский цикл" и "Барраяр"), то
-                        # сохраняем более точное название из FB2 тегов.
-
-                        # ЗАЩИТА: "Издательская папка с фамилией" — папка вида
-                        # "Fanzon. Наш выбор. Куанг" содержит фамилию автора как ПОСЛЕДНЕЕ слово.
-                        # Такие папки — организационные, а не серийные.
-                        # Серию ищем сначала по имени файла, мета только подтверждает.
-                        # ИСКЛЮЧЕНИЕ: "Серия (Автор)" — фамилия в скобках является лишь дизамбигуатором,
-                        # такая папка — это серия; проверяем только хвост БЕЗ скобок.
-                        _part_no_parens = re.sub(r'\s*\([^)]*\)\s*$', '', part.strip()).strip()
-                        _part_words = re.split(r'[\s.\-]+', _part_no_parens) if _part_no_parens else re.split(r'[\s.\-]+', part.strip())
-                        _part_last_word = _part_words[-1].lower().replace('ё', 'е') if _part_words else ''
-                        _author_name_clean = re.sub(r'\([^)]*\)', '', author_name).strip()
-                        _author_words = set(w.lower().replace('ё', 'е') for w in _author_name_clean.split() if len(w) > 2)
-                        # Check if ANY word in the folder (>2 chars) matches an author word.
-                        # This covers "Таннер А" where the FIRST word "Таннер" is the surname,
-                        # not just the last word (the old check only caught endings like "Куанг").
-                        # Also handles inflected forms: "Киза" matches author word "Киз" via startswith.
-                        _folder_contains_author = any(
-                            any(
-                                fw == aw or fw.startswith(aw) or aw.startswith(fw)
-                                for aw in _author_words
-                            )
-                            for fw in (w.lower().replace('ё', 'е') for w in _part_words if len(w) > 2)
-                        )
-                        # Также проверяем скобочный суффикс папки: если автор совпадает
-                        # с тем что в скобках — это папка "Серия (Автор)", не серия.
-                        # Пример: папка "Орлов Алекс (Дарищев Вадим)", автор "Дарищев Вадим"
-                        # → _part_words = ["Орлов", "Алекс"], author_words не совпадут,
-                        # но в скобках "Дарищев Вадим" == author → тоже авторская папка.
-                        if not _folder_contains_author:
-                            _parens_in_part = re.search(r'\(([^)]+)\)', part)
-                            if _parens_in_part:
-                                _parens_words = set(
-                                    w.lower().replace('ё', 'е')
-                                    for w in _parens_in_part.group(1).split()
-                                    if len(w) > 2
-                                )
-                                if _parens_words & _author_words:
-                                    _folder_contains_author = True
-
-                        if _folder_contains_author:
-                            pass  # Не устанавливаем серию из папки → идём дальше к filename extraction
-                        else:
-                            series_name = self._extract_series_from_folder_name(part)
-                            if series_name:
-                                if record.metadata_series:
-                                    meta_l = record.metadata_series.lower().replace('ё', 'е')
-                                    folder_l = series_name.lower().replace('ё', 'е')
-                                    # Если одно является префиксом другого — это одна серия,
-                                    # просто разные формы названия → оставляем более точную.
-                                    if not (folder_l.startswith(meta_l) or meta_l.startswith(folder_l)):
-                                        # Разные названия → папка имеет высший приоритет
-                                        record.proposed_series = series_name
-                                        record.series_source = "folder_hierarchy"
-                                    else:
-                                        # Та же серия, разная форма.
-                                        # Если meta_l начинается с folder_l → мета добавляет лишнее
-                                        # (напр. "Ацтек (RedDetonator)" vs "Ацтек") → берём folder_name.
-                                        # Если folder_l начинается с meta_l → папка добавляет описание
-                                        # (напр. "Барраярский цикл" vs "Барраяр") → берём мету.
-                                        if meta_l.startswith(folder_l) and len(meta_l) > len(folder_l):
-                                            record.proposed_series = series_name
-                                        else:
-                                            record.proposed_series = record.metadata_series
-                                        record.series_source = "folder_metadata_confirmed"
-                                else:
-                                    record.proposed_series = series_name
-                                    record.series_source = "folder_hierarchy"
-            
-            # Special case: depth==4 without series subfolder
-            # Pass 1 wrongly sets folder_dataset for depth==4, allowing Pass 2 to override it
-            file_depth = len(Path(record.file_path).parts)
-            # Учитываём если в пути есть extension-папки (они прозрачны, не считаются как уровень)
-            raw_parts = Path(record.file_path).parts
-            file_depth = len(tuple(
-                p for i, p in enumerate(raw_parts)
-                if i == len(raw_parts) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
-            ))
-            is_depth4_without_real_series = (
-                file_depth == 4 and 
-                record.series_source == "folder_dataset"
-            )
-            
-            # Общая проверка: если серия из папки (любого типа) попала в publisher-blacklist →
-            # сбросить и дать шанс filename extraction, затем metadata как финальный fallback.
-            # Используем word-boundary regex чтобы "СИ" не совпадало с "Русич" и т.п.
-            # ИСКЛЮЧЕНИЕ: folder_dataset и folder_hierarchy — это имена реальных папок,
-            # созданных пользователем; они авторитетны и blacklist к ним не применяем.
-            if record.proposed_series and self.filename_blacklist and \
-                    record.series_source not in self._FOLDER_SOURCES:
-                _fs_lower = record.proposed_series.lower().replace('ё', 'е')
-                _folder_series_bl = False
-                for _bl in self.filename_blacklist:
-                    _bl_l = _bl.lower().replace('ё', 'е').strip()
-                    if not _bl_l:
-                        continue
-                    _pat = r'(?<![а-яёa-z\w])' + re.escape(_bl_l) + r'(?![а-яёa-z\w])'
-                    if re.search(_pat, _fs_lower):
-                        _folder_series_bl = True
-                        break
-                if _folder_series_bl:
-                    record.proposed_series = ''
-                    record.series_source = ''
-            if record.series_source == "folder_dataset" and not is_depth4_without_real_series:
-                if record.proposed_series:
-                    continue  # Папка дала series (кроме depth==4 ошибки)
-
-            if record.series_source == "folder_hierarchy":
-                continue  # Иерархия папок определила серию - готово!
-
-            if record.series_source == "no_series_folder":
-                continue  # Папка «Вне серий» — серии нет, дальше не ищем
-
-            if record.proposed_series and not is_depth4_without_real_series:
-                continue  # Серия уже установлена (кроме depth==4 ошибки)
-            
-            # ОБЯЗАТЕЛЬНО пробуемы паттерны (глубина НЕ влияет!)
-            # Если series уже установлена из папок → пропускаем extraction
-            # Но если folder_dataset дал пустую серию — продолжаем extraction из filename
-            if record.series_source == "folder_dataset" and record.proposed_series:
-                continue  # Folder extraction already set hierarchical series
-
-            # Если папка НЕ дала series → пробуем extraction из filename
-            series_candidate = self._extract_series_from_filename(
-                record.file_path, validate=False, metadata_series=record.metadata_series
-            )
-
-            if series_candidate:
-                # Базовые фильтры (НЕ валидация) — ДО записи в extracted_series_candidate
-                # Запятая-разделитель авторов стоит перед словом с заглавной буквы
-                # ("Иванов, Петров"), грамматическая — перед строчной ("Игрок, забравшийся").
-                if ',' in series_candidate:
-                    # ИСКЛЮЧЕНИЕ: если кандидат совпадает с metadata_series →
-                    # запятая является частью настоящего названия серии ("Мы, Мигель Мартинес")
-                    _meta_lc = record.metadata_series.strip().lower().replace('ё', 'е') if record.metadata_series else ''
-                    _cand_lc = series_candidate.lower().replace('ё', 'е')
-                    # Для иерархической серии «Корень\Подсерия» также проверяем
-                    # совпадение подсерии с metadata (Остен Ард 1\Память, Скорбь и Шип)
-                    _sub_lc = _cand_lc.split(chr(92), 1)[1] if chr(92) in _cand_lc else ''
-                    _meta_confirms_comma = bool(_meta_lc and (
-                        _cand_lc == _meta_lc or _sub_lc == _meta_lc
-                    ))
-                    if not _meta_confirms_comma:
-                        # Считаем это списком авторов только если после каждой запятой
-                        # идёт слово с заглавной буквы (или инициал)
-                        parts_after_comma = [p.strip() for p in series_candidate.split(',')[1:]]
-                        all_capitalized = all(
-                            p and (p[0].isupper() or (len(p) >= 2 and p[1] == '.'))
-                            for p in parts_after_comma
-                        )
-                        if all_capitalized:
-                            series_candidate = None  # Список авторов
-                # ВАЖНО: проверки ниже — независимые (не elif), чтобы срабатывать
-                # даже когда кандидат прошёл comma-check (например "о том, как")
-                if series_candidate and self._is_author_surname(series_candidate, record.proposed_author):
-                                series_candidate = None  # Фамилия или полное имя автора
-                if series_candidate and record.file_title:
-                    # TITLE-AS-SERIES GUARD: если кандидат совпадает с названием книги,
-                    # это ложный матч (например "Книга" в service_words увела нас не туда).
-                    # Очищаем file_title от мусора [litres] и сравниваем.
-                    import re as _re
-                    _title_clean = _re.sub(r'\s*\[.*?\]\s*$', '', record.file_title.strip())
-                    # Также убрать (ЛП), (альт. перевод) и т.п. скобочные суффиксы
-                    _title_no_parens = _re.sub(r'\s*\([^)]*\)\s*$', '', _title_clean).strip()
-                    # Нормализуем кандидата: убираем ведущий пунктуационный мусор ("- Траун" → "Траун"),
-                    # чтобы title-collision guard правильно сравнивал с заголовком книги.
-                    _cand_for_guard = _re.sub(r'^[\-–—\s]+', '', series_candidate).strip()
-                    _cand_lower = _cand_for_guard.lower()
-                    _title_lower = _title_clean.lower()
-                    _title_np_lower = _title_no_parens.lower()
-                    # Прямое совпадение ИЛИ кандидат является началом названия книги
-                    # (ловит обрезанные кандидаты типа "Спасение (альт" от "Спасение (альт. перевод)")
-                    # ИЛИ кандидат начинается с базового названия (без скобок) — "спасение (альт" startswith "спасение"
-                    # ИСКЛЮЧЕНИЕ 1: если кандидат совпадает с metadata_series → это подтверждённая серия,
-                    # название книги просто совпадает (1-я книга серии называется так же, как серия)
-                    # ИСКЛЮЧЕНИЕ 2: если кандидат явно присутствует в скобках в имени файла —
-                    # "(Серый. Трилогия)" → серия "Серый" надёжна даже если title="Серый"
-                    # ИСКЛЮЧЕНИЕ 3: если в имени файла кандидат стоит перед номером тома
-                    # "Чисто шведские убийства 1. Отпуск в раю" → кандидат явно является серией,
-                    # даже если file_title тоже начинается с него (1-я книга = имя серии + подзаголовок)
-                    _meta_raw = (record.metadata_series or '').replace('\u2026', '...')
-                    _meta_lower = _meta_raw.lower().replace('ё', 'е') if _meta_raw else ''
-                    _cand_lower_norm = _cand_lower.replace('ё', 'е').replace('\u2026', '...')
-                    _is_confirmed_by_meta = bool(_meta_lower and _cand_lower_norm == _meta_lower)
-                    # ИСКЛЮЧЕНИЕ: кандидат является ПРЕФИКСОМ metadata_series
-                    # "Воронцов" → metadata "Воронцов. Перезагрузка" → кандидат реальная серия,
-                    # title просто начинается с первого слова серии.
-                    _is_meta_prefix = bool(
-                        _meta_lower and not _is_confirmed_by_meta and
-                        (_meta_lower.startswith(_cand_lower_norm + '.') or
-                         _meta_lower.startswith(_cand_lower_norm + ' '))
-                    )
-                    # ИСКЛЮЧЕНИЕ: кандидат = metadata_series + суффикс из служебных слов
-                    # "Честное пионерское! Часть" → meta "Честное пионерское!" → кандидат начинается
-                    # с подтверждённой серии, хвост — только мусор/служебные слова.
-                    # Проверяем: candidates начинается с meta И хвост = только \W + цифры/SW-слова.
-                    _is_meta_with_service_suffix = bool(
-                        _meta_lower and not _is_confirmed_by_meta and not _is_meta_prefix and
-                        _cand_lower_norm.startswith(_meta_lower) and
-                        _re.match(r'^[\W\s]*(|(\w+\s*)+)$',
-                                  _cand_lower_norm[len(_meta_lower):].strip())
-                        and all(
-                            w in self.service_words or w.isdigit()
-                            for w in _cand_lower_norm[len(_meta_lower):].split()
-                            if w.isalpha()
-                        )
-                    )
-                    _fn_stem_lower = Path(record.file_path).stem.lower()
-                    _is_in_parens = bool(_re.search(r'\(\s*' + _re.escape(_cand_lower), _fn_stem_lower))
-                    # ИСКЛЮЧЕНИЕ 4: серия получена блок-матчером с score=1.0 И подтверждена metadata_series.
-                    # Только с metadata-подтверждением: title совпадает с серией у omnibus или 1-й книги.
-                    # Без metadata — блок-матчер мог дать score=1.0 из-за Author→Series coercion,
-                    # а настоящий title книги случайно совпадает с кандидатом — гарду надо сработать.
-                    # metadata_series считается подтверждением только если она НЕ в blacklist.
-                    # Если metadata — издательский ярлык (напр. «МИФ Проза»), он мог быть
-                    # очищен внутри block-matcher, но record.metadata_series всё ещё не пустая.
-                    # В таком случае confidence не оправдана — guard должен сработать.
-                    _meta_is_bl = False
-                    if record.metadata_series and self.filename_blacklist:
-                        _ml = record.metadata_series.lower().replace('ё', 'е')
-                        _meta_is_bl = any(
-                            bl.lower().replace('ё', 'е') in _ml
-                            for bl in self.filename_blacklist if bl
-                        )
-                    _is_block_matcher_confident = (getattr(self, '_last_from_block_matcher', False)
-                                                   and bool(record.metadata_series)
-                                                   and not _meta_is_bl)
-                    # Кандидат + номер в имени файла: "... - Серия N." или "... - Серия N "
-                    _is_numbered_series = bool(_re.search(
-                        _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.\-–—]+\d+(?:[\s.]|$)',
-                        _fn_stem_lower.replace('ё', 'е')
-                    ))
-                    if not _is_confirmed_by_meta and not _is_meta_prefix and not _is_meta_with_service_suffix and not _is_in_parens and not _is_numbered_series and not _is_block_matcher_confident and (
-                       (_title_lower and _cand_lower == _title_lower) or \
-                       (_title_np_lower and _cand_lower == _title_np_lower) or \
-                       (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
-                       # ИСКЛЮЧЕНИЕ: однословный кандидат без подтверждённой metadata_series,
-                       # а заголовок начинается с этого слова → это первое слово заголовка, не серия.
-                       # Пример: "Куонг Валери Тонг - Бей. Беги. Замри" → candidate="Бей", title="Бей. Беги. Замри"
-                       (not record.metadata_series and
-                        ' ' not in _cand_lower and
-                        _title_lower and _title_lower.startswith(_cand_lower)) or \
-                       (_title_np_lower and len(_title_np_lower) >= 4 and _cand_lower.startswith(_title_np_lower)) or \
-                       # ИСКЛЮЧЕНИЕ guard: кандидат является хвостом заголовка (subtitle-суффикс).
-                       # Пример: candidate="Правдивая история о том, как студентка исчезла у всех на виду"
-                       # title="Пропавшая: Исчезновение Лорен Спирер. Правдивая история..."
-                       # → title.endswith(candidate) → это подзаголовок, не серия.
-                       (_title_lower and _title_lower.endswith(_cand_lower) and len(_cand_lower) >= 10) or \
-                       # ИСКЛЮЧЕНИЕ guard: кандидат является подстрокой заголовка (фрагмент в середине).
-                       # Пример: candidate="Рязань, год" (блок из "Время умирать. Рязань, год 1237")
-                       # title="Время умирать. Рязань, год 1237" → candidate in title → не серия.
-                       (_title_lower and _cand_lower in _title_lower and len(_cand_lower) >= 8)):
-                                        series_candidate = None  # Название книги ≠ серия
-
-                # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)
-                if series_candidate:
-                    record.extracted_series_candidate = series_candidate
-
-            # Если прошел базовые фильтры → валидация
-            if series_candidate:
-                clean = self._clean_series_name(
-                    series_candidate,
-                    keep_trailing_number=self._last_was_hierarchical
-                )
-
-                # ✅ НОВОЕ: Удалить слова из blacklist вместо полного отвергания
-                clean = self._remove_blacklist_words(clean)
-
-                # Guard: если _clean_series_name отстрипала служебное слово (напр. "трилогия"),
-                # а metadata_series подтверждает полное название — восстанавливаем из metadata.
-                # Условие: clean является префиксом metadata_series И кандидат начинался с metadata_series.
-                if clean and record.metadata_series:
-                    _nyo = _nfc_lower_yo
-                    _meta = record.metadata_series.strip()
-                    if (_nyo(_meta).startswith(_nyo(clean) + ' ')
-                            and _nyo(series_candidate).startswith(_nyo(_meta))):
-                        clean = _meta
-
-                if clean:  # Проверяем что что-то осталось после очистки
-                    author_for_validation = record.proposed_author or None
-
-                    if self._is_valid_series(clean, extracted_author=author_for_validation):
-                        # Мета используется ТОЛЬКО для подтверждения серии из имени файла,
-                        # но НЕ для её расширения. Если из файла извлечено "Чингисхан",
-                        # а мета говорит "Чингисхан. Хроники завоевателя" — оставляем "Чингисхан".
-                        # Исправляем грамматику русского языка (добавляем запятую перед "что")
-                        clean = self._fix_russian_grammar(clean)
-                        record.proposed_series = clean
-                        record.series_source = "filename"
-                        if (record.metadata_series and
-                                record.metadata_series.strip().lower() == clean.lower()):
-                            record.series_source = "filename+meta_confirmed"
-                        # Если иерархический root содержит trailing number, а metadata_series
-                        # совпадает с root БЕЗ числа — число является позицией книги, не частью
-                        # названия серии. Пример: «Север и Юг 01\Великая сага» + meta «Север и Юг»
-                        # → proposed_series = «Север и Юг» (иначе каждая книга в отдельной группе).
-                        if record.metadata_series and '\\' in (record.proposed_series or ''):
-                            _root_h, _sub_h = record.proposed_series.split('\\', 1)
-                            _root_h = _root_h.strip()
-                            _root_no_num = re.sub(r'\s+\d+\s*$', '', _root_h).strip()
-                            _meta_s = record.metadata_series.strip()
-                            if (_root_no_num and _root_no_num != _root_h and
-                                    _root_no_num.lower().replace('ё', 'е') ==
-                                    _meta_s.lower().replace('ё', 'е')):
-                                _sub_stripped = _sub_h.strip()
-                                _sub_is_num_only = bool(re.match(r'^\d+$', _sub_stripped))
-                                _sub_is_meta_dup = (_sub_stripped.lower().replace('ё', 'е') ==
-                                                    _meta_s.lower().replace('ё', 'е'))
-                                if _sub_is_num_only or _sub_is_meta_dup:
-                                    # Подсерия — чисто цифровая или дублирует metadata:
-                                    # «Север и Юг 01\12» или «Серия 1\Серия» → стираем до metadata
-                                    record.proposed_series = _meta_s
-                                    record.series_source = "filename+meta_confirmed"
-                                # else: подсерия — реальное название («Аспект-Император»);
-                                # оставляем proposed_series без изменений (с числом в root)
-                        continue
-
-            # Fallback: metadata ТОЛЬКО если паттерны не дали
-            if not series_candidate:
-                file_name = Path(record.file_path).stem  # Имя без расширения
-                
-                # ✅ ВАЖНО: Удалить метатеги из конца чтобы fallback правила работали!
-                # "(СИ)" - Самиздат/Интернет
-                # "(ЛП)" - Лицензионное произведение
-                file_name_for_fallback = re.sub(r'\s*\([СЛ]И\)\s*$', '', file_name).strip()
-                
-                # Перед fallback к metadata попробуем простое правило: Author. Series RomanNumeral
-                # "Яманов Александр. Бесноватый Цесаревич I.fb2" → "Бесноватый Цесаревич"
-                if '. ' in file_name_for_fallback:
-                    parts = file_name_for_fallback.split('. ', 1)
-                    if len(parts) == 2:
-                        first_part = parts[0].strip()
-                        second_part = parts[1].strip()
-                        
-                        # Проверяем что первая часть это автор (< 50 символов, без цифр)
-                        looks_like_author = (
-                            len(first_part) < 50 and
-                            not any(digit in first_part for digit in '0123456789')
-                        )
-                        
-                        if looks_like_author:
-                            # Убрать аннотацию в скобках с конца перед матчингом диапазона:
-                            # "Маршал 1-9 (без иллюстраций)" → "Маршал 1-9"
-                            second_part_bare = re.sub(r'\s*\([^)]*\)\s*$', '', second_part).strip()
-                            # Убрать год-суффикс (1900–2099) — не должен трактоваться как номер тома:
-                            # "Том Ⅰ - 2022" → "Том Ⅰ"  /  "Серия 1 2023" → "Серия 1"
-                            second_part_bare = re.sub(r'(?:\s*[-–—])?\s*(?:19|20)\d{2}\s*$', '', second_part_bare).strip()
-                            # Диапазон N-M: "Совок 1-5", "Попаданец в Дракона 1-8"
-                            match = re.search(r'^(.+?)\s+\d+[-\u2013\u2014]\d+\s*$', second_part_bare)
-                            is_range_match = bool(match)
-                            if not match:
-                                # Одиночное арабское число 1–2 цифры: "Охотник 1", "Серия 12"
-                                # 3+ цифры (888, 1234) — номер дела/произведения, не том серии.
-                                match = re.search(r'^(.+?)\s+\d{1,2}\s*$', second_part_bare)
-                            if not match:
-                                # Римские цифры: "Бесноватый Цесаревич I"
-                                match = re.search(r'^(.+?)\s+[IVX]+\s*$', second_part_bare)
-                            if match:
-                                simple_series = match.group(1).strip()
-                                _ftitle = (record.file_title or '').lower()
-                                # Диапазон N-M в имени файла — однозначный признак серии,
-                                # даже если название совпадает с заголовком книги.
-                                # Пример: "Хакер 1-2.fb2", file_title="Хакер" → серия "Хакер" корректна.
-                                _in_title = (not is_range_match and
-                                             bool(_ftitle and simple_series.lower() in _ftitle))
-                                if not _in_title and self._is_valid_series(simple_series, extracted_author=record.proposed_author):
-                                    series_candidate = simple_series
-                
-                # ✅ НОВОЕ: Попробуем "Author - Series NUM или N-M" паттерн
-                # "Шалашов Евгений - Господин следователь 2" → "Господин следователь"
-                # Также: "Author - Series N. Title" (число не в конце, за ним ". Title")
-                if not series_candidate and ' - ' in file_name_for_fallback:
-                    match = re.match(r'^(.+?)\s*-\s*(.+?)\s+(?:\d{1,2}[-\u2013\u2014]\d{1,2}|\d{1,2}|[IVX]+)\s*$', file_name_for_fallback)
-                    if not match:
-                        # Попытка: "Author - Series N. Title"
-                        match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d{1,2}\.\s+.+$', file_name_for_fallback)
-                    if match:
-                        first_part = match.group(1).strip()
-                        series_part = match.group(2).strip()
-                        
-                        # Проверяем что первая часть это автор/авторы
-                        looks_like_author = (
-                            len(first_part) < 50 and
-                            not any(digit in first_part for digit in '0123456789')
-                        )
-                        
-                        if looks_like_author:
-                            _ftitle = (record.file_title or '').lower()
-                            _in_title = bool(_ftitle and series_part.lower() in _ftitle)
-                            # ИСКЛЮЧЕНИЕ: если кандидат стоит перед номером тома в имени файла
-                            # ("Королевство Костей и Терний 1. Терновый Король") →
-                            # это явная серия, даже если _in_title=False по другим причинам.
-                            _fn_stem_fb = Path(record.file_path).stem.lower().replace('ё', 'е')
-                            _sp_norm = series_part.lower().replace('ё', 'е')
-                            _is_numbered_in_fn = bool(re.search(
-                                re.escape(_sp_norm) + r'[\s.\-–—]+\d+(?:[\s.]|$)',
-                                _fn_stem_fb
-                            ))
-                            if (_is_numbered_in_fn or not _in_title) and self._is_valid_series(series_part, extracted_author=record.proposed_author):
-                                series_candidate = series_part
-            
-            if series_candidate:
-                # Из filename extraction найдена серия
-                record.extracted_series_candidate = series_candidate
-                clean = self._clean_series_name(
-                    series_candidate, 
-                    keep_trailing_number=self._last_was_hierarchical
-                )
-                # ✅ НОВОЕ: Удалить слова из blacklist вместо полного отвергания
-                clean = self._remove_blacklist_words(clean)
-                
-                if clean:  # Проверяем что что-то осталось после очистки
-                    author_for_validation = record.proposed_author or None
-                    
-                    if self._is_valid_series(clean, extracted_author=author_for_validation):
-                        # Исправляем грамматику русского языка (добавляем запятую перед "что")
-                        clean = self._fix_russian_grammar(clean)
-                        record.proposed_series = clean
-                        record.series_source = "filename"
-                        if (record.metadata_series and
-                                record.metadata_series.strip().lower() == clean.lower()):
-                            record.series_source = "filename+meta_confirmed"
-                        # Если иерархический root содержит trailing number, а metadata_series
-                        # совпадает с root БЕЗ числа — число является позицией книги, не частью
-                        # названия серии. Пример: «Север и Юг 01\Великая сага» + meta «Север и Юг»
-                        # → proposed_series = «Север и Юг» (иначе каждая книга в отдельной группе).
-                        if record.metadata_series and '\\' in (record.proposed_series or ''):
-                            _root_h, _sub_h = record.proposed_series.split('\\', 1)
-                            _root_h = _root_h.strip()
-                            _root_no_num = re.sub(r'\s+\d+\s*$', '', _root_h).strip()
-                            _meta_s = record.metadata_series.strip()
-                            if (_root_no_num and _root_no_num != _root_h and
-                                    _root_no_num.lower().replace('ё', 'е') ==
-                                    _meta_s.lower().replace('ё', 'е')):
-                                _sub_stripped = _sub_h.strip()
-                                _sub_is_num_only = bool(re.match(r'^\d+$', _sub_stripped))
-                                _sub_is_meta_dup = (_sub_stripped.lower().replace('ё', 'е') ==
-                                                    _meta_s.lower().replace('ё', 'е'))
-                                if _sub_is_num_only or _sub_is_meta_dup:
-                                    # Подсерия — чисто цифровая или дублирует metadata:
-                                    # «Север и Юг 01\12» или «Серия 1\Серия» → стираем до metadata
-                                    record.proposed_series = _meta_s
-                                    record.series_source = "filename+meta_confirmed"
-                                # else: подсерия — реальное название («Аспект-Император»);
-                                # оставляем proposed_series без изменений (с числом в root)
-            elif record.metadata_series:
-                # ✅ ЗАЩИТА: Перед использованием metadata - проверяем наличие слов из blacklist
-                # ТРЕБОВАНИЕ: "если мета содержит слово или слова из BL, полностью ее игнорируем в качестве значения"
-                # Пример: "Шедевры фантастики (продолжатели)" содержит "фантастики" → отклоняем целиком
-                # ВАЖНО: word-boundary matching, не substring — "попаданец" не должен блокировать
-                # легитимное "Попаданец в Дракона" является реальной серией
-                meta_lower = record.metadata_series.lower()
-                has_blacklist_word = False
-                for bl in self.filename_blacklist:
-                    bl_lower = bl.lower().strip()
-                    if not bl_lower:
-                        continue
-                    # Для коротких слов (≤3 символа) — word-boundary; для длинных — word-boundary тоже
-                    pat = r'(?<![а-яёa-z])' + re.escape(bl_lower) + r'(?![а-яёa-z])'
-                    if re.search(pat, meta_lower):
-                        has_blacklist_word = True
-                        break
-                
-                if has_blacklist_word:
-                    # metadata содержит слова из blacklist → игнорируем целиком, не используем как series
-                    pass
-                else:
-                    # ✅ ДОПОЛНИТЕЛЬНО: Проверяем целиком ли она в blacklist
-                    # Пример: "Современный фантастический боевик (АСТ)" → без "(АСТ)" = "Современный фантастический боевик"
-                    metadata_base = record.metadata_series.replace(' (АСТ)', '').replace('(АСТ)', '').strip()
-                    is_pure_blacklist = any(
-                        metadata_base.lower() == bl.lower() 
-                        for bl in self.filename_blacklist
-                    )
-                    
-                    if is_pure_blacklist:
-                        # Весь metadata это blacklist → пропускаем (series остаётся пустой)
-                        pass
-                    else:
-                        # Fallback к metadata - только если из filename ничего не нашли
-                        series = self._extract_series_from_metadata(record.metadata_series.strip())
-                        # Очищаем от скобочных суффиксов (автор в скобках, номера томов и т.п.)
-                        # Пример: "Путь (Михаил Игнатов)" → "Путь"
-                        series = self._clean_series_name(series)
-
-                        # ✅ Удалить слова из blacklist также из metadata серии
-                        series = self._remove_blacklist_words(series)
-                        
-                        author_for_validation = record.proposed_author or None
-                        if series and self._is_valid_series(series, extracted_author=author_for_validation):
-                            # Исправляем грамматику русского языка (добавляем запятую перед "что")
-                            series = self._fix_russian_grammar(series)
-                            record.proposed_series = series
-                            
-                            # 🔑 Папка уже была проверена выше. Если мы здесь → это просто metadata series (не совпадает с папкой)
-                            record.series_source = "metadata"
-        
+            self._process_single_record(record, _parts_cache)
         # 🔑 Многоавторные папки — коллекции, не серии.
         # Если папка содержит книги РАЗНЫХ авторов → её имя не является серией.
         self._clear_multiauthor_folder_series(records)
@@ -1358,6 +709,643 @@ class Pass2SeriesFilename:
                 n = int(_sm.group(1))
                 if n < 1900 and str(n) != (record.series_number or ''):
                     record.series_number = str(n)
+
+    def _process_single_record(self, record, parts_cache: dict) -> None:
+        """Обработать одну запись: определить серию из папки, filename или metadata."""
+        # Приоритет из config.json: FOLDER_STRUCTURE=3 > FILENAME=2 > FB2_METADATA=1
+        # Поиск по папкам применяется всегда, используя любой известный автор:
+        # proposed_author (из папки или файла) или metadata_authors (из FB2).
+        # Это гарантирует соблюдение приоритета независимо от author_source.
+        author_name = record.proposed_author or record.metadata_authors or None
+        if author_name:
+            path_parts = _parts_cache.get(record.file_path)
+            if path_parts is None:
+                raw = Path(record.file_path).parts
+                path_parts = tuple(
+                    p for i, p in enumerate(raw)
+                    if i == len(raw) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
+                )
+                _parts_cache[record.file_path] = path_parts
+
+            author_folder_idx = None
+            for i, part in enumerate(path_parts[:-1]):
+                if _is_strong_match(author_name, part):
+                    author_folder_idx = i
+                    break
+            if author_folder_idx is None:
+                for i, part in enumerate(path_parts[:-1]):
+                    if _author_matches_folder(author_name, part):
+                        author_folder_idx = i
+                        break
+
+            if author_folder_idx is not None:
+                i = author_folder_idx
+                part = path_parts[i]
+                # Папка подтвердила автора — если источник был только мета, обновляем
+                if record.author_source == "metadata":
+                    record.author_source = "metadata_folder_confirmed"
+
+                # Если VARIANT B уже установил серию из папки — не перезаписываем.
+                # Только обновление author_source выше допустимо.
+                if record.series_source in self._FOLDER_SOURCES and record.proposed_series:
+                    pass  # серия уже определена папочной структурой
+
+                # Найдена папка автора на позиции i
+                # Следующая папка (i+1) это серия (если это не файл)
+                elif i + 1 < len(path_parts) - 1:  # -1 чтобы исключить сам файл
+                    series_folder = path_parts[i + 1]
+                    if not series_folder.endswith('.fb2'):
+                        # Папка «Вне серий» / «Без серии» — явный признак отсутствия серии
+                        if is_no_series_folder(series_folder, self.no_series_names):
+                            record.proposed_series = ""
+                            record.series_source = "no_series_folder"
+
+                        # Если подпапка — это "вариант" / "альт. перевод" / "СИ" и т.п.,
+                        # она НЕ является названием серии — серия берётся из папки автора.
+                        elif self._is_variant_folder(series_folder):
+                            series_name = self._extract_series_from_folder_name(part)
+                            if series_name:
+                                record.proposed_series = series_name
+                                record.series_source = "folder_hierarchy"
+
+                        else:
+                            # Проверяем: папка-автор сама является циклом?
+                            # Признак: "Серия (Автор)" — _extract_series_from_folder_name вернёт
+                            # что-то отличное от исходного имени папки.
+                            # НО: если скобки содержат псевдоним/псевдоним автора
+                            # ("Гоблин (MeXXanik)") — это НЕ "Серия (Автор)", а папка автора.
+                            author_folder_series = self._extract_series_from_folder_name(part)
+                            _parens_match = re.search(r'\(([^)]+)\)\s*$', part)
+                            _parens_content = _parens_match.group(1).strip() if _parens_match else ''
+
+                            # Если скобки содержат "и др" / "et al" — это многоавторный хинт,
+                            # а НЕ дизамбигуатор автора: папка является серийной, не авторской.
+                            _ET_AL_RE = re.compile(
+                                r'(?:и\s+др\.?|и\s+другие|et\s+al\.?|and\s+others)\s*$',
+                                re.IGNORECASE
+                            )
+                            _is_multiauthor_hint = bool(_parens_content) and bool(_ET_AL_RE.search(_parens_content))
+
+                            _parens_is_author = (
+                                bool(_parens_content)
+                                and not _is_multiauthor_hint
+                                and _author_matches_folder(author_name, _parens_content)
+                            )
+                            has_parent_series = (
+                                bool(author_folder_series) and
+                                author_folder_series.strip().lower() != part.strip().lower() and
+                                not _parens_is_author
+                            )
+
+                            if has_parent_series:
+                                # Б) Иерархия: {цикл}\{Подсерия}
+                                # Убираем суффикс "(Автор)", но сохраняем:
+                                # - числовой префикс "N. " — порядковый номер подсерии
+                                # - скобочный суффикс с цифрами "(Хроники 7-8)" — глобальный контекст
+                                _par_m = re.search(r'\s*\(([^)]*)\)\s*$', series_folder)
+                                if _par_m and any(c.isdigit() for c in _par_m.group(1)):
+                                    # Содержит цифры — это контекст нумерации, не имя автора
+                                    subfolder_display = series_folder.strip()
+                                else:
+                                    subfolder_display = re.sub(r'\s*\([^)]*\)\s*$', '', series_folder).strip()
+                                record.proposed_series = f"{author_folder_series}\\{subfolder_display}"
+
+                                # Костыль для многоавторных папок: "Серия (Фамилия и др)" →
+                                # ищем полное имя в metadata и ставим "Фамилия Имя и другие".
+                                if _is_multiauthor_hint:
+                                    hint_surname = _ET_AL_RE.sub('', _parens_content).strip().rstrip(',').strip()
+                                    hint_lower = hint_surname.lower().replace('ё', 'е')
+                                    # Ищем полное нормализованное имя в proposed_author (уже "Фамилия Имя")
+                                    full_name = None
+                                    for pa_part in re.split(r'\s*,\s*', record.proposed_author or ''):
+                                        if any(hint_lower in w.lower().replace('ё', 'е') for w in pa_part.split()):
+                                            full_name = pa_part.strip()
+                                            break
+                                    # Fallback: поиск в metadata_authors
+                                    if not full_name:
+                                        for meta_a in re.split(r'[;,]', record.metadata_authors or ''):
+                                            meta_a = meta_a.strip()
+                                            if any(hint_lower in w.lower().replace('ё', 'е') for w in meta_a.split()):
+                                                full_name = meta_a
+                                                break
+                                    if full_name:
+                                        record.proposed_author = f"{full_name} и другие"
+                                        record.author_source = 'folder_multiauthor'
+                            else:
+                                # Обычная папка автора → серия из папки i+1
+                                # Если есть ещё папка i+2 (подсерия) — строим "Серия\Подсерия",
+                                # сохраняя числовой префикс "N." в имени подсерии (порядок внутри серии).
+                                if i + 2 < len(path_parts) - 1:
+                                    parent_series_name = self._extract_series_from_folder_name(series_folder, record.proposed_author or '')
+                                    subseries_folder = path_parts[i + 2]
+                                    record.proposed_series = f"{parent_series_name or series_folder}\\{subseries_folder}"
+                                else:
+                                    subseries_name = self._extract_series_from_folder_name(series_folder, record.proposed_author or '')
+                                    record.proposed_series = subseries_name or series_folder
+
+                            record.series_source = "folder_hierarchy"
+                elif not (record.series_source in self._FOLDER_SOURCES and record.proposed_series):
+                    # Папка i содержит автора И является папкой серии одновременно
+                    # (формат: "Сборник\Серия (Автор)\Файл.fb2" — нет подпапки серии)
+                    # Папка имеет ВЫСШИЙ приоритет. Но если metadata_series — вариация
+                    # того же названия (напр. "Барраярский цикл" и "Барраяр"), то
+                    # сохраняем более точное название из FB2 тегов.
+
+                    # ЗАЩИТА: "Издательская папка с фамилией" — папка вида
+                    # "Fanzon. Наш выбор. Куанг" содержит фамилию автора как ПОСЛЕДНЕЕ слово.
+                    # Такие папки — организационные, а не серийные.
+                    # Серию ищем сначала по имени файла, мета только подтверждает.
+                    # ИСКЛЮЧЕНИЕ: "Серия (Автор)" — фамилия в скобках является лишь дизамбигуатором,
+                    # такая папка — это серия; проверяем только хвост БЕЗ скобок.
+                    _part_no_parens = re.sub(r'\s*\([^)]*\)\s*$', '', part.strip()).strip()
+                    _part_words = re.split(r'[\s.\-]+', _part_no_parens) if _part_no_parens else re.split(r'[\s.\-]+', part.strip())
+                    _part_last_word = _part_words[-1].lower().replace('ё', 'е') if _part_words else ''
+                    _author_name_clean = re.sub(r'\([^)]*\)', '', author_name).strip()
+                    _author_words = set(w.lower().replace('ё', 'е') for w in _author_name_clean.split() if len(w) > 2)
+                    # Check if ANY word in the folder (>2 chars) matches an author word.
+                    # This covers "Таннер А" where the FIRST word "Таннер" is the surname,
+                    # not just the last word (the old check only caught endings like "Куанг").
+                    # Also handles inflected forms: "Киза" matches author word "Киз" via startswith.
+                    _folder_contains_author = any(
+                        any(
+                            fw == aw or fw.startswith(aw) or aw.startswith(fw)
+                            for aw in _author_words
+                        )
+                        for fw in (w.lower().replace('ё', 'е') for w in _part_words if len(w) > 2)
+                    )
+                    # Также проверяем скобочный суффикс папки: если автор совпадает
+                    # с тем что в скобках — это папка "Серия (Автор)", не серия.
+                    # Пример: папка "Орлов Алекс (Дарищев Вадим)", автор "Дарищев Вадим"
+                    # → _part_words = ["Орлов", "Алекс"], author_words не совпадут,
+                    # но в скобках "Дарищев Вадим" == author → тоже авторская папка.
+                    if not _folder_contains_author:
+                        _parens_in_part = re.search(r'\(([^)]+)\)', part)
+                        if _parens_in_part:
+                            _parens_words = set(
+                                w.lower().replace('ё', 'е')
+                                for w in _parens_in_part.group(1).split()
+                                if len(w) > 2
+                            )
+                            if _parens_words & _author_words:
+                                _folder_contains_author = True
+
+                    if _folder_contains_author:
+                        pass  # Не устанавливаем серию из папки → идём дальше к filename extraction
+                    else:
+                        series_name = self._extract_series_from_folder_name(part)
+                        if series_name:
+                            if record.metadata_series:
+                                meta_l = record.metadata_series.lower().replace('ё', 'е')
+                                folder_l = series_name.lower().replace('ё', 'е')
+                                # Если одно является префиксом другого — это одна серия,
+                                # просто разные формы названия → оставляем более точную.
+                                if not (folder_l.startswith(meta_l) or meta_l.startswith(folder_l)):
+                                    # Разные названия → папка имеет высший приоритет
+                                    record.proposed_series = series_name
+                                    record.series_source = "folder_hierarchy"
+                                else:
+                                    # Та же серия, разная форма.
+                                    # Если meta_l начинается с folder_l → мета добавляет лишнее
+                                    # (напр. "Ацтек (RedDetonator)" vs "Ацтек") → берём folder_name.
+                                    # Если folder_l начинается с meta_l → папка добавляет описание
+                                    # (напр. "Барраярский цикл" vs "Барраяр") → берём мету.
+                                    if meta_l.startswith(folder_l) and len(meta_l) > len(folder_l):
+                                        record.proposed_series = series_name
+                                    else:
+                                        record.proposed_series = record.metadata_series
+                                    record.series_source = "folder_metadata_confirmed"
+                            else:
+                                record.proposed_series = series_name
+                                record.series_source = "folder_hierarchy"
+        
+        # Special case: depth==4 without series subfolder
+        # Pass 1 wrongly sets folder_dataset for depth==4, allowing Pass 2 to override it
+        file_depth = len(Path(record.file_path).parts)
+        # Учитываём если в пути есть extension-папки (они прозрачны, не считаются как уровень)
+        raw_parts = Path(record.file_path).parts
+        file_depth = len(tuple(
+            p for i, p in enumerate(raw_parts)
+            if i == len(raw_parts) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
+        ))
+        is_depth4_without_real_series = (
+            file_depth == 4 and 
+            record.series_source == "folder_dataset"
+        )
+        
+        # Общая проверка: если серия из папки (любого типа) попала в publisher-blacklist →
+        # сбросить и дать шанс filename extraction, затем metadata как финальный fallback.
+        # Используем word-boundary regex чтобы "СИ" не совпадало с "Русич" и т.п.
+        # ИСКЛЮЧЕНИЕ: folder_dataset и folder_hierarchy — это имена реальных папок,
+        # созданных пользователем; они авторитетны и blacklist к ним не применяем.
+        if record.proposed_series and self.filename_blacklist and \
+                record.series_source not in self._FOLDER_SOURCES:
+            _fs_lower = record.proposed_series.lower().replace('ё', 'е')
+            _folder_series_bl = False
+            for _bl in self.filename_blacklist:
+                _bl_l = _bl.lower().replace('ё', 'е').strip()
+                if not _bl_l:
+                    continue
+                _pat = r'(?<![а-яёa-z\w])' + re.escape(_bl_l) + r'(?![а-яёa-z\w])'
+                if re.search(_pat, _fs_lower):
+                    _folder_series_bl = True
+                    break
+            if _folder_series_bl:
+                record.proposed_series = ''
+                record.series_source = ''
+        if record.series_source == "folder_dataset" and not is_depth4_without_real_series:
+            if record.proposed_series:
+                return  # Папка дала series (кроме depth==4 ошибки)
+
+        if record.series_source == "folder_hierarchy":
+            return  # Иерархия папок определила серию - готово!
+
+        if record.series_source == "no_series_folder":
+            return  # Папка «Вне серий» — серии нет, дальше не ищем
+
+        if record.proposed_series and not is_depth4_without_real_series:
+            return  # Серия уже установлена (кроме depth==4 ошибки)
+        
+        # ОБЯЗАТЕЛЬНО пробуемы паттерны (глубина НЕ влияет!)
+        # Если series уже установлена из папок → пропускаем extraction
+        # Но если folder_dataset дал пустую серию — продолжаем extraction из filename
+        if record.series_source == "folder_dataset" and record.proposed_series:
+            return  # Folder extraction already set hierarchical series
+
+        # Если папка НЕ дала series → пробуем extraction из filename
+        series_candidate = self._extract_series_from_filename(
+            record.file_path, validate=False, metadata_series=record.metadata_series
+        )
+
+        if series_candidate:
+            # Базовые фильтры (НЕ валидация) — ДО записи в extracted_series_candidate
+            # Запятая-разделитель авторов стоит перед словом с заглавной буквы
+            # ("Иванов, Петров"), грамматическая — перед строчной ("Игрок, забравшийся").
+            if ',' in series_candidate:
+                # ИСКЛЮЧЕНИЕ: если кандидат совпадает с metadata_series →
+                # запятая является частью настоящего названия серии ("Мы, Мигель Мартинес")
+                _meta_lc = record.metadata_series.strip().lower().replace('ё', 'е') if record.metadata_series else ''
+                _cand_lc = series_candidate.lower().replace('ё', 'е')
+                # Для иерархической серии «Корень\Подсерия» также проверяем
+                # совпадение подсерии с metadata (Остен Ард 1\Память, Скорбь и Шип)
+                _sub_lc = _cand_lc.split(chr(92), 1)[1] if chr(92) in _cand_lc else ''
+                _meta_confirms_comma = bool(_meta_lc and (
+                    _cand_lc == _meta_lc or _sub_lc == _meta_lc
+                ))
+                if not _meta_confirms_comma:
+                    # Считаем это списком авторов только если после каждой запятой
+                    # идёт слово с заглавной буквы (или инициал)
+                    parts_after_comma = [p.strip() for p in series_candidate.split(',')[1:]]
+                    all_capitalized = all(
+                        p and (p[0].isupper() or (len(p) >= 2 and p[1] == '.'))
+                        for p in parts_after_comma
+                    )
+                    if all_capitalized:
+                        series_candidate = None  # Список авторов
+            # ВАЖНО: проверки ниже — независимые (не elif), чтобы срабатывать
+            # даже когда кандидат прошёл comma-check (например "о том, как")
+            if series_candidate and self._is_author_surname(series_candidate, record.proposed_author):
+                            series_candidate = None  # Фамилия или полное имя автора
+            if series_candidate and record.file_title:
+                # TITLE-AS-SERIES GUARD: если кандидат совпадает с названием книги,
+                # это ложный матч (например "Книга" в service_words увела нас не туда).
+                # Очищаем file_title от мусора [litres] и сравниваем.
+                import re as _re
+                _title_clean = _re.sub(r'\s*\[.*?\]\s*$', '', record.file_title.strip())
+                # Также убрать (ЛП), (альт. перевод) и т.п. скобочные суффиксы
+                _title_no_parens = _re.sub(r'\s*\([^)]*\)\s*$', '', _title_clean).strip()
+                # Нормализуем кандидата: убираем ведущий пунктуационный мусор ("- Траун" → "Траун"),
+                # чтобы title-collision guard правильно сравнивал с заголовком книги.
+                _cand_for_guard = _re.sub(r'^[\-–—\s]+', '', series_candidate).strip()
+                _cand_lower = _cand_for_guard.lower()
+                _title_lower = _title_clean.lower()
+                _title_np_lower = _title_no_parens.lower()
+                # Прямое совпадение ИЛИ кандидат является началом названия книги
+                # (ловит обрезанные кандидаты типа "Спасение (альт" от "Спасение (альт. перевод)")
+                # ИЛИ кандидат начинается с базового названия (без скобок) — "спасение (альт" startswith "спасение"
+                # ИСКЛЮЧЕНИЕ 1: если кандидат совпадает с metadata_series → это подтверждённая серия,
+                # название книги просто совпадает (1-я книга серии называется так же, как серия)
+                # ИСКЛЮЧЕНИЕ 2: если кандидат явно присутствует в скобках в имени файла —
+                # "(Серый. Трилогия)" → серия "Серый" надёжна даже если title="Серый"
+                # ИСКЛЮЧЕНИЕ 3: если в имени файла кандидат стоит перед номером тома
+                # "Чисто шведские убийства 1. Отпуск в раю" → кандидат явно является серией,
+                # даже если file_title тоже начинается с него (1-я книга = имя серии + подзаголовок)
+                _meta_raw = (record.metadata_series or '').replace('\u2026', '...')
+                _meta_lower = _meta_raw.lower().replace('ё', 'е') if _meta_raw else ''
+                _cand_lower_norm = _cand_lower.replace('ё', 'е').replace('\u2026', '...')
+                _is_confirmed_by_meta = bool(_meta_lower and _cand_lower_norm == _meta_lower)
+                # ИСКЛЮЧЕНИЕ: кандидат является ПРЕФИКСОМ metadata_series
+                # "Воронцов" → metadata "Воронцов. Перезагрузка" → кандидат реальная серия,
+                # title просто начинается с первого слова серии.
+                _is_meta_prefix = bool(
+                    _meta_lower and not _is_confirmed_by_meta and
+                    (_meta_lower.startswith(_cand_lower_norm + '.') or
+                     _meta_lower.startswith(_cand_lower_norm + ' '))
+                )
+                # ИСКЛЮЧЕНИЕ: кандидат = metadata_series + суффикс из служебных слов
+                # "Честное пионерское! Часть" → meta "Честное пионерское!" → кандидат начинается
+                # с подтверждённой серии, хвост — только мусор/служебные слова.
+                # Проверяем: candidates начинается с meta И хвост = только \W + цифры/SW-слова.
+                _is_meta_with_service_suffix = bool(
+                    _meta_lower and not _is_confirmed_by_meta and not _is_meta_prefix and
+                    _cand_lower_norm.startswith(_meta_lower) and
+                    _re.match(r'^[\W\s]*(|(\w+\s*)+)$',
+                              _cand_lower_norm[len(_meta_lower):].strip())
+                    and all(
+                        w in self.service_words or w.isdigit()
+                        for w in _cand_lower_norm[len(_meta_lower):].split()
+                        if w.isalpha()
+                    )
+                )
+                _fn_stem_lower = Path(record.file_path).stem.lower()
+                _is_in_parens = bool(_re.search(r'\(\s*' + _re.escape(_cand_lower), _fn_stem_lower))
+                # ИСКЛЮЧЕНИЕ 4: серия получена блок-матчером с score=1.0 И подтверждена metadata_series.
+                # Только с metadata-подтверждением: title совпадает с серией у omnibus или 1-й книги.
+                # Без metadata — блок-матчер мог дать score=1.0 из-за Author→Series coercion,
+                # а настоящий title книги случайно совпадает с кандидатом — гарду надо сработать.
+                # metadata_series считается подтверждением только если она НЕ в blacklist.
+                # Если metadata — издательский ярлык (напр. «МИФ Проза»), он мог быть
+                # очищен внутри block-matcher, но record.metadata_series всё ещё не пустая.
+                # В таком случае confidence не оправдана — guard должен сработать.
+                _meta_is_bl = False
+                if record.metadata_series and self.filename_blacklist:
+                    _ml = record.metadata_series.lower().replace('ё', 'е')
+                    _meta_is_bl = any(
+                        bl.lower().replace('ё', 'е') in _ml
+                        for bl in self.filename_blacklist if bl
+                    )
+                _is_block_matcher_confident = (getattr(self, '_last_from_block_matcher', False)
+                                               and bool(record.metadata_series)
+                                               and not _meta_is_bl)
+                # Кандидат + номер в имени файла: "... - Серия N." или "... - Серия N "
+                _is_numbered_series = bool(_re.search(
+                    _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.\-–—]+\d+(?:[\s.]|$)',
+                    _fn_stem_lower.replace('ё', 'е')
+                ))
+                if not _is_confirmed_by_meta and not _is_meta_prefix and not _is_meta_with_service_suffix and not _is_in_parens and not _is_numbered_series and not _is_block_matcher_confident and (
+                   (_title_lower and _cand_lower == _title_lower) or \
+                   (_title_np_lower and _cand_lower == _title_np_lower) or \
+                   (_title_lower and _title_lower.startswith(_cand_lower) and len(_cand_lower) >= 4) or \
+                   # ИСКЛЮЧЕНИЕ: однословный кандидат без подтверждённой metadata_series,
+                   # а заголовок начинается с этого слова → это первое слово заголовка, не серия.
+                   # Пример: "Куонг Валери Тонг - Бей. Беги. Замри" → candidate="Бей", title="Бей. Беги. Замри"
+                   (not record.metadata_series and
+                    ' ' not in _cand_lower and
+                    _title_lower and _title_lower.startswith(_cand_lower)) or \
+                   (_title_np_lower and len(_title_np_lower) >= 4 and _cand_lower.startswith(_title_np_lower)) or \
+                   # ИСКЛЮЧЕНИЕ guard: кандидат является хвостом заголовка (subtitle-суффикс).
+                   # Пример: candidate="Правдивая история о том, как студентка исчезла у всех на виду"
+                   # title="Пропавшая: Исчезновение Лорен Спирер. Правдивая история..."
+                   # → title.endswith(candidate) → это подзаголовок, не серия.
+                   (_title_lower and _title_lower.endswith(_cand_lower) and len(_cand_lower) >= 10) or \
+                   # ИСКЛЮЧЕНИЕ guard: кандидат является подстрокой заголовка (фрагмент в середине).
+                   # Пример: candidate="Рязань, год" (блок из "Время умирать. Рязань, год 1237")
+                   # title="Время умирать. Рязань, год 1237" → candidate in title → не серия.
+                   (_title_lower and _cand_lower in _title_lower and len(_cand_lower) >= 8)):
+                                    series_candidate = None  # Название книги ≠ серия
+
+            # Сохраняем только если прошёл фильтры (иначе Pass4 может распространить имя автора)
+            if series_candidate:
+                record.extracted_series_candidate = series_candidate
+
+        # Если прошел базовые фильтры → валидация
+        if series_candidate:
+            clean = self._clean_series_name(
+                series_candidate,
+                keep_trailing_number=self._last_was_hierarchical
+            )
+
+            # ✅ НОВОЕ: Удалить слова из blacklist вместо полного отвергания
+            clean = self._remove_blacklist_words(clean)
+
+            # Guard: если _clean_series_name отстрипала служебное слово (напр. "трилогия"),
+            # а metadata_series подтверждает полное название — восстанавливаем из metadata.
+            # Условие: clean является префиксом metadata_series И кандидат начинался с metadata_series.
+            if clean and record.metadata_series:
+                _nyo = _nfc_lower_yo
+                _meta = record.metadata_series.strip()
+                if (_nyo(_meta).startswith(_nyo(clean) + ' ')
+                        and _nyo(series_candidate).startswith(_nyo(_meta))):
+                    clean = _meta
+
+            if clean:  # Проверяем что что-то осталось после очистки
+                author_for_validation = record.proposed_author or None
+
+                if self._is_valid_series(clean, extracted_author=author_for_validation):
+                    # Мета используется ТОЛЬКО для подтверждения серии из имени файла,
+                    # но НЕ для её расширения. Если из файла извлечено "Чингисхан",
+                    # а мета говорит "Чингисхан. Хроники завоевателя" — оставляем "Чингисхан".
+                    # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                    clean = self._fix_russian_grammar(clean)
+                    record.proposed_series = clean
+                    record.series_source = "filename"
+                    if (record.metadata_series and
+                            record.metadata_series.strip().lower() == clean.lower()):
+                        record.series_source = "filename+meta_confirmed"
+                    # Если иерархический root содержит trailing number, а metadata_series
+                    # совпадает с root БЕЗ числа — число является позицией книги, не частью
+                    # названия серии. Пример: «Север и Юг 01\Великая сага» + meta «Север и Юг»
+                    # → proposed_series = «Север и Юг» (иначе каждая книга в отдельной группе).
+                    if record.metadata_series and '\\' in (record.proposed_series or ''):
+                        _root_h, _sub_h = record.proposed_series.split('\\', 1)
+                        _root_h = _root_h.strip()
+                        _root_no_num = re.sub(r'\s+\d+\s*$', '', _root_h).strip()
+                        _meta_s = record.metadata_series.strip()
+                        if (_root_no_num and _root_no_num != _root_h and
+                                _root_no_num.lower().replace('ё', 'е') ==
+                                _meta_s.lower().replace('ё', 'е')):
+                            _sub_stripped = _sub_h.strip()
+                            _sub_is_num_only = bool(re.match(r'^\d+$', _sub_stripped))
+                            _sub_is_meta_dup = (_sub_stripped.lower().replace('ё', 'е') ==
+                                                _meta_s.lower().replace('ё', 'е'))
+                            if _sub_is_num_only or _sub_is_meta_dup:
+                                # Подсерия — чисто цифровая или дублирует metadata:
+                                # «Север и Юг 01\12» или «Серия 1\Серия» → стираем до metadata
+                                record.proposed_series = _meta_s
+                                record.series_source = "filename+meta_confirmed"
+                            # else: подсерия — реальное название («Аспект-Император»);
+                            # оставляем proposed_series без изменений (с числом в root)
+                    return
+
+        # Fallback: metadata ТОЛЬКО если паттерны не дали
+        if not series_candidate:
+            file_name = Path(record.file_path).stem  # Имя без расширения
+            
+            # ✅ ВАЖНО: Удалить метатеги из конца чтобы fallback правила работали!
+            # "(СИ)" - Самиздат/Интернет
+            # "(ЛП)" - Лицензионное произведение
+            file_name_for_fallback = re.sub(r'\s*\([СЛ]И\)\s*$', '', file_name).strip()
+            
+            # Перед fallback к metadata попробуем простое правило: Author. Series RomanNumeral
+            # "Яманов Александр. Бесноватый Цесаревич I.fb2" → "Бесноватый Цесаревич"
+            if '. ' in file_name_for_fallback:
+                parts = file_name_for_fallback.split('. ', 1)
+                if len(parts) == 2:
+                    first_part = parts[0].strip()
+                    second_part = parts[1].strip()
+                    
+                    # Проверяем что первая часть это автор (< 50 символов, без цифр)
+                    looks_like_author = (
+                        len(first_part) < 50 and
+                        not any(digit in first_part for digit in '0123456789')
+                    )
+                    
+                    if looks_like_author:
+                        # Убрать аннотацию в скобках с конца перед матчингом диапазона:
+                        # "Маршал 1-9 (без иллюстраций)" → "Маршал 1-9"
+                        second_part_bare = re.sub(r'\s*\([^)]*\)\s*$', '', second_part).strip()
+                        # Убрать год-суффикс (1900–2099) — не должен трактоваться как номер тома:
+                        # "Том Ⅰ - 2022" → "Том Ⅰ"  /  "Серия 1 2023" → "Серия 1"
+                        second_part_bare = re.sub(r'(?:\s*[-–—])?\s*(?:19|20)\d{2}\s*$', '', second_part_bare).strip()
+                        # Диапазон N-M: "Совок 1-5", "Попаданец в Дракона 1-8"
+                        match = re.search(r'^(.+?)\s+\d+[-\u2013\u2014]\d+\s*$', second_part_bare)
+                        is_range_match = bool(match)
+                        if not match:
+                            # Одиночное арабское число 1–2 цифры: "Охотник 1", "Серия 12"
+                            # 3+ цифры (888, 1234) — номер дела/произведения, не том серии.
+                            match = re.search(r'^(.+?)\s+\d{1,2}\s*$', second_part_bare)
+                        if not match:
+                            # Римские цифры: "Бесноватый Цесаревич I"
+                            match = re.search(r'^(.+?)\s+[IVX]+\s*$', second_part_bare)
+                        if match:
+                            simple_series = match.group(1).strip()
+                            _ftitle = (record.file_title or '').lower()
+                            # Диапазон N-M в имени файла — однозначный признак серии,
+                            # даже если название совпадает с заголовком книги.
+                            # Пример: "Хакер 1-2.fb2", file_title="Хакер" → серия "Хакер" корректна.
+                            _in_title = (not is_range_match and
+                                         bool(_ftitle and simple_series.lower() in _ftitle))
+                            if not _in_title and self._is_valid_series(simple_series, extracted_author=record.proposed_author):
+                                series_candidate = simple_series
+            
+            # ✅ НОВОЕ: Попробуем "Author - Series NUM или N-M" паттерн
+            # "Шалашов Евгений - Господин следователь 2" → "Господин следователь"
+            # Также: "Author - Series N. Title" (число не в конце, за ним ". Title")
+            if not series_candidate and ' - ' in file_name_for_fallback:
+                match = re.match(r'^(.+?)\s*-\s*(.+?)\s+(?:\d{1,2}[-\u2013\u2014]\d{1,2}|\d{1,2}|[IVX]+)\s*$', file_name_for_fallback)
+                if not match:
+                    # Попытка: "Author - Series N. Title"
+                    match = re.match(r'^(.+?)\s*-\s*(.+?)\s+\d{1,2}\.\s+.+$', file_name_for_fallback)
+                if match:
+                    first_part = match.group(1).strip()
+                    series_part = match.group(2).strip()
+                    
+                    # Проверяем что первая часть это автор/авторы
+                    looks_like_author = (
+                        len(first_part) < 50 and
+                        not any(digit in first_part for digit in '0123456789')
+                    )
+                    
+                    if looks_like_author:
+                        _ftitle = (record.file_title or '').lower()
+                        _in_title = bool(_ftitle and series_part.lower() in _ftitle)
+                        # ИСКЛЮЧЕНИЕ: если кандидат стоит перед номером тома в имени файла
+                        # ("Королевство Костей и Терний 1. Терновый Король") →
+                        # это явная серия, даже если _in_title=False по другим причинам.
+                        _fn_stem_fb = Path(record.file_path).stem.lower().replace('ё', 'е')
+                        _sp_norm = series_part.lower().replace('ё', 'е')
+                        _is_numbered_in_fn = bool(re.search(
+                            re.escape(_sp_norm) + r'[\s.\-–—]+\d+(?:[\s.]|$)',
+                            _fn_stem_fb
+                        ))
+                        if (_is_numbered_in_fn or not _in_title) and self._is_valid_series(series_part, extracted_author=record.proposed_author):
+                            series_candidate = series_part
+        
+        if series_candidate:
+            # Из filename extraction найдена серия
+            record.extracted_series_candidate = series_candidate
+            clean = self._clean_series_name(
+                series_candidate, 
+                keep_trailing_number=self._last_was_hierarchical
+            )
+            # ✅ НОВОЕ: Удалить слова из blacklist вместо полного отвергания
+            clean = self._remove_blacklist_words(clean)
+            
+            if clean:  # Проверяем что что-то осталось после очистки
+                author_for_validation = record.proposed_author or None
+                
+                if self._is_valid_series(clean, extracted_author=author_for_validation):
+                    # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                    clean = self._fix_russian_grammar(clean)
+                    record.proposed_series = clean
+                    record.series_source = "filename"
+                    if (record.metadata_series and
+                            record.metadata_series.strip().lower() == clean.lower()):
+                        record.series_source = "filename+meta_confirmed"
+                    # Если иерархический root содержит trailing number, а metadata_series
+                    # совпадает с root БЕЗ числа — число является позицией книги, не частью
+                    # названия серии. Пример: «Север и Юг 01\Великая сага» + meta «Север и Юг»
+                    # → proposed_series = «Север и Юг» (иначе каждая книга в отдельной группе).
+                    if record.metadata_series and '\\' in (record.proposed_series or ''):
+                        _root_h, _sub_h = record.proposed_series.split('\\', 1)
+                        _root_h = _root_h.strip()
+                        _root_no_num = re.sub(r'\s+\d+\s*$', '', _root_h).strip()
+                        _meta_s = record.metadata_series.strip()
+                        if (_root_no_num and _root_no_num != _root_h and
+                                _root_no_num.lower().replace('ё', 'е') ==
+                                _meta_s.lower().replace('ё', 'е')):
+                            _sub_stripped = _sub_h.strip()
+                            _sub_is_num_only = bool(re.match(r'^\d+$', _sub_stripped))
+                            _sub_is_meta_dup = (_sub_stripped.lower().replace('ё', 'е') ==
+                                                _meta_s.lower().replace('ё', 'е'))
+                            if _sub_is_num_only or _sub_is_meta_dup:
+                                # Подсерия — чисто цифровая или дублирует metadata:
+                                # «Север и Юг 01\12» или «Серия 1\Серия» → стираем до metadata
+                                record.proposed_series = _meta_s
+                                record.series_source = "filename+meta_confirmed"
+                            # else: подсерия — реальное название («Аспект-Император»);
+                            # оставляем proposed_series без изменений (с числом в root)
+        elif record.metadata_series:
+            # ✅ ЗАЩИТА: Перед использованием metadata - проверяем наличие слов из blacklist
+            # ТРЕБОВАНИЕ: "если мета содержит слово или слова из BL, полностью ее игнорируем в качестве значения"
+            # Пример: "Шедевры фантастики (продолжатели)" содержит "фантастики" → отклоняем целиком
+            # ВАЖНО: word-boundary matching, не substring — "попаданец" не должен блокировать
+            # легитимное "Попаданец в Дракона" является реальной серией
+            meta_lower = record.metadata_series.lower()
+            has_blacklist_word = False
+            for bl in self.filename_blacklist:
+                bl_lower = bl.lower().strip()
+                if not bl_lower:
+                    continue
+                # Для коротких слов (≤3 символа) — word-boundary; для длинных — word-boundary тоже
+                pat = r'(?<![а-яёa-z])' + re.escape(bl_lower) + r'(?![а-яёa-z])'
+                if re.search(pat, meta_lower):
+                    has_blacklist_word = True
+                    break
+            
+            if has_blacklist_word:
+                # metadata содержит слова из blacklist → игнорируем целиком, не используем как series
+                pass
+            else:
+                # ✅ ДОПОЛНИТЕЛЬНО: Проверяем целиком ли она в blacklist
+                # Пример: "Современный фантастический боевик (АСТ)" → без "(АСТ)" = "Современный фантастический боевик"
+                metadata_base = record.metadata_series.replace(' (АСТ)', '').replace('(АСТ)', '').strip()
+                is_pure_blacklist = any(
+                    metadata_base.lower() == bl.lower() 
+                    for bl in self.filename_blacklist
+                )
+                
+                if is_pure_blacklist:
+                    # Весь metadata это blacklist → пропускаем (series остаётся пустой)
+                    pass
+                else:
+                    # Fallback к metadata - только если из filename ничего не нашли
+                    series = self._extract_series_from_metadata(record.metadata_series.strip())
+                    # Очищаем от скобочных суффиксов (автор в скобках, номера томов и т.п.)
+                    # Пример: "Путь (Михаил Игнатов)" → "Путь"
+                    series = self._clean_series_name(series)
+
+                    # ✅ Удалить слова из blacklist также из metadata серии
+                    series = self._remove_blacklist_words(series)
+                    
+                    author_for_validation = record.proposed_author or None
+                    if series and self._is_valid_series(series, extracted_author=author_for_validation):
+                        # Исправляем грамматику русского языка (добавляем запятую перед "что")
+                        series = self._fix_russian_grammar(series)
+                        record.proposed_series = series
+                        
+                        # 🔑 Папка уже была проверена выше. Если мы здесь → это просто metadata series (не совпадает с папкой)
+                        record.series_source = "metadata"
+        
 
     def _detect_named_arcs(self, records: List[BookRecord]) -> None:
         """Обнаружить именованные дуги в серии и создать подсерии через '\\'.
