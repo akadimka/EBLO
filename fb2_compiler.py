@@ -2885,7 +2885,25 @@ class FB2CompilerService:
             )
 
         binary_section = ('\n' + '\n'.join(binaries)) if binaries else ''
-        return description + toc_body + '\n'.join(body_parts) + binary_section + '\n</FictionBook>\n'
+        raw = description + toc_body + '\n'.join(body_parts) + binary_section + '\n</FictionBook>\n'
+        return self._pretty_xml(raw)
+
+    @staticmethod
+    def _pretty_xml(xml_str: str) -> str:
+        """Форматировать XML с отступами через minidom. Сохраняет UTF-8 декларацию."""
+        import xml.dom.minidom as _minidom
+        try:
+            dom = _minidom.parseString(xml_str.encode('utf-8'))
+            pretty = dom.toprettyxml(indent='  ', encoding=None)
+            # toprettyxml добавляет свою декларацию — убираем её (у нас уже есть нужная)
+            lines = pretty.splitlines()
+            if lines and lines[0].startswith('<?xml'):
+                lines = lines[1:]
+            # Убираем пустые строки, которые minidom вставляет между узлами
+            lines = [l for l in lines if l.strip()]
+            return '<?xml version="1.0" encoding="utf-8"?>\n' + '\n'.join(lines) + '\n'
+        except Exception:
+            return xml_str
 
     # ------------------------------------------------------------------
     # Удаление исходников
