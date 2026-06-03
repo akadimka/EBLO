@@ -69,6 +69,7 @@ try:
     from synchronization import SynchronizationService
 
     from fb2_utils import fb2_rglob, fb2_count as _fb2_count
+    from archiving_service import archive_fb2_files
 
 except Exception as e:
     from .genres_manager import GenresManager
@@ -724,37 +725,12 @@ class MainWindow(tk.Tk):
         self.logger.log(f'Начато архивирование: {library_path} ({len(fb2_files)} файлов)')
 
         def _archive_worker():
-            import zipfile as _zipfile
-            done = 0
-            errors = []
-            total = len(fb2_files)
-            size_before = 0
-            size_after = 0
-            for idx, fb2_path in enumerate(fb2_files, 1):
-                try:
-                    fb2_size = fb2_path.stat().st_size
-                    zip_path = fb2_path.with_name(fb2_path.name + '.zip')
-                    # Имя внутри архива — только имя файла (без пути)
-                    with _zipfile.ZipFile(
-                        zip_path, 'w',
-                        compression=_zipfile.ZIP_DEFLATED,
-                        compresslevel=6
-                    ) as zf:
-                        zf.write(fb2_path, arcname=fb2_path.name)
-                    zip_size = zip_path.stat().st_size
-                    fb2_path.unlink()
-                    done += 1
-                    size_before += fb2_size
-                    size_after += zip_size
-                except Exception as e:
-                    errors.append(f'{fb2_path.name}: {e}')
+            def _on_progress(n, t, pct):
+                self.after(0, lambda n=n, t=t, p=pct:
+                    self.progress_var.set(f'Архивирование... {n}/{t} ({p}%)'))
 
-                if idx % 50 == 0 or idx == total:
-                    pct = int(idx * 100 / total)
-                    self.after(0, lambda n=idx, t=total, p=pct:
-                        self.progress_var.set(f'Архивирование... {n}/{t} ({p}%)'))
-
-            self.after(0, lambda: _finish(done, errors, total, size_before, size_after))
+            result = archive_fb2_files(fb2_files, on_progress=_on_progress)
+            self.after(0, lambda: _finish(**result))
 
         def _finish(done, errors, total, size_before, size_after):
             def _fmt(b):
