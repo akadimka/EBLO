@@ -2588,8 +2588,11 @@ class FB2CompilerService:
                 suffix = self._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes, use_parts=True)
             else:
                 suffix = self._series_suffix(n_volumes, top_lo, top_hi, part_count)
-            # Реальный диапазон томов для <sequence number> в метаданных
-            _vol_range = (f'{top_lo}' if top_lo == top_hi else f'{top_lo}-{top_hi}') if top_lo else None
+            # Реальный диапазон томов для <sequence number> в метаданных.
+            # top_lo=0 означает что сортировка через sort_key[2] (подсерии без числа в корне).
+            _eff_lo = top_lo if top_lo else 1
+            _eff_hi = top_hi if top_hi else _eff_lo
+            _vol_range = f'{_eff_lo}' if _eff_lo == _eff_hi else f'{_eff_lo}-{_eff_hi}'
             output_xml = self._build_fb2(
                 author=group.author,
                 series=clean_series,
