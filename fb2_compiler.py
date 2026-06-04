@@ -1242,6 +1242,20 @@ class FB2CompilerService:
             ):
                 return 0, 0
 
+        # Критерий 0: суффикс «(т. N-M)» / «(ч. N-M)» в stem — наш собственный формат
+        # скомпилированного файла. Проверяем первым, т.к. дальнейший поиск диапазона
+        # обрезается по точке в «т.» и не находит "N-M".
+        _SUFFIX_RANGE_RE = re.compile(
+            r'\((?:т|ч|том|часть|vol|book)\.?\s*(\d+)\s*[-–—]\s*(\d+)\s*\)',
+            re.IGNORECASE | re.UNICODE,
+        )
+        _stem_val_early = book.abs_path.stem
+        _sm = _SUFFIX_RANGE_RE.search(_stem_val_early)
+        if _sm and _has_series_link(_stem_val_early):
+            lo_e, hi_e = int(_sm.group(1)), int(_sm.group(2))
+            if hi_e > lo_e:
+                return lo_e, hi_e
+
         # Regex для удаления пометок тома родительской серии вида «(т. 7-8)»
         _VOL_ANNOT_STRIP = re.compile(
             r'\((?:т|том|vol|book|ч|часть)\.?\s*\d+[-–—]\d+\)', re.IGNORECASE | re.UNICODE
@@ -2574,6 +2588,8 @@ class FB2CompilerService:
                 suffix = self._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes, use_parts=True)
             else:
                 suffix = self._series_suffix(n_volumes, top_lo, top_hi, part_count)
+            # Реальный диапазон томов для <sequence number> в метаданных
+            _vol_range = (f'{top_lo}' if top_lo == top_hi else f'{top_lo}-{top_hi}') if top_lo else None
             output_xml = self._build_fb2(
                 author=group.author,
                 series=clean_series,
@@ -2583,6 +2599,7 @@ class FB2CompilerService:
                 binaries=collected_binaries,
                 cover_image_id=cover_image_id,
                 book_cover_ids=book_cover_ids,
+                volume_range=_vol_range,
             )
 
             # --- Имя выходного файла ---
@@ -2936,6 +2953,7 @@ class FB2CompilerService:
         binaries: Optional[List[str]] = None,
         cover_image_id: Optional[str] = None,
         book_cover_ids: Optional[List[Optional[str]]] = None,
+        volume_range: Optional[str] = None,
     ) -> str:
         """Собрать итоговый FB2 XML из компонентов."""
         # Разбиваем автора на фамилию и имя
@@ -2956,11 +2974,11 @@ class FB2CompilerService:
         if not genre_tag:
             genre_tag = '  <genre>other</genre>\n'
 
-        # <sequence number> всегда содержит последовательный диапазон 1-N,
-        # а не исходные номера томов из sort_key — иначе подсерии, чьи книги
-        # пронумерованы 7 и 8 в родительской серии, ошибочно получали бы
-        # number="7-8" вместо "1-2".
-        seq_range = '1' if n_books == 1 else f'1-{n_books}'
+        # <sequence number> — реальный диапазон томов серии (top_lo-top_hi).
+        # Это важно для повторного сканирования: пайплайн читает number и
+        # определяет позицию компиляции в серии. Без реального диапазона
+        # "т. 3-4" получает number="1-2" и занимает позицию 1-2 при ресканировании.
+        seq_range = volume_range if volume_range else ('1' if n_books == 1 else f'1-{n_books}')
         sequence_attr = f'name="{safe_series}" number="{seq_range}"'
 
         coverpage_tag = ''
