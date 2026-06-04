@@ -1370,6 +1370,12 @@ class Pass4Consensus:
             _author_counts = _Cnt(rec.proposed_author.strip() for rec in _recs)
             if len(_author_counts) <= 1:
                 continue  # все одинаковые — нечего делать
+            # Если в группе есть записи с разными metadata_series — это разные произведения.
+            # Унификация автора между ними некорректна даже при общем токене.
+            _meta_series_vals = {_nfc_lower_yo(r.metadata_series.strip())
+                                 for r in _recs if r.metadata_series and r.metadata_series.strip()}
+            if len(_meta_series_vals) > 1:
+                continue
             # Токены каждого варианта автора
             def _atokens(a):
                 return {t.lower().replace('ё', 'е')

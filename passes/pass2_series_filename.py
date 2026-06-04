@@ -501,6 +501,29 @@ class Pass2SeriesFilename:
                         if not record.proposed_series or record.series_source not in self._FOLDER_SOURCES:
                             record.proposed_series = extracted_series
                             record.series_source = 'folder_dataset'
+
+                        # Если папка содержит несколько авторов "(Барчук, Прядеев)",
+                        # добавляем нематченных соавторов из metadata_authors.
+                        if author_matches and ',' in extracted_author and record.metadata_authors:
+                            _folder_surnames = [
+                                re.sub(r'[^\w]', '', s).lower().replace('ё', 'е')
+                                for s in re.split(r',\s*', extracted_author)
+                            ]
+                            _cur_auth_norm = record.proposed_author.lower().replace('ё', 'е')
+                            for _fsur in _folder_surnames:
+                                if len(_fsur) <= 3 or _fsur in _cur_auth_norm:
+                                    continue
+                                # Ищем полное имя в metadata_authors
+                                for _meta_part in re.split(r'[;,]', record.metadata_authors):
+                                    _mp = _meta_part.strip()
+                                    if not _mp:
+                                        continue
+                                    _mp_norm = _mp.lower().replace('ё', 'е')
+                                    if _fsur in _mp_norm and _mp_norm not in _cur_auth_norm:
+                                        record.proposed_author = record.proposed_author + ', ' + _mp
+                                        _cur_auth_norm = record.proposed_author.lower().replace('ё', 'е')
+                                        break
+
                         _count += 1
                         break
             if _count:
