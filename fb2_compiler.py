@@ -405,8 +405,9 @@ class FB2CompilerService:
                         def _is_abbrev(t: str) -> bool:
                             if len(t) <= 3 or '.' in t:
                                 return True
-                            # А_З_К — заглавные буквы через подчёркивания (псевдоним-инициалы)
-                            if re.match(r'^[А-ЯЁA-Z](?:_[А-ЯЁA-Z])+$', t):
+                            # А_З_К / а_з_к — буквы через подчёркивания (псевдоним-инициалы)
+                            # токены уже в нижнем регистре → проверяем [а-яёa-z]
+                            if re.match(r'^[а-яёa-z](?:_[а-яёa-z])+$', t):
                                 return True
                             return False
                         return all(_is_abbrev(t) for t in extra)

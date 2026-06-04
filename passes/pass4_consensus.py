@@ -1388,6 +1388,14 @@ class Pass4Consensus:
                 _common &= ts
             if not _common:
                 continue  # нет общего автора — не трогаем
+            # Унифицируем только если все варианты содержат одинаковое число авторов.
+            # Разное число авторов = настоящие разные соавторы (А_З_К + Берг vs просто Берг) —
+            # в таком случае это не ошибка форматирования, а реальное соавторство.
+            def _token_count(a):
+                return len([t for t in re.split(r'[\s,;]+', a) if len(t) > 2])
+            _token_counts = {_token_count(a) for a in _author_counts}
+            if len(_token_counts) > 1:
+                continue  # разное число авторов — не трогаем
             # Победитель — вариант с наибольшим числом записей
             _majority_author = _author_counts.most_common(1)[0][0]
             for rec in _recs:
