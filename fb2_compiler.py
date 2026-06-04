@@ -2002,6 +2002,18 @@ class FB2CompilerService:
                                 # поэтому meta_num и _kw_n совпадают — secondary не нужен.
                                 if _kw_n != meta_num:
                                     return (0, meta_num, _kw_n, 0), 'series_number', False, sn
+                    # Если meta_num совпадает с числом в конце названия серии,
+                    # это arc-номер (напр. "Позывной «Курсант» 2" → arc=2, sn=2).
+                    # Реальный номер книги внутри arc ищем в file_title.
+                    _series_trailing = re.search(r'\s+(\d{1,4})\s*$', prop_s)
+                    if _series_trailing and int(_series_trailing.group(1)) == meta_num:
+                        _ft_raw = (rec.file_title or '').strip()
+                        _ft_book = re.search(r'[-–—\s]+(\d{1,4})\s*$', _ft_raw)
+                        if _ft_book:
+                            _book_n = int(_ft_book.group(1))
+                            if 0 < _book_n < 1900 and _book_n != meta_num:
+                                return (0, _book_n, 0, 0), 'subseries_number', False, str(_book_n)
+
                     return (0, meta_num, 0, 0), 'series_number', False, sn
 
         # When _series_ok is False but series_number was already set by Rule 2 (pass2),
