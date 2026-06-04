@@ -1188,7 +1188,10 @@ class Pass4Consensus:
 
                 # Не перезаписываем если серия уже получена из имени файла —
                 # filename имеет приоритет над metadata согласно настройкам.
-                if rec.series_source in ('filename', 'filename+meta_confirmed'):
+                # filename_named_arc — именованная дуга, обнаруженная по имени файла,
+                # тоже имеет приоритет над folder_meta_consensus.
+                if rec.series_source in ('filename', 'filename+meta_confirmed',
+                                         'filename_named_arc'):
                     continue
 
                 # Исправляем
