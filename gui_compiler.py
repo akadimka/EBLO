@@ -748,6 +748,49 @@ class CompilerDialog:
         except Exception:
             self._fname_var.set('—')
 
+    def _recalc_consecutive_runs(self, group):
+        """Найти consecutive runs, оставить наибольший, авто-исключить остальные."""
+        import re as _re
+
+        def _book_vol(b):
+            vl = (b.volume_label or '').strip()
+            m = _re.match(r'^(\d+)', vl)
+            return int(m.group(1)) if m else None
+
+        vol_books = [(v, b) for b in group.books if (v := _book_vol(b)) is not None]
+        vol_books.sort(key=lambda x: x[0])
+
+        if not vol_books:
+            group.volume_range = ''
+            return
+
+        # Разбиваем на consecutive runs
+        runs = []
+        cur_run = [vol_books[0]]
+        for i in range(1, len(vol_books)):
+            if vol_books[i][0] == vol_books[i-1][0] + 1:
+                cur_run.append(vol_books[i])
+            else:
+                runs.append(cur_run)
+                cur_run = [vol_books[i]]
+        runs.append(cur_run)
+
+        if len(runs) > 1:
+            # Есть пробелы — оставляем наибольший run (при равенстве — последний)
+            best_run = max(runs, key=lambda r: (len(r), r[0][0]))
+            best_paths = {b.abs_path.resolve() for _, b in best_run}
+            for _, b in vol_books:
+                if b.abs_path.resolve() not in best_paths:
+                    group.auto_excluded_paths.append(b.abs_path)
+            group.books = [b for _, b in best_run]
+            lo, hi = best_run[0][0], best_run[-1][0]
+        else:
+            lo_vals = [v for v, _ in vol_books]
+            lo, hi = min(lo_vals), max(lo_vals)
+
+        group.volume_range = f'{lo}-{hi}' if lo != hi else str(lo)
+        group.order_determined = all(not b.order_ambiguous for b in group.books)
+
     def _on_book_rightclick(self, event):
         """Контекстное меню ПКМ на книге в группе."""
         iid = self._det_tree.identify_row(event.y)
@@ -810,56 +853,18 @@ class CompilerDialog:
             if p not in group.excluded_paths:
                 group.excluded_paths.append(p)
 
-        # Сбрасываем старые авто-исключения — пересчитаем заново
+        # Сбрасываем старые авто-исключения — возвращаем в books для пересчёта
+        orig = getattr(group, '_original_books', [])
         for prev_auto in list(group.auto_excluded_paths or []):
-            orig = getattr(group, '_original_books', [])
-            for ob in orig:
-                if ob.abs_path.resolve() == prev_auto.resolve():
-                    if not any(b.abs_path.resolve() == prev_auto.resolve() for b in group.books):
+            if not any(b.abs_path.resolve() == prev_auto.resolve() for b in group.books):
+                for ob in orig:
+                    if ob.abs_path.resolve() == prev_auto.resolve():
                         group.books.append(ob)
-                    break
+                        break
         group.auto_excluded_paths = []
 
-        # Находим consecutive runs по номерам томов
-        def _book_vol(b):
-            import re as _re
-            vl = (b.volume_label or '').strip()
-            m = _re.match(r'^(\d+)', vl)
-            return int(m.group(1)) if m else None
-
-        vol_books = [(v, b) for b in group.books if (v := _book_vol(b)) is not None]
-        vol_books.sort(key=lambda x: x[0])
-
-        if vol_books:
-            # Разбиваем на consecutive runs
-            runs = []
-            cur_run = [vol_books[0]]
-            for i in range(1, len(vol_books)):
-                if vol_books[i][0] == vol_books[i-1][0] + 1:
-                    cur_run.append(vol_books[i])
-                else:
-                    runs.append(cur_run)
-                    cur_run = [vol_books[i]]
-            runs.append(cur_run)
-
-            if len(runs) > 1:
-                # Есть пробелы — оставляем наибольший run (при равенстве — последний)
-                best_run = max(runs, key=lambda r: (len(r), r[0][0]))
-                best_paths = {b.abs_path.resolve() for _, b in best_run}
-                for _, b in vol_books:
-                    if b.abs_path.resolve() not in best_paths:
-                        group.auto_excluded_paths.append(b.abs_path)
-                group.books = [b for _, b in best_run]
-                lo, hi = best_run[0][0], best_run[-1][0]
-            else:
-                lo_vals = [v for v, _ in vol_books]
-                lo, hi = min(lo_vals), max(lo_vals)
-
-            group.volume_range = f'{lo}-{hi}' if lo != hi else str(lo)
-        else:
-            group.volume_range = ''
-
-        group.order_determined = all(not b.order_ambiguous for b in group.books)
+        # Пересчитываем consecutive runs и авто-исключаем несмежные тома
+        self._recalc_consecutive_runs(group)
 
         # Перерисовываем список и обновляем превью немедленно
         self._on_select()
@@ -870,29 +875,36 @@ class CompilerDialog:
         p = _P(path) if not hasattr(path, 'parts') else path
         p_res = p.resolve()
 
-        # Убираем из excluded_paths, auto_excluded_paths и duplicate_paths
+        # Убираем из excluded_paths и duplicate_paths
         group.excluded_paths = [x for x in (group.excluded_paths or [])
                                  if x.resolve() != p_res]
-        group.auto_excluded_paths = [x for x in (group.auto_excluded_paths or [])
-                                      if x.resolve() != p_res]
         group.duplicate_paths = [x for x in (group.duplicate_paths or [])
                                   if x.resolve() != p_res]
 
-        # Восстанавливаем из сохранённого оригинала (если есть)
+        # Возвращаем ВСЕ auto_excluded обратно в group.books — consecutive run
+        # пересчитается заново и сам решит что оставить
+        orig = getattr(group, '_original_books', [])
+        for auto_p in list(group.auto_excluded_paths or []):
+            if not any(b.abs_path.resolve() == auto_p.resolve() for b in group.books):
+                for ob in orig:
+                    if ob.abs_path.resolve() == auto_p.resolve():
+                        group.books.append(ob)
+                        break
+        group.auto_excluded_paths = []
+
+        # Восстанавливаем саму книгу если её нет в books
         if not any(b.abs_path.resolve() == p_res for b in group.books):
-            orig = getattr(group, '_original_books', [])
             for ob in orig:
                 if ob.abs_path.resolve() == p_res:
                     group.books.append(ob)
                     break
-            group.books.sort(key=lambda b: b.sort_key)
 
-        # Пересчитываем диапазон
-        lo_vals = [b.sort_key[1] for b in group.books if b.sort_key[0] == 0 and b.sort_key[1]]
-        if lo_vals:
-            lo, hi = min(lo_vals), max(lo_vals)
-            group.volume_range = f'{lo}-{hi}' if lo != hi else str(lo)
+        group.books.sort(key=lambda b: b.sort_key)
         group.order_determined = all(not b.order_ambiguous for b in group.books)
+
+        # Заново прогоняем логику consecutive runs (как в _exclude_book)
+        # — она сама авто-исключит несмежные тома если пробелы остались
+        self._recalc_consecutive_runs(group)
         self._on_select()
 
     def _on_book_dblclick(self, _event=None):
