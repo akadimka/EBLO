@@ -402,7 +402,14 @@ class FB2CompilerService:
                     # Лишние токены допустимы только если выглядят как инициалы/аббревиатуры
                     # (длина ≤3 символов или содержат точку). Иначе — соавтор, не сливаем.
                     def _is_abbrev_only(extra: set) -> bool:
-                        return all(len(t) <= 3 or '.' in t for t in extra)
+                        def _is_abbrev(t: str) -> bool:
+                            if len(t) <= 3 or '.' in t:
+                                return True
+                            # А_З_К — заглавные буквы через подчёркивания (псевдоним-инициалы)
+                            if re.match(r'^[А-ЯЁA-Z](?:_[А-ЯЁA-Z])+$', t):
+                                return True
+                            return False
+                        return all(_is_abbrev(t) for t in extra)
 
                     if aw1 == aw2:
                         author_dir = 0        # равны
