@@ -446,11 +446,18 @@ class Pass2SeriesFilename:
                 'folder_dataset', 'folder_hierarchy',
                 'metadata_folder_confirmed', 'folder_multiauthor',
             }
+            # folder_parse_limit — глубина поиска папок вверх от файла
+            _fpl = int(self.settings.get('folder_parse_limit', 10)
+                       if isinstance(self.settings, dict)
+                       else getattr(self.settings, 'settings', {}).get('folder_parse_limit', 10))
+
             for record in records:
                 if record.author_source not in _FOLDER_AUTHOR_SRC:
                     continue
                 path_parts = Path(record.file_path).parts
-                for part in path_parts[:-1]:
+                # Ограничиваем глубину поиска по folder_parse_limit
+                relevant_parts = path_parts[max(0, len(path_parts) - 1 - _fpl):-1]
+                for part in relevant_parts:
                     for _p_str, _p_re, _p_groups in self.compiled_folder_patterns:
                         if 'series' not in _p_groups or 'author' not in _p_groups:
                             continue
@@ -732,27 +739,24 @@ class Pass2SeriesFilename:
         # proposed_author (из папки или файла) или metadata_authors (из FB2).
         # Это гарантирует соблюдение приоритета независимо от author_source.
 
-        # Если любая родительская папка совпадает с genre_folder_prefixes (коллекция-каталог),
-        # не берём серию из иерархии — иначе имя каталога попадёт в proposed_series.
-        _gfp = getattr(self, '_genre_folder_prefixes', None)
-        if _gfp is None:
+        # folder_parse_limit: ограничение глубины поиска папок вверх от файла
+        _fpl = getattr(self, '_folder_parse_limit_cache', None)
+        if _fpl is None:
             try:
-                _gfp = [p.lower() for p in (self.settings.get('genre_folder_prefixes', [])
-                                             if isinstance(self.settings, dict)
-                                             else self.settings.settings.get('genre_folder_prefixes', []))]
+                _fpl = int(self.settings.get('folder_parse_limit', 10)
+                           if isinstance(self.settings, dict)
+                           else getattr(self.settings, 'settings', {}).get('folder_parse_limit', 10))
             except Exception:
-                _gfp = []
-            self._genre_folder_prefixes = _gfp
-        if _gfp:
-            _path_lower_parts = [p.lower() for p in Path(record.file_path).parts[:-1]]
-            if any(any(part.startswith(gfp) for gfp in _gfp) for part in _path_lower_parts):
-                return  # файл внутри каталога-коллекции — серию из папок не берём
+                _fpl = 10
+            self._folder_parse_limit_cache = _fpl
 
         author_name = record.proposed_author or record.metadata_authors or None
         if author_name:
             path_parts = parts_cache.get(record.file_path)
             if path_parts is None:
                 raw = Path(record.file_path).parts
+                # Ограничиваем глубину до folder_parse_limit уровней от файла
+                raw = raw[max(0, len(raw) - 1 - _fpl):]
                 path_parts = tuple(
                     p for i, p in enumerate(raw)
                     if i == len(raw) - 1 or p.lower() not in FILE_EXTENSION_FOLDER_NAMES
