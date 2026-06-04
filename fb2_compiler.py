@@ -64,6 +64,8 @@ class CompilationGroup:
     volume_range: str       # "1-7" или ""
     duplicate_paths: List[Path] = None  # Файлы-дубликаты для автоматического удаления
     kept_paths: List[Path] = None       # Файлы, которые остаются (для cleanup_only групп)
+    excluded_paths: List[Path] = None        # Исключены вручную — не компилируются и не удаляются
+    auto_excluded_paths: List[Path] = None  # Исключены автоматически из-за пробела в томах
     alphabetical_order: bool = False    # True — порядок не определён, отсортировано по названию
     cleanup_only: bool = False          # True — новая компиляция не нужна, только удалить дубликаты
     part_count: int = 0                 # > 0 если книги имеют паттерн N.M (том.часть): общее число частей
@@ -74,6 +76,10 @@ class CompilationGroup:
             self.duplicate_paths = []
         if self.kept_paths is None:
             self.kept_paths = []
+        if self.excluded_paths is None:
+            self.excluded_paths = []
+        if self.auto_excluded_paths is None:
+            self.auto_excluded_paths = []
 
 
 @dataclass
@@ -2462,7 +2468,12 @@ class FB2CompilerService:
             cover_image_id: Optional[str] = None  # ID бинаря обложки первой книги (для <coverpage>)
             book_cover_ids: List[Optional[str]] = []  # ID обложки каждой книги (по порядку)
 
+            _excluded_set = {p.resolve() for p in (group.excluded_paths or [])}
+
             for book_idx, book in enumerate(group.books, 1):
+                if _excluded_set and book.abs_path.resolve() in _excluded_set:
+                    book_cover_ids.append(None)
+                    continue
                 # Префикс для бинарей этой книги — исключает коллизии ID между томами
                 vol_prefix = f'vol{book_idx}_'
 
@@ -2584,7 +2595,9 @@ class FB2CompilerService:
                 self._log(f"   ♻ Удалено {len(group.duplicate_paths)} дубликатах")
 
             # --- Удаляем исходники ---
-            source_paths = [b.abs_path for b in group.books]
+            # Исключённые вручную файлы не удаляем (excluded_paths)
+            source_paths = [b.abs_path for b in group.books
+                            if b.abs_path.resolve() not in _excluded_set]
             if delete_sources:
                 self._delete_sources(source_paths)
 

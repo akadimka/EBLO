@@ -235,13 +235,17 @@ class CompilerDialog:
         self._det_tree.column('sn',       width=60,  minwidth=40, anchor='center')
         self._det_tree.column('size',     width=80,  minwidth=60, anchor='e')
 
-        self._det_tree.tag_configure('to_delete', background='#FFE4E1', foreground='#CC0000')  # красный — к удалению
-        self._det_tree.tag_configure('kept',      background='#E8F5E9', foreground='#2E7D32')  # зелёный — остаётся
+        self._det_tree.tag_configure('to_delete',    background='#FFE4E1', foreground='#CC0000')  # красный — к удалению
+        self._det_tree.tag_configure('kept',         background='#E8F5E9', foreground='#2E7D32')  # зелёный — остаётся
+        self._det_tree.tag_configure('excluded',     background='#FFF9C4', foreground='#795548')  # жёлтый — исключён вручную
+        self._det_tree.tag_configure('excluded_auto',background='#FFF3CD', foreground='#9E6A00')  # светло-жёлтый — исключён автоматически
 
         self._det_tree.grid(row=0, column=0, sticky='nsew')
         det_vsb.grid(row=0, column=1, sticky='ns')
         self._det_paths: dict = {}
         self._det_tree.bind('<Double-1>', self._on_book_dblclick)
+        self._det_tree.bind('<Button-3>', self._on_book_rightclick)
+        self._book_ctx_menu = tk.Menu(self._det_tree, tearoff=0)
 
         # ── Строка предпросмотра имени файла ─────────────────────────
         fname_frm = ttk.Frame(bot_frm)
@@ -636,6 +640,10 @@ class CompilerDialog:
             self._fname_var.set(kept_label)
             return
 
+        # Сохраняем оригинальный список книг при первом показе (для возможности восстановить)
+        if not hasattr(group, '_original_books'):
+            group._original_books = list(group.books)
+
         for pos, book in enumerate(group.books, 1):
             title    = (book.record.file_title or '').strip() or book.abs_path.stem
             sort_lbl = _SORT_SOURCE_LABEL.get(book.sort_source, book.sort_source)
@@ -671,6 +679,26 @@ class CompilerDialog:
                 tags=('to_delete',),
             )
             self._det_paths[_iid] = dup_path
+
+        # Исключённые вручную (жёлтые)
+        excl_offset = offset + len(group.duplicate_paths or [])
+        for pos, excl_path in enumerate(group.excluded_paths or [], excl_offset + 1):
+            _iid = self._det_tree.insert(
+                '', tk.END,
+                values=(pos, excl_path.stem, excl_path.name, '⊘ Исключён', '—', _fmt_size(excl_path)),
+                tags=('excluded',),
+            )
+            self._det_paths[_iid] = excl_path
+
+        # Исключённые автоматически из-за пробела в томах (светло-жёлтые)
+        auto_offset = excl_offset + len(group.excluded_paths or [])
+        for pos, auto_path in enumerate(group.auto_excluded_paths or [], auto_offset + 1):
+            _iid = self._det_tree.insert(
+                '', tk.END,
+                values=(pos, auto_path.stem, auto_path.name, '⊘ Исключён (авт.)', '—', _fmt_size(auto_path)),
+                tags=('excluded_auto',),
+            )
+            self._det_paths[_iid] = auto_path
 
         # Проверка пересечения диапазонов
         self._overlap_var.set('')
@@ -713,12 +741,159 @@ class CompilerDialog:
                 suffix = self._service._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes,
                                                       series_complete=sc, use_parts=True)
             else:
-                suffix  = self._service._series_suffix(n_volumes, top_lo, top_hi, part_count,
-                                                       series_complete=sc)
+                suffix = self._service._series_suffix(n_volumes, top_lo, top_hi, part_count,
+                                                      series_complete=sc)
             fname       = f'{safe_author} - {safe_series} ({suffix}).fb2'
             self._fname_var.set(fname)
         except Exception:
             self._fname_var.set('—')
+
+    def _on_book_rightclick(self, event):
+        """Контекстное меню ПКМ на книге в группе."""
+        iid = self._det_tree.identify_row(event.y)
+        if not iid:
+            return
+        self._det_tree.selection_set(iid)
+        path = self._det_paths.get(iid)
+        if not path:
+            return
+        # Получаем текущую группу
+        sel = self._tree.selection()
+        if not sel:
+            return
+        group = self._group_by_iid.get(sel[0])
+        if not group or getattr(group, 'cleanup_only', False):
+            return
+        tags = self._det_tree.item(iid, 'tags')
+        if 'kept' in tags:
+            return
+
+        menu = self._book_ctx_menu
+        menu.delete(0, 'end')
+
+        if 'excluded' in tags or 'excluded_auto' in tags:
+            menu.add_command(
+                label='Вернуть в компиляцию',
+                command=lambda: self._restore_book(iid, path, group),
+            )
+        elif 'to_delete' in tags:
+            menu.add_command(
+                label='Вернуть в компиляцию',
+                command=lambda: self._restore_book(iid, path, group),
+            )
+        else:
+            menu.add_command(
+                label='Не включать в компиляцию',
+                command=lambda: self._exclude_book(iid, path, group, delete=False),
+            )
+            menu.add_command(
+                label='Не включать и пометить на удаление',
+                command=lambda: self._exclude_book(iid, path, group, delete=True),
+            )
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _exclude_book(self, iid: str, path, group, delete: bool):
+        """Исключить книгу из компиляции. delete=True → красный; False → жёлтый."""
+        from pathlib import Path as _P
+        p = _P(path) if not hasattr(path, 'parts') else path
+        p_res = p.resolve()
+
+        # Убираем книгу из group.books
+        group.books = [b for b in group.books if b.abs_path.resolve() != p_res]
+
+        if delete:
+            if p not in group.duplicate_paths:
+                group.duplicate_paths.append(p)
+        else:
+            if group.excluded_paths is None:
+                group.excluded_paths = []
+            if p not in group.excluded_paths:
+                group.excluded_paths.append(p)
+
+        # Сбрасываем старые авто-исключения — пересчитаем заново
+        for prev_auto in list(group.auto_excluded_paths or []):
+            orig = getattr(group, '_original_books', [])
+            for ob in orig:
+                if ob.abs_path.resolve() == prev_auto.resolve():
+                    if not any(b.abs_path.resolve() == prev_auto.resolve() for b in group.books):
+                        group.books.append(ob)
+                    break
+        group.auto_excluded_paths = []
+
+        # Находим consecutive runs по номерам томов
+        def _book_vol(b):
+            import re as _re
+            vl = (b.volume_label or '').strip()
+            m = _re.match(r'^(\d+)', vl)
+            return int(m.group(1)) if m else None
+
+        vol_books = [(v, b) for b in group.books if (v := _book_vol(b)) is not None]
+        vol_books.sort(key=lambda x: x[0])
+
+        if vol_books:
+            # Разбиваем на consecutive runs
+            runs = []
+            cur_run = [vol_books[0]]
+            for i in range(1, len(vol_books)):
+                if vol_books[i][0] == vol_books[i-1][0] + 1:
+                    cur_run.append(vol_books[i])
+                else:
+                    runs.append(cur_run)
+                    cur_run = [vol_books[i]]
+            runs.append(cur_run)
+
+            if len(runs) > 1:
+                # Есть пробелы — оставляем наибольший run (при равенстве — последний)
+                best_run = max(runs, key=lambda r: (len(r), r[0][0]))
+                best_paths = {b.abs_path.resolve() for _, b in best_run}
+                for _, b in vol_books:
+                    if b.abs_path.resolve() not in best_paths:
+                        group.auto_excluded_paths.append(b.abs_path)
+                group.books = [b for _, b in best_run]
+                lo, hi = best_run[0][0], best_run[-1][0]
+            else:
+                lo_vals = [v for v, _ in vol_books]
+                lo, hi = min(lo_vals), max(lo_vals)
+
+            group.volume_range = f'{lo}-{hi}' if lo != hi else str(lo)
+        else:
+            group.volume_range = ''
+
+        group.order_determined = all(not b.order_ambiguous for b in group.books)
+
+        # Перерисовываем список и обновляем превью немедленно
+        self._on_select()
+
+    def _restore_book(self, iid: str, path, group):
+        """Вернуть книгу из excluded/duplicate обратно в group.books."""
+        from pathlib import Path as _P
+        p = _P(path) if not hasattr(path, 'parts') else path
+        p_res = p.resolve()
+
+        # Убираем из excluded_paths, auto_excluded_paths и duplicate_paths
+        group.excluded_paths = [x for x in (group.excluded_paths or [])
+                                 if x.resolve() != p_res]
+        group.auto_excluded_paths = [x for x in (group.auto_excluded_paths or [])
+                                      if x.resolve() != p_res]
+        group.duplicate_paths = [x for x in (group.duplicate_paths or [])
+                                  if x.resolve() != p_res]
+
+        # Восстанавливаем из сохранённого оригинала (если есть)
+        if not any(b.abs_path.resolve() == p_res for b in group.books):
+            orig = getattr(group, '_original_books', [])
+            for ob in orig:
+                if ob.abs_path.resolve() == p_res:
+                    group.books.append(ob)
+                    break
+            group.books.sort(key=lambda b: b.sort_key)
+
+        # Пересчитываем диапазон
+        lo_vals = [b.sort_key[1] for b in group.books if b.sort_key[0] == 0 and b.sort_key[1]]
+        if lo_vals:
+            lo, hi = min(lo_vals), max(lo_vals)
+            group.volume_range = f'{lo}-{hi}' if lo != hi else str(lo)
+        group.order_determined = all(not b.order_ambiguous for b in group.books)
+        self._on_select()
 
     def _on_book_dblclick(self, _event=None):
         sel = self._det_tree.selection()
