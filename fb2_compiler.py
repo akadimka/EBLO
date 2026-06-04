@@ -2565,7 +2565,12 @@ class FB2CompilerService:
             # Позиция run'а идёт в суффикс: полная серия → слово, частичная → «т. N-M».
             # Если группа содержит подсерии, слово выбирается по числу верхних дуг (n_top_arcs),
             # а не по общему числу книг, чтобы «Пенталогия» (5 дуг) + «в 9 книгах» (9 файлов).
-            if has_subseries and n_top_arcs and n_top_arcs >= 2:
+            # Если пользователь исключил книги — серия неполная, всегда т. N-M
+            _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths)
+            if _has_exclusions:
+                _lbl = 'ч.' if (has_subseries and n_top_arcs and n_top_arcs >= 2) else 'т.'
+                suffix = f'{_lbl} {top_lo}' if top_lo == top_hi else f'{_lbl} {top_lo}-{top_hi}'
+            elif has_subseries and n_top_arcs and n_top_arcs >= 2:
                 suffix = self._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes, use_parts=True)
             else:
                 suffix = self._series_suffix(n_volumes, top_lo, top_hi, part_count)
