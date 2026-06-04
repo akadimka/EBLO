@@ -731,6 +731,23 @@ class Pass2SeriesFilename:
         # Поиск по папкам применяется всегда, используя любой известный автор:
         # proposed_author (из папки или файла) или metadata_authors (из FB2).
         # Это гарантирует соблюдение приоритета независимо от author_source.
+
+        # Если любая родительская папка совпадает с genre_folder_prefixes (коллекция-каталог),
+        # не берём серию из иерархии — иначе имя каталога попадёт в proposed_series.
+        _gfp = getattr(self, '_genre_folder_prefixes', None)
+        if _gfp is None:
+            try:
+                _gfp = [p.lower() for p in (self.settings.get('genre_folder_prefixes', [])
+                                             if isinstance(self.settings, dict)
+                                             else self.settings.settings.get('genre_folder_prefixes', []))]
+            except Exception:
+                _gfp = []
+            self._genre_folder_prefixes = _gfp
+        if _gfp:
+            _path_lower_parts = [p.lower() for p in Path(record.file_path).parts[:-1]]
+            if any(any(part.startswith(gfp) for gfp in _gfp) for part in _path_lower_parts):
+                return  # файл внутри каталога-коллекции — серию из папок не берём
+
         author_name = record.proposed_author or record.metadata_authors or None
         if author_name:
             path_parts = parts_cache.get(record.file_path)
