@@ -685,7 +685,7 @@ class CompilerDialog:
         for pos, excl_path in enumerate(group.excluded_paths or [], excl_offset + 1):
             _iid = self._det_tree.insert(
                 '', tk.END,
-                values=(pos, excl_path.stem, excl_path.name, '⊘ Исключён', '—', _fmt_size(excl_path)),
+                values=(pos, excl_path.stem, excl_path.name, '⊘ Исключён (польз.)', '—', _fmt_size(excl_path)),
                 tags=('excluded',),
             )
             self._det_paths[_iid] = excl_path
@@ -737,7 +737,12 @@ class CompilerDialog:
             top_lo, top_hi, n_volumes, has_subseries, n_top_arcs = self._service._run_stats(group.books)
             safe_series = _re.sub(r'[/:*?"<>|]', '_', self._service._series_to_display(clean_series))
             sc = group.series_complete
-            if has_subseries and n_top_arcs and n_top_arcs >= 2:
+            # Если пользователь исключил книги — серия неполная, всегда т. N-M
+            _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths)
+            if _has_exclusions:
+                _lbl = 'ч.' if (has_subseries and n_top_arcs and n_top_arcs >= 2) else 'т.'
+                suffix = f'{_lbl} {top_lo}' if top_lo == top_hi else f'{_lbl} {top_lo}-{top_hi}'
+            elif has_subseries and n_top_arcs and n_top_arcs >= 2:
                 suffix = self._service._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes,
                                                       series_complete=sc, use_parts=True)
             else:
