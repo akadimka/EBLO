@@ -1426,6 +1426,41 @@ class Pass4Consensus:
         if _author_unified:
             print(f"[PASS 4] Unified {_author_unified} author values by series+common-author consensus")
 
+        # Апгрейд folder_dataset серий до filename_named_arc подсерий.
+        # Когда filename_named_arc даёт «Серия\Подсерия», а folder_dataset —
+        # только «Серия» (корень), обновляем folder_dataset записи до полного пути.
+        # Это безопасно: корень должен совпадать точно, и только в рамках одного автора.
+        _subseries_upgraded = 0
+        # Собираем все named_arc подсерии: корень → (полный путь, author_key)
+        _arc_subseries: dict = {}  # (author_key, root_norm) → full_subseries
+        for rec in records:
+            if rec.series_source == 'filename_named_arc' and '\\' in (rec.proposed_series or ''):
+                root = rec.proposed_series.split('\\', 1)[0].strip()
+                root_norm = _nfc_lower_yo(root)
+                author_key = _nfc_lower_yo((rec.proposed_author or '').strip())
+                key = (author_key, root_norm)
+                # Если несколько подсерий у одного автора с одним корнем — не трогаем
+                if key not in _arc_subseries:
+                    _arc_subseries[key] = rec.proposed_series
+                elif _arc_subseries[key] != rec.proposed_series:
+                    _arc_subseries[key] = None  # неоднозначно
+
+        for rec in records:
+            if rec.series_source != 'folder_dataset':
+                continue
+            if not rec.proposed_series or '\\' in rec.proposed_series:
+                continue
+            root_norm = _nfc_lower_yo(rec.proposed_series.strip())
+            author_key = _nfc_lower_yo((rec.proposed_author or '').strip())
+            key = (author_key, root_norm)
+            target = _arc_subseries.get(key)
+            if target and target != rec.proposed_series:
+                rec.proposed_series = target
+                _subseries_upgraded += 1
+
+        if _subseries_upgraded:
+            print(f"[PASS 4] Upgraded {_subseries_upgraded} folder_dataset series to named_arc subseries")
+
         # Финальная нормализация ё→е во всех proposed_series.
         # Pass3SeriesNormalize делает это до Pass4, но Pass4 может перезаписать
         # proposed_series значениями с ё (через консенсус). Делаем NFC + ё→е здесь,
