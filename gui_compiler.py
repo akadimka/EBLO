@@ -737,16 +737,37 @@ class CompilerDialog:
             top_lo, top_hi, n_volumes, has_subseries, n_top_arcs = self._service._run_stats(group.books)
             safe_series = _re.sub(r'[/:*?"<>|]', '_', self._service._series_to_display(clean_series))
             sc = group.series_complete
+            # Суммарное число томов для arc-позиционных предкомпиляций
+            _arc_part_count = 0
+            _all_arc_point = all(
+                self._service._precompiled_range(b, group.series)[0] ==
+                self._service._precompiled_range(b, group.series)[1] > 0
+                for b in group.books
+            ) if group.books else False
+            if _all_arc_point:
+                _swords_idx = {kw.lower(): idx
+                               for idx, kw in enumerate(self._service._SERIES_WORDS) if kw}
+                _swords_pat = _re.compile(
+                    '|'.join(_re.escape(k) for k in _swords_idx), _re.IGNORECASE)
+                for b in group.books:
+                    _st = (b.abs_path.stem + ' ' + (b.record.file_title or '')).lower()
+                    _m = _swords_pat.search(_st)
+                    if _m:
+                        _arc_part_count += _swords_idx[_m.group(0).lower()]
+                if _arc_part_count <= n_volumes:
+                    _arc_part_count = 0
             # Если пользователь исключил книги — серия неполная, всегда т. N-M
             _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths)
             if _has_exclusions:
                 _lbl = 'ч.' if (has_subseries and n_top_arcs and n_top_arcs >= 2) else 'т.'
                 suffix = f'{_lbl} {top_lo}' if top_lo == top_hi else f'{_lbl} {top_lo}-{top_hi}'
             elif has_subseries and n_top_arcs and n_top_arcs >= 2:
-                suffix = self._service._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes,
+                suffix = self._service._series_suffix(n_top_arcs, top_lo, top_hi,
+                                                      _arc_part_count or n_volumes,
                                                       series_complete=sc, use_parts=True)
             else:
-                suffix = self._service._series_suffix(n_volumes, top_lo, top_hi, part_count,
+                suffix = self._service._series_suffix(n_volumes, top_lo, top_hi,
+                                                      _arc_part_count or part_count,
                                                       series_complete=sc)
             fname       = f'{safe_author} - {safe_series} ({suffix}).fb2'
             self._fname_var.set(fname)

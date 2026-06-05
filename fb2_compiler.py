@@ -2632,14 +2632,42 @@ class FB2CompilerService:
             # Если группа содержит подсерии, слово выбирается по числу верхних дуг (n_top_arcs),
             # а не по общему числу книг, чтобы «Пенталогия» (5 дуг) + «в 9 книгах» (9 файлов).
             # Если пользователь исключил книги — серия неполная, всегда т. N-M
+
+            # Для компиляций из arc-позиционных предкомпиляций вычисляем суммарное
+            # число томов по сервисным словам (Дилогия→2, Трилогия→3 и т.д.).
+            # Пример: Сафари 1 (Дилогия) + Сафари 2 (Трилогия) + Сафари 3 (Трилогия)
+            # → arc_count=3, total_books=8 → «Трилогия в 8 книгах».
+            _arc_part_count = 0
+            _all_arc_point = all(
+                self._precompiled_range(b, group.series)[0] ==
+                self._precompiled_range(b, group.series)[1] > 0
+                for b in group.books
+            )
+            if _all_arc_point:
+                _swords_idx = {kw.lower(): idx
+                               for idx, kw in enumerate(self._SERIES_WORDS) if kw}
+                _swords_pat = re.compile(
+                    '|'.join(re.escape(kw) for kw in _swords_idx),
+                    re.IGNORECASE | re.UNICODE,
+                )
+                for b in group.books:
+                    _st = (b.abs_path.stem + ' ' + (b.record.file_title or '')).lower()
+                    _m = _swords_pat.search(_st)
+                    if _m:
+                        _arc_part_count += _swords_idx[_m.group(0).lower()]
+                if _arc_part_count <= n_volumes:
+                    _arc_part_count = 0  # не имеет смысла если не больше числа дуг
+
             _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths)
             if _has_exclusions:
                 _lbl = 'ч.' if (has_subseries and n_top_arcs and n_top_arcs >= 2) else 'т.'
                 suffix = f'{_lbl} {top_lo}' if top_lo == top_hi else f'{_lbl} {top_lo}-{top_hi}'
             elif has_subseries and n_top_arcs and n_top_arcs >= 2:
-                suffix = self._series_suffix(n_top_arcs, top_lo, top_hi, n_volumes, use_parts=True)
+                suffix = self._series_suffix(n_top_arcs, top_lo, top_hi,
+                                             _arc_part_count or n_volumes, use_parts=True)
             else:
-                suffix = self._series_suffix(n_volumes, top_lo, top_hi, part_count)
+                suffix = self._series_suffix(n_volumes, top_lo, top_hi,
+                                             _arc_part_count or part_count)
             # Реальный диапазон томов для <sequence number> в метаданных.
             # top_lo=0 означает что сортировка через sort_key[2] (подсерии без числа в корне).
             _eff_lo = top_lo if top_lo else 1
