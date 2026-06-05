@@ -1450,6 +1450,11 @@ class Pass4Consensus:
                 continue
             if not rec.proposed_series or '\\' in rec.proposed_series:
                 continue
+            # Пропускаем предкомпиляции (sn вида "N-M") — это сборники томов,
+            # а не отдельные книги; их серия уже корректна.
+            _sn = (rec.series_number or '').strip()
+            if re.match(r'^\d+\s*[-–—]\s*\d+$', _sn):
+                continue
             root_norm = _nfc_lower_yo(rec.proposed_series.strip())
             author_key = _nfc_lower_yo((rec.proposed_author or '').strip())
             key = (author_key, root_norm)
