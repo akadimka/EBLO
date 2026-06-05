@@ -419,11 +419,15 @@ class FB2CompilerService:
                     if aw1 == aw2:
                         author_dir = 0        # равны
                     elif aw1 < aw2 and _is_abbrev_only(aw2 - aw1):
-                        author_dir = 12       # ak1 короче, ak2 — канонический
+                        author_dir = 12       # ak1 короче, ak2 — канонический (аббревиатура)
                     elif aw2 < aw1 and _is_abbrev_only(aw1 - aw2):
-                        author_dir = 21       # ak2 короче, ak1 — канонический
+                        author_dir = 21       # ak2 короче, ak1 — канонический (аббревиатура)
+                    elif aw1 < aw2 and sk1 == sk2:
+                        author_dir = 12       # ak1 ⊂ ak2, одна серия → допускаем слияние
+                    elif aw2 < aw1 and sk1 == sk2:
+                        author_dir = 21       # ak2 ⊂ ak1, одна серия → допускаем слияние
                     else:
-                        continue              # пересекаются или лишние токены — соавтор
+                        continue              # пересекаются или разные серии — соавтор
 
                     # Серия: определяем направление суффикса
                     if sk1 == sk2:
