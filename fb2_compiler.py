@@ -2428,11 +2428,14 @@ class FB2CompilerService:
 
         has_ambiguous = any(b.order_ambiguous for b in books)
         # Тайбрейкер при одинаковом sort_key (напр. два разных тома с одним номером серии):
-        # сортируем по нормализованному названию, затем по пути файла.
+        # 1. Файлы с числовым префиксом «N. Название» идут раньше тех что без него
+        #    (Карамазов. Книга 3 перед Дневниками при одинаковом sn=3).
+        # 2. Нормализованное название, затем путь файла.
         sorted_books = sorted(
             books,
             key=lambda b: (
                 b.sort_key,
+                0 if re.match(r'^\d', b.abs_path.stem) else 1,
                 (b.record.file_title or b.abs_path.stem).lower(),
                 str(b.abs_path),
             ),
