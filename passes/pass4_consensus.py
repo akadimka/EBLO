@@ -1391,16 +1391,33 @@ class Pass4Consensus:
                 _common &= ts
             if not _common:
                 continue  # нет общего автора — не трогаем
-            # Унифицируем только если все варианты содержат одинаковое число авторов.
-            # Разное число авторов = настоящие разные соавторы (А_З_К + Берг vs просто Берг) —
-            # в таком случае это не ошибка форматирования, а реальное соавторство.
             def _token_count(a):
                 return len([t for t in re.split(r'[\s,;]+', a) if len(t) > 2])
             _token_counts = {_token_count(a) for a in _author_counts}
+
             if len(_token_counts) > 1:
-                continue  # разное число авторов — не трогаем
-            # Победитель — вариант с наибольшим числом записей
-            _majority_author = _author_counts.most_common(1)[0][0]
+                # Разное число авторов — проверяем, является ли меньший набор подмножеством большего.
+                # Пример: "Барчук Павел" ⊂ "Барчук Павел, Прядеев Евгений" → объединяем к большему.
+                # НО только если metadata_series одинакова (иначе разные серии — разные авторства).
+                # А_З_К + Берг / Берг: разные metadata_series → guard уже пропустил это выше.
+                _max_tokens = max(_token_counts)
+                _largest_authors = [a for a in _author_counts if _token_count(a) == _max_tokens]
+                if len(_largest_authors) != 1:
+                    continue  # несколько вариантов с одинаковым max → неоднозначно
+                _largest = _largest_authors[0]
+                _largest_tokens = _atokens(_largest)
+                # Все остальные варианты должны быть подмножеством наибольшего
+                _all_subsets = all(
+                    _atokens(a) <= _largest_tokens
+                    for a in _author_counts if a != _largest
+                )
+                if not _all_subsets:
+                    continue  # есть авторы не входящие в наибольший набор → не трогаем
+                _majority_author = _largest
+            else:
+                # Все одинаковое число авторов — берём по большинству записей
+                _majority_author = _author_counts.most_common(1)[0][0]
+
             for rec in _recs:
                 if rec.proposed_author.strip() != _majority_author:
                     rec.proposed_author = _majority_author
