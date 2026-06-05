@@ -896,6 +896,8 @@ class FB2CompilerService:
             # файлы из неё получают приоритет: дубли тех же томов из других
             # папок помечаются к удалению. Тома, которых нет в доминирующей
             # папке, берутся из других папок как обычно.
+            _eff_vol = self._book_eff_pos
+
             if books:
                 # Считаем сколько уникальных позиций томов покрывает каждая папка
                 from collections import Counter as _Counter
@@ -908,16 +910,26 @@ class FB2CompilerService:
                         # Предкомпиляция — добавляем весь диапазон, не только lo
                         lo_r, hi_r = int(rng_m.group(1)), int(rng_m.group(2))
                         folder_vol_sets[folder].update(range(lo_r, hi_r + 1))
-                    elif b.sort_key[0] == 0 and b.sort_key[1]:
-                        folder_vol_sets[folder].add(b.sort_key[1])
+                    else:
+                        ev = _eff_vol(b)
+                        if ev:
+                            folder_vol_sets[folder].add(ev)
+                # Считаем также число файлов в каждой папке (тайбрейкер при равных томах)
+                folder_file_counts: Dict[str, int] = {}
+                for b in books:
+                    folder_file_counts[str(b.abs_path.parent)] = \
+                        folder_file_counts.get(str(b.abs_path.parent), 0) + 1
                 if len(folder_vol_sets) > 1:
-                    dominant_folder = max(folder_vol_sets, key=lambda f: len(folder_vol_sets[f]))
+                    dominant_folder = max(
+                        folder_vol_sets,
+                        key=lambda f: (len(folder_vol_sets[f]), folder_file_counts.get(f, 0))
+                    )
                     dominant_vols = folder_vol_sets[dominant_folder]
                     if dominant_vols:
                         new_books = []
                         for b in books:
                             folder = str(b.abs_path.parent)
-                            vol = b.sort_key[1] if b.sort_key[0] == 0 and b.sort_key[1] else None
+                            vol = _eff_vol(b) or None
                             if folder != dominant_folder and vol and vol in dominant_vols:
                                 duplicate_paths.append(b.abs_path)
                             else:
@@ -1703,6 +1715,10 @@ class FB2CompilerService:
 
         def _specificity(b: CompilationBook) -> int:
             sk = b.sort_key
+            # Прямая arc-позиция (sk[1]>0) предпочтительнее косвенной (sk[1]=0, sk[2]>0).
+            # «Спасатель 1» (0,1,0,0) конкретнее чем «01_Книга» (0,0,1,0).
+            if len(sk) > 1 and sk[1] > 0:
+                return 3  # прямая позиция — максимальный приоритет
             return (1 if len(sk) > 2 and sk[2] != 0 else 0) + (1 if len(sk) > 3 and sk[3] != 0 else 0)
 
         def _file_size(b: CompilationBook) -> int:
@@ -1741,14 +1757,14 @@ class FB2CompilerService:
                 if ratio < similarity_threshold:
                     continue
                 # Похожи: решаем, какую оставить.
-                # Приоритет 1: размер файла — больший файл содержит больше текста.
-                # Приоритет 2 (тайбрейкер): точность позиции в серии (subseries-компоненты).
-                size_a, size_b = _file_size(book_a), _file_size(book_b)
-                if size_a != size_b:
-                    loser = book_b if size_a > size_b else book_a
+                # Приоритет 1: точность позиции в серии (прямой arc > косвенный subseries).
+                # Приоритет 2 (тайбрейкер): размер файла — больший файл содержит больше текста.
+                spec_a, spec_b = _specificity(book_a), _specificity(book_b)
+                if spec_a != spec_b:
+                    loser = book_b if spec_a > spec_b else book_a
                 else:
-                    spec_a, spec_b = _specificity(book_a), _specificity(book_b)
-                    loser = book_b if spec_a >= spec_b else book_a
+                    size_a, size_b = _file_size(book_a), _file_size(book_b)
+                    loser = book_b if size_a >= size_b else book_a
                 to_remove.add(id(loser))
                 duplicate_paths.append(loser.abs_path)
                 self._log(
@@ -2363,6 +2379,20 @@ class FB2CompilerService:
             pass
         return None
 
+    @staticmethod
+    def _book_eff_pos(book: 'CompilationBook') -> int:
+        """Эффективная позиция книги в серии.
+
+        Для подсерий без номера в корне (sk[1]=0) позиция хранится в
+        sk[2] или sk[3]. Возвращаем первый ненулевой компонент после sk[1].
+        """
+        sk = book.sort_key
+        if sk[0] != 0:
+            return 0
+        if sk[1]:
+            return sk[1]
+        return next((sk[i] for i in range(2, len(sk)) if sk[i] > 0), 0)
+
     def _split_into_consecutive_runs(
         self,
         books: List[CompilationBook],
@@ -2387,8 +2417,7 @@ class FB2CompilerService:
             # Исключение: sort_key[1]=0 означает подсерию без номера в корне —
             # тогда sort_key[2] является фактической позицией книги.
             if len(book.sort_key) > 2 and book.sort_key[2] != 0:
-                eff = book.sort_key[2] if book.sort_key[1] == 0 else book.sort_key[1]
-                return eff
+                return FB2CompilerService._book_eff_pos(book)
             rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', book.volume_label or '')
             return int(rng.group(2)) if rng else book.sort_key[1]
 
@@ -2398,9 +2427,7 @@ class FB2CompilerService:
 
         for book in books[1:]:
             # sort_key[1]=0 с sort_key[2]>0 = подсерия без номера в корне
-            lo = book.sort_key[2] if (book.sort_key[1] == 0 and
-                                       len(book.sort_key) > 2 and
-                                       book.sort_key[2] > 0) else book.sort_key[1]
+            lo = self._book_eff_pos(book)
             if lo <= prev_hi + 1:  # следующий или перекрывающийся диапазон
                 current_run.append(book)
                 prev_hi = get_hi(book)
@@ -2441,9 +2468,8 @@ class FB2CompilerService:
             используем sort_key[2] как позицию в основной серии — это позволяет
             корректно строить непрерывные run'ы рядом с arc-файлами.
             """
-            sk = b.sort_key
-            if sk[0] == 0 and sk[1] == 0 and len(sk) > 2 and sk[2] > 0:
-                sk = (0, sk[2], 0, sk[3] if len(sk) > 3 else 0)
+            eff = FB2CompilerService._book_eff_pos(b)
+            sk = (0, eff, 0, 0) if b.sort_key[0] == 0 and b.sort_key[1] == 0 and eff > 0 else b.sort_key
             return (
                 sk,
                 0 if re.match(r'^\d', b.abs_path.stem) else 1,
