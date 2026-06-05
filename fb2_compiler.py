@@ -2384,8 +2384,11 @@ class FB2CompilerService:
             # Если volume_label — диапазон внутри подсерии (sort_key[2] != 0),
             # раскрывать его как верхнеуровневый диапазон нельзя:
             # используем только sort_key[1] (позицию в родительской серии).
+            # Исключение: sort_key[1]=0 означает подсерию без номера в корне —
+            # тогда sort_key[2] является фактической позицией книги.
             if len(book.sort_key) > 2 and book.sort_key[2] != 0:
-                return book.sort_key[1]
+                eff = book.sort_key[2] if book.sort_key[1] == 0 else book.sort_key[1]
+                return eff
             rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', book.volume_label or '')
             return int(rng.group(2)) if rng else book.sort_key[1]
 
@@ -2394,7 +2397,10 @@ class FB2CompilerService:
         prev_hi = get_hi(books[0])
 
         for book in books[1:]:
-            lo = book.sort_key[1]
+            # sort_key[1]=0 с sort_key[2]>0 = подсерия без номера в корне
+            lo = book.sort_key[2] if (book.sort_key[1] == 0 and
+                                       len(book.sort_key) > 2 and
+                                       book.sort_key[2] > 0) else book.sort_key[1]
             if lo <= prev_hi + 1:  # следующий или перекрывающийся диапазон
                 current_run.append(book)
                 prev_hi = get_hi(book)
@@ -2427,19 +2433,25 @@ class FB2CompilerService:
             return sorted_books, True, True
 
         has_ambiguous = any(b.order_ambiguous for b in books)
-        # Тайбрейкер при одинаковом sort_key (напр. два разных тома с одним номером серии):
-        # 1. Файлы с числовым префиксом «N. Название» идут раньше тех что без него
-        #    (Карамазов. Книга 3 перед Дневниками при одинаковом sn=3).
-        # 2. Нормализованное название, затем путь файла.
-        sorted_books = sorted(
-            books,
-            key=lambda b: (
-                b.sort_key,
+
+        def _eff_sort_key(b: CompilationBook):
+            """Эффективный ключ сортировки.
+
+            Для подсерий без числа в корне (sort_key[1]=0, sort_key[2]>0)
+            используем sort_key[2] как позицию в основной серии — это позволяет
+            корректно строить непрерывные run'ы рядом с arc-файлами.
+            """
+            sk = b.sort_key
+            if sk[0] == 0 and sk[1] == 0 and len(sk) > 2 and sk[2] > 0:
+                sk = (0, sk[2], 0, sk[3] if len(sk) > 3 else 0)
+            return (
+                sk,
                 0 if re.match(r'^\d', b.abs_path.stem) else 1,
                 (b.record.file_title or b.abs_path.stem).lower(),
                 str(b.abs_path),
-            ),
-        )
+            )
+
+        sorted_books = sorted(books, key=_eff_sort_key)
         return sorted_books, not has_ambiguous, False
 
     def _compute_volume_range(self, books: List[CompilationBook]) -> str:
