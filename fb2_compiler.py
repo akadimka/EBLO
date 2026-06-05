@@ -659,6 +659,11 @@ class FB2CompilerService:
                     if not multi or len(re.findall(r'\.\s+[а-яёa-z]', multi, re.IGNORECASE)) < 1:
                         continue
                     own_pos = book.sort_key[1] if book.sort_key[0] == 0 else None
+                    # Если заголовок этого файла совпадает с заголовком его собственной позиции
+                    # (т.е. все книги группы имеют одинаковый file_title) — это обычный том,
+                    # а не внешняя компиляция других книг.
+                    if own_pos and _pos_to_title.get(own_pos, '') == multi:
+                        continue
                     matched = sorted(
                         pos for pos, t in _pos_to_title.items()
                         if t and t in multi and pos != own_pos
