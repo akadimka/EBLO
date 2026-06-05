@@ -1482,23 +1482,39 @@ class Pass2SeriesFilename:
             vol_num = int(m.group(2))
             arc_raw = m.group(3).strip()
             # Убираем хвостовой порядковый номер дуги
-            arc_display = _TRAIL_NUM.sub('', arc_raw).strip()
+            arc_full = _TRAIL_NUM.sub('', arc_raw).strip()
             # Берём первую секцию до '. ' — общий arc-prefix без подзаголовка.
             # «Пилот ракетоносца. Выбор курса» → «Пилот ракетоносца»
-            arc_display = re.split(r'\.\s+', arc_display)[0].strip()
-            arc_norm = _norm_s(arc_display)
+            # Сохраняем оба варианта: полное имя и префикс — в шаге 2 предпочтём полное
+            # если все вхождения дуги имеют одинаковое полное имя.
+            arc_prefix = re.split(r'\.\s+', arc_full)[0].strip()
+            # Ключ группировки — по полному имени; если оно уникально, попробуем префикс
+            arc_norm_full = _norm_s(arc_full)
+            arc_norm_prefix = _norm_s(arc_prefix)
+            arc_norm = arc_norm_full  # используем полное имя для группировки
+            arc_display = arc_full
             if not arc_norm or len(arc_norm) < 4:
                 continue
             key = (_norm_s(rec.proposed_author or ''), series_rec)
-            groups[key].append((rec, vol_num, arc_norm, arc_display))
+            groups[key].append((rec, vol_num, arc_norm, arc_display, arc_norm_prefix, arc_prefix))
 
         # 2. По каждой группе: arc titles с 2+ вхождениями → подсерия
         for (_author_k, _series_k), entries in groups.items():
             arc_counts: dict = defaultdict(list)
-            for rec, vol_num, arc_norm, arc_display in entries:
+            for rec, vol_num, arc_norm, arc_display, arc_norm_prefix, arc_prefix in entries:
                 arc_counts[arc_norm].append((rec, vol_num, arc_display))
+            # Также группируем по префиксу (для случаев с разными подзаголовками)
+            arc_counts_prefix: dict = defaultdict(list)
+            for rec, vol_num, arc_norm, arc_display, arc_norm_prefix, arc_prefix in entries:
+                if arc_norm_prefix != arc_norm:  # только если отличается от полного
+                    arc_counts_prefix[arc_norm_prefix].append((rec, vol_num, arc_prefix))
 
-            for arc_norm, arc_entries in arc_counts.items():
+            # Объединяем: полное имя приоритетнее префикса
+            all_arc_counts = {**arc_counts_prefix}
+            for k, v in arc_counts.items():
+                all_arc_counts[k] = v  # полное имя перезаписывает префикс
+
+            for arc_norm, arc_entries in all_arc_counts.items():
                 if len(arc_entries) < 2:
                     continue  # уникальный title — не дуга
                 # Берём наиболее длинный arc_display как каноническое название дуги
@@ -1524,7 +1540,10 @@ class Pass2SeriesFilename:
                     range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
                 else:
                     range_suffix = ''
-                series_root = re.sub(r'\s*\[[^\]]*\]\s*$', '', entries[0][0].proposed_series).strip()  # без [скобок]
+                # Берём корень до первого '\' чтобы избежать двойного вложения
+                # если предыдущая итерация уже добавила '\' к proposed_series.
+                _ps0 = entries[0][0].proposed_series
+                series_root = re.sub(r'\s*\[[^\]]*\]\s*$', '', _ps0.split('\\')[0]).strip()
                 new_series = f'{series_root}{range_suffix}\\{arc_canonical}'
                 for rec, vol_num, _ in arc_entries:
                     rec.proposed_series = new_series
