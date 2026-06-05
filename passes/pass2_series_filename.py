@@ -1517,6 +1517,10 @@ class Pass2SeriesFilename:
             for arc_norm, arc_entries in all_arc_counts.items():
                 if len(arc_entries) < 2:
                     continue  # уникальный title — не дуга
+                # Если arc совпадает с названием самой серии — это не подсерия
+                # (пример: «ПТУшник N. ПТУшник» → arc="ПТУшник" = series "ПТУшник")
+                if arc_norm == _series_k:
+                    continue
                 # Берём наиболее длинный arc_display как каноническое название дуги
                 arc_canonical = max((arc_display for _, _, arc_display in arc_entries), key=len)
                 vols = sorted(vol_num for _, vol_num, _ in arc_entries)
