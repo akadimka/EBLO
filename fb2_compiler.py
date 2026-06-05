@@ -281,8 +281,14 @@ class FB2CompilerService:
         # Частичный run — указываем диапазон томов/частей
         _lbl = 'ч.' if use_parts else 'т.'
         if lo == hi:
-            return f'{_lbl} {lo}'
-        return f'{_lbl} {lo}-{hi}'
+            _base = f'{_lbl} {lo}'
+        else:
+            _base = f'{_lbl} {lo}-{hi}'
+        # Если известно суммарное число книг (arc-point предкомпиляции) — добавляем счёт
+        n_books_total = part_count if part_count > 0 else n_volumes
+        if n_books_total > n_volumes:
+            return f'{_base} в {n_books_total} книгах'
+        return _base
 
     def __init__(self, logger=None):
         self.logger = logger
@@ -751,7 +757,11 @@ class FB2CompilerService:
                     # Это корректнее чем проверять только против best_pre:
                     # [1-42]+[31-43]+[31-45] → [31-43] дублируется [31-45], [31-45] уникален.
                     _book_sn = (book.record.series_number or '').strip()
-                    covered_by_any = any(
+                    # Arc-point pre-compilations (lo==hi) не дедуплицируем друг против друга:
+                    # два файла с одинаковым arc-position могут покрывать РАЗНЫЙ внутренний
+                    # контент (например, Брия 1 кн.1-2 и Брия 1 кн.3-4 оба имеют arc-pos 1).
+                    _is_arc_point = (lo == hi)
+                    covered_by_any = (not _is_arc_point) and any(
                         (o_lo <= lo and hi <= o_hi)
                         and (o_book.record.series_number or '').strip() == _book_sn
                         for (o_book, o_lo, o_hi) in precompiled
@@ -1321,6 +1331,22 @@ class FB2CompilerService:
                                        for p in [_cand_low.find(w)] if p >= 0), -1)
                     if _slink_pos >= 0:
                         _after = candidate[_slink_pos:]
+                        # Проверяем паттерн «SeriesName N. Подсерия M-K» — N стоит сразу
+                        # после названия серии и является arc-позицией в родительской серии.
+                        # Пример: «Брия 1. Книга Длинного Солнца 1-2» → arc N=1, не диапазон 1-2.
+                        _arc_n_m = re.match(
+                            r'^.{0,' + str(max(len(w) for w in series_words) + 5) + r'}'
+                            r'\s+(\d{1,4})\s*\.',
+                            _after
+                        )
+                        if _arc_n_m:
+                            _arc_n_val = _arc_n_m.group(1)
+                            _arc_n_int = int(_arc_n_val)
+                            # Arc-номер не должен быть частью названия серии
+                            if (_arc_n_int < 1900 and
+                                    not re.search(r'(?<!\d)' + re.escape(_arc_n_val) + r'(?!\d)',
+                                                  series_lower)):
+                                return _arc_n_int, _arc_n_int  # arc-позиция, не внутренний диапазон
                         # Ищем точку-разделитель предложений, но НЕ десятичную точку (как в "2.0").
                         # Десятичная точка окружена цифрами с обеих сторон: (?<=\d)\.(?=\d).
                         _dot_m = re.search(r'(?<!\d)\.(?!\d)', _after)
@@ -2655,13 +2681,48 @@ class FB2CompilerService:
                     _m = _swords_pat.search(_st)
                     if _m:
                         _arc_part_count += _swords_idx[_m.group(0).lower()]
+                    else:
+                        # Фоллбек: ищем диапазон N-M в стеме (внутренние книги arc'а).
+                        # «Брия 1. Книга Длинного Солнца 1-2» → "1-2" после точки = 2 книги.
+                        _rng_in_stem = re.search(r'(\d+)\s*[-–—]\s*(\d+)', b.abs_path.stem)
+                        if _rng_in_stem:
+                            _r_lo, _r_hi = int(_rng_in_stem.group(1)), int(_rng_in_stem.group(2))
+                            if _r_hi > _r_lo and _r_hi - _r_lo < 50:
+                                _arc_part_count += _r_hi - _r_lo + 1
+                            else:
+                                _arc_part_count += 1
+                        else:
+                            _arc_part_count += 1  # одиночная книга
                 if _arc_part_count <= n_volumes:
-                    _arc_part_count = 0  # не имеет смысла если не больше числа дуг
+                    _arc_part_count = 0  # не имеет смысла если не больше числа arc'ов
 
+            # Проверяем пробелы в top-level arc-позициях.
+            # Если arc-позиции не образуют непрерывный ряд (например {1,3,4} без 2),
+            # серия неполная → не используем сервисное слово (Трилогия и т.п.).
+            _top_arc_positions = sorted({
+                b.sort_key[1] for b in group.books
+                if b.sort_key[0] == 0 and b.sort_key[1]
+            })
+            _arc_has_gaps = (
+                len(_top_arc_positions) >= 2 and
+                _top_arc_positions != list(range(_top_arc_positions[0],
+                                                 _top_arc_positions[-1] + 1))
+            )
+
+            _sc_compile = not (group.excluded_paths or group.auto_excluded_paths) and getattr(group, 'series_complete', True)
             _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths)
+            # Arc-point группы с неполной серией → «ч. N в K книгах»
+            _arc_partial = _all_arc_point and _arc_part_count > 0 and not getattr(group, 'series_complete', True)
             if _has_exclusions:
                 _lbl = 'ч.' if (has_subseries and n_top_arcs and n_top_arcs >= 2) else 'т.'
                 suffix = f'{_lbl} {top_lo}' if top_lo == top_hi else f'{_lbl} {top_lo}-{top_hi}'
+            elif _arc_has_gaps:
+                _total = _arc_part_count or n_volumes
+                suffix = f'в {_total} книгах'
+            elif _arc_partial:
+                _lbl = 'ч.'
+                _base = f'{_lbl} {top_lo}' if top_lo == top_hi else f'{_lbl} {top_lo}-{top_hi}'
+                suffix = f'{_base} в {_arc_part_count} книгах'
             elif has_subseries and n_top_arcs and n_top_arcs >= 2:
                 suffix = self._series_suffix(n_top_arcs, top_lo, top_hi,
                                              _arc_part_count or n_volumes, use_parts=True)

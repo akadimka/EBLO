@@ -754,21 +754,45 @@ class CompilerDialog:
                     _m = _swords_pat.search(_st)
                     if _m:
                         _arc_part_count += _swords_idx[_m.group(0).lower()]
+                    else:
+                        # Фоллбек: диапазон N-M в стеме = внутренние книги arc'а
+                        _rng = _re.search(r'(\d+)\s*[-–—]\s*(\d+)', b.abs_path.stem)
+                        if _rng:
+                            _r_lo, _r_hi = int(_rng.group(1)), int(_rng.group(2))
+                            if _r_hi > _r_lo and _r_hi - _r_lo < 50:
+                                _arc_part_count += _r_hi - _r_lo + 1
+                            else:
+                                _arc_part_count += 1
+                        else:
+                            _arc_part_count += 1
                 if _arc_part_count <= n_volumes:
                     _arc_part_count = 0
             # Если пользователь исключил книги — серия неполная, всегда т. N-M
+            # Проверка пробелов в arc-позициях
+            _top_arc_pos = sorted({
+                b.sort_key[1] for b in group.books
+                if b.sort_key[0] == 0 and b.sort_key[1]
+            })
+            _arc_has_gaps = (
+                len(_top_arc_pos) >= 2 and
+                _top_arc_pos != list(range(_top_arc_pos[0], _top_arc_pos[-1] + 1))
+            )
+            _sc = True if _arc_part_count > 0 else sc
             _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths)
-            if _has_exclusions:
-                _lbl = 'ч.' if (has_subseries and n_top_arcs and n_top_arcs >= 2) else 'т.'
-                suffix = f'{_lbl} {top_lo}' if top_lo == top_hi else f'{_lbl} {top_lo}-{top_hi}'
+            # Arc-point группы с неполной серией → «ч. N в K книгах»
+            _arc_partial = _all_arc_point and _arc_part_count > 0 and not sc
+            if _has_exclusions or _arc_has_gaps or _arc_partial:
+                _lbl = 'ч.' if (has_subseries and n_top_arcs and n_top_arcs >= 2) or _arc_partial else 'т.'
+                _base = f'{_lbl} {top_lo}' if top_lo == top_hi else f'{_lbl} {top_lo}-{top_hi}'
+                suffix = f'{_base} в {_arc_part_count} книгах' if _arc_partial and _arc_part_count > 0 else _base
             elif has_subseries and n_top_arcs and n_top_arcs >= 2:
                 suffix = self._service._series_suffix(n_top_arcs, top_lo, top_hi,
                                                       _arc_part_count or n_volumes,
-                                                      series_complete=sc, use_parts=True)
+                                                      series_complete=_sc, use_parts=True)
             else:
                 suffix = self._service._series_suffix(n_volumes, top_lo, top_hi,
                                                       _arc_part_count or part_count,
-                                                      series_complete=sc)
+                                                      series_complete=_sc)
             fname       = f'{safe_author} - {safe_series} ({suffix}).fb2'
             self._fname_var.set(fname)
         except Exception:
