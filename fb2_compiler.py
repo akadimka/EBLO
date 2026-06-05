@@ -510,14 +510,20 @@ class FB2CompilerService:
             # Чёрный археолог (Трилогия)" → оба уже готовы, merge не нужен.
             # volume_label может быть ещё "2"/"3" (до контекстной коррекции),
             # поэтому проверяем через _precompiled_range напрямую.
-            _all_precompiled = all(self._precompiled_range(b, series)[1] > 0 for b in books)
+            _precomp_ranges = {id(b): self._precompiled_range(b, series) for b in books}
+            _all_precompiled = all(hi > 0 for lo, hi in _precomp_ranges.values())
             if _all_precompiled and len(books) >= 2:
                 _sn_vals = [b.record.series_number or '' for b in books]
                 # Только если series_number — простые целые числа (arc-номера: 2, 3…),
                 # а не диапазоны ("1-3") и не пустые значения.
                 _plain_ints = all(re.match(r'^\d+$', sn) for sn in _sn_vals)
                 if _plain_ints and len(set(_sn_vals)) == len(_sn_vals):
-                    continue  # пропускаем — каждая предкомпиляция самодостаточна
+                    # Дополнительная проверка: если все arc-позиции одноточечные (lo==hi),
+                    # это отдельные arc'и родительской серии — их нужно компилировать вместе.
+                    # Пропускаем только если хотя бы один имеет многокнижный диапазон (lo<hi).
+                    _any_multi = any(lo < hi for lo, hi in _precomp_ranges.values())
+                    if _any_multi:
+                        continue  # пропускаем — подсерии с внутренними диапазонами
 
             # --- Контекстная коррекция: книги с сервисным словом (Трилогия…)
             # без явного series_number, которые не были опознаны _precompiled_range
@@ -1380,11 +1386,24 @@ class FB2CompilerService:
                     # Если же серия «Война великого бога 2» → «2» есть → (1,2) ✓.
                     _kw_pos = _stem_lower.find(kw.lower())
                     _before_kw = _stem_lower[:_kw_pos]
+                    # Паттерн «Серия N (Сервисное)»: N в скобках
                     _sub_n_m = re.search(r'(?<![–—\-\d])(\d{1,4})\s*\(\s*$', _before_kw)
                     if _sub_n_m:
                         _n_val = _sub_n_m.group(1)
                         if not re.search(r'(?<!\d)' + re.escape(_n_val) + r'(?!\d)', series_lower):
                             return 0, 0
+                    # Паттерн «Серия N. Подсерия. Сервисное» (N через точку, не в скобках):
+                    # Пример: «Вселенная Сафари 2. Егерь. Трилогия» — arc 2, не диапазон 1-3.
+                    # Если N не входит в название серии → это arc-позиция, возвращаем (N, N).
+                    _dot_n_m = re.search(
+                        r'(?<![–—\-\d])(\d{1,4})\s*\.\s+\S+.*$', _before_kw
+                    )
+                    if _dot_n_m:
+                        _n_val = _dot_n_m.group(1)
+                        _arc_n = int(_n_val)
+                        if (_arc_n < 1900 and
+                                not re.search(r'(?<!\d)' + re.escape(_n_val) + r'(?!\d)', series_lower)):
+                            return _arc_n, _arc_n  # arc-позиция в родительской серии
                     return 1, idx
 
         # Критерий 2: series_number — диапазон "N-M" из метаданных (запасной вариант)
