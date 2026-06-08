@@ -715,6 +715,17 @@ class FB2CompilerService:
             precompiled: List[Tuple[CompilationBook, int, int]] = []  # (book, lo, hi)
             regular_books: List[CompilationBook] = []
             for book in books:
+                # Сначала проверяем inner_precompilation (EBLO-скомпилированная подсерия
+                # «ч. N в K книгах»). _precompiled_range не знает этот паттерн,
+                # поэтому обрабатываем до его вызова.
+                if book.sort_source == 'inner_precompilation':
+                    _rng_m = re.match(r'^(\d+)-(\d+)$', book.volume_label or '')
+                    if _rng_m:
+                        lo, hi = int(_rng_m.group(1)), int(_rng_m.group(2))
+                        book.sort_source = 'filename_range'
+                        book.order_ambiguous = False
+                        precompiled.append((book, lo, hi))
+                        continue
                 lo, hi = self._precompiled_range(book, series)
                 if hi > lo:
                     # Обновляем sort_key и volume_label по реальному диапазону файла.
@@ -777,8 +788,19 @@ class FB2CompilerService:
                 # И нет других непокрытых предкомпиляций (other_precompiled пуст).
                 # Пример: предкомпиляция 1-3 + обычный том 4 → НЕ актуальна (том 4 не покрыт).
                 # Пример: предкомпиляция 1-2 + предкомпиляция 3-4 → НЕ актуальна (нужно объединить).
+                _best_is_inner = best_pre.sort_source == 'filename_range' and \
+                    bool(re.match(r'^\d+-\d+$', best_pre.volume_label or '')) and \
+                    best_pre.sort_key[1] > 0 and best_pre.sort_key[2] == 0
+                _inner_arc_pos = best_pre.sort_key[1] if _best_is_inner else None
+
                 def _vol_num_for_check(b: 'CompilationBook') -> Optional[int]:
                     if b.sort_key and b.sort_key[0] == 0:
+                        if _best_is_inner:
+                            # Внутренняя предкомпиляция: сравниваем по sk[2] (подпозиция),
+                            # только если книга находится в той же arc-позиции.
+                            if b.sort_key[1] == _inner_arc_pos and b.sort_key[2] != 0:
+                                return b.sort_key[2]
+                            return None
                         # Для подсерий без числа в корне позиция хранится в sort_key[2]
                         return b.sort_key[2] if b.sort_key[1] == 0 else b.sort_key[1]
                     return None
@@ -814,6 +836,10 @@ class FB2CompilerService:
                     def _vol_num(b: CompilationBook) -> Optional[int]:
                         """Номер тома из sort_key если источник надёжен."""
                         if b.sort_key and b.sort_key[0] == 0:
+                            if _best_is_inner:
+                                if b.sort_key[1] == _inner_arc_pos and b.sort_key[2] != 0:
+                                    return b.sort_key[2]
+                                return None
                             # Для подсерий без числа в корне позиция в sort_key[2]
                             return b.sort_key[2] if b.sort_key[1] == 0 else b.sort_key[1]
                         return None
@@ -1931,6 +1957,18 @@ class FB2CompilerService:
         is_subseries = '\\' in (rec.proposed_series or '')
         sn = (rec.series_number or '').strip()
 
+        # Ранняя детекция EBLO-скомпилированных подсерий: «... (ч. N в K книгах)»
+        # Такой файл — предкомпиляция внутреннего диапазона 1-K дуги N.
+        # Возвращаем arc-позицию N как sort_key[1] и «1-K» как volume_label,
+        # чтобы find_groups распознал его как precompiled и почистил исходники.
+        if is_subseries:
+            _inner_comp_m = re.search(r'\(ч\.\s*(\d+)\s+в\s+(\d+)\s+книгах\)', stem)
+            if _inner_comp_m:
+                _arc_n = int(_inner_comp_m.group(1))
+                _k = int(_inner_comp_m.group(2))
+                if 0 < _arc_n < 1900 and _k > 1:
+                    return (0, _arc_n, 0, 0), 'inner_precompilation', False, f'1-{_k}'
+
         # Исключение: filename_named_arc — series_number это ГЛОБАЛЬНАЯ позиция тома
         # (выставлена нашим же кодом в _detect_named_arcs), не позиция в подсерии.
         # Используем напрямую, минуя обычную subseries-логику.
@@ -2268,6 +2306,16 @@ class FB2CompilerService:
             if _fn_m:
                 _fn_n = int(next(g for g in _fn_m.groups() if g is not None))
                 if _fn_n and _fn_n < 1900:
+                    sub_ordinal = _fn_n
+
+        # Fallback когда parent_num известен (из «N. Подсерия») но позиция внутри
+        # подсерии не определена: ведущее число stem («1. Название») = sub_ordinal.
+        # Пример: «Мир\3. Хикки» + файл «1. Чертова дюжина.fb2» → sub_ordinal=1.
+        if parent_num and not sub_ordinal and not inline:
+            _fn_m = self._STEM_NUM_RE.match(stem)
+            if _fn_m:
+                _fn_n = int(next(g for g in _fn_m.groups() if g is not None))
+                if _fn_n and _fn_n < 1900 and _fn_n != parent_num:
                     sub_ordinal = _fn_n
 
         # Метаданные как fallback для sub_ordinal
