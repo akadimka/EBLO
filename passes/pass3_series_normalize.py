@@ -134,6 +134,23 @@ class Pass3SeriesNormalize:
             if normalized != record.proposed_series:
                 record.proposed_series = normalized
 
+        # --- Схлопывание избыточной иерархии ---
+        # «ОБХСС\ОБХСС 82» → «ОБХСС 82»: подсерия начинается с того же слова что корень,
+        # значит «ОБХСС\» — избыточный префикс. После схлопывания punct-унификация
+        # совместит «ОБХСС 82» и «ОБХСС-82» (одинаковый punct_key = "обхсс 82").
+        for rec in records:
+            s = rec.proposed_series or ''
+            if '\\' not in s:
+                continue
+            root, sub = s.split('\\', 1)
+            root_norm = _nfc_lower_yo(re.sub(r'[^\w\s]', ' ', root.strip()))
+            root_norm = re.sub(r'\s+', ' ', root_norm).strip()
+            sub_norm  = _nfc_lower_yo(re.sub(r'[^\w\s]', ' ', sub.strip()))
+            sub_norm  = re.sub(r'\s+', ' ', sub_norm).strip()
+            # Подсерия начинается с корня (слово-в-слово) и добавляет что-то ещё
+            if root_norm and sub_norm.startswith(root_norm + ' '):
+                rec.proposed_series = sub.strip()
+
         # --- Унификация по punct-нормализованному ключу ---
         # Если несколько вариантов одной серии отличаются только пунктуацией
         # (напр. "Ревизор. Возвращение в СССР" и "Ревизор возвращение в СССР"),
