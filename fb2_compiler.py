@@ -2783,6 +2783,10 @@ class FB2CompilerService:
             elif has_subseries and n_top_arcs and n_top_arcs >= 2:
                 suffix = self._series_suffix(n_top_arcs, top_lo, top_hi,
                                              _arc_part_count or n_volumes, use_parts=True)
+            elif has_subseries and n_top_arcs == 1 and n_volumes > 1 and top_lo > 1:
+                # Одна дуга внутри многодуговой серии, arc-позиция > 1:
+                # «ч. 2 в 3 книгах» — показывает и позицию в родителе, и объём.
+                suffix = f'ч. {top_lo} в {n_volumes} книгах'
             else:
                 suffix = self._series_suffix(n_volumes, top_lo, top_hi,
                                              _arc_part_count or part_count)
