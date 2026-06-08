@@ -768,14 +768,20 @@ class FB2CompilerService:
                     #          Но если есть ещё [31-45], то [31-43] покрыт [31-45] → дубликат.
                     # Это корректнее чем проверять только против best_pre:
                     # [1-42]+[31-43]+[31-45] → [31-43] дублируется [31-45], [31-45] уникален.
-                    _book_sn = (book.record.series_number or '').strip()
                     # Arc-point pre-compilations (lo==hi) не дедуплицируем друг против друга:
                     # два файла с одинаковым arc-position могут покрывать РАЗНЫЙ внутренний
                     # контент (например, Брия 1 кн.1-2 и Брия 1 кн.3-4 оба имеют arc-pos 1).
+                    # Для подсерий (is_subseries) нужна проверка series_number — иначе
+                    # «Дилогия арк 3» (lo=1,hi=2) ошибочно покроется «Тетралогией арк 2»
+                    # (lo=1,hi=4), хотя это разные арки одной родительской серии.
+                    # Для плоских серий series_number не разграничивает арки → только диапазон.
                     _is_arc_point = (lo == hi)
+                    _book_sn = (book.record.series_number or '').strip()
+                    _is_subseries_bucket = '\\' in series
                     covered_by_any = (not _is_arc_point) and any(
                         (o_lo <= lo and hi <= o_hi)
-                        and (o_book.record.series_number or '').strip() == _book_sn
+                        and (not _is_subseries_bucket
+                             or (o_book.record.series_number or '').strip() == _book_sn)
                         for (o_book, o_lo, o_hi) in precompiled
                         if o_book is not book
                     )
