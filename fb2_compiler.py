@@ -2678,6 +2678,19 @@ class FB2CompilerService:
                     if sn:
                         covered_hi = max(covered_hi, sn)
 
+            # Если все книги исключены или группа пустая — ничего компилировать не нужно.
+            if not group.books or not bodies:
+                if group.duplicate_paths:
+                    self._delete_sources(group.duplicate_paths)
+                return CompilationResult(
+                    group=group,
+                    output_path=None,
+                    books_compiled=0,
+                    source_paths=[b.abs_path for b in group.books],
+                    success=True,
+                    error='',
+                )
+
             # --- Извлекаем метаданные из первой (или лучшей) книги ---
             meta = self._extract_metadata(group.books[0])
 
