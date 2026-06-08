@@ -722,7 +722,8 @@ class FB2CompilerService:
                     _rng_m = re.match(r'^(\d+)-(\d+)$', book.volume_label or '')
                     if _rng_m:
                         lo, hi = int(_rng_m.group(1)), int(_rng_m.group(2))
-                        book.sort_source = 'filename_range'
+                        # sort_source оставляем 'inner_precompilation' — _best_is_inner
+                        # проверяет именно его, чтобы не путать с обычными предкомпиляциями.
                         book.order_ambiguous = False
                         precompiled.append((book, lo, hi))
                         continue
@@ -788,9 +789,7 @@ class FB2CompilerService:
                 # И нет других непокрытых предкомпиляций (other_precompiled пуст).
                 # Пример: предкомпиляция 1-3 + обычный том 4 → НЕ актуальна (том 4 не покрыт).
                 # Пример: предкомпиляция 1-2 + предкомпиляция 3-4 → НЕ актуальна (нужно объединить).
-                _best_is_inner = best_pre.sort_source == 'filename_range' and \
-                    bool(re.match(r'^\d+-\d+$', best_pre.volume_label or '')) and \
-                    best_pre.sort_key[1] > 0 and best_pre.sort_key[2] == 0
+                _best_is_inner = best_pre.sort_source == 'inner_precompilation'
                 _inner_arc_pos = best_pre.sort_key[1] if _best_is_inner else None
 
                 def _vol_num_for_check(b: 'CompilationBook') -> Optional[int]:
