@@ -942,7 +942,11 @@ class FB2CompilerService:
             def _title_dedup_order(b: CompilationBook):
                 year_m = re.search(r'[-–\s](\d{4})\b', b.abs_path.stem)
                 year = int(year_m.group(1)) if year_m else 0
-                return (-year, str(b.abs_path))
+                # Предкомпиляция с бо́льшим диапазоном побеждает меньшую:
+                # «1-16» должна выжить против «1-14» при одинаковом title_key.
+                rng_m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', b.volume_label or '')
+                range_hi = int(rng_m.group(2)) if rng_m else 0
+                return (-year, -range_hi, str(b.abs_path))
 
             seen_titles: Dict[str, CompilationBook] = {}
             for book in sorted(books, key=_title_dedup_order):
