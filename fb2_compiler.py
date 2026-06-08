@@ -1037,10 +1037,9 @@ class FB2CompilerService:
                 valid_runs = [r for r in self._split_into_consecutive_runs(numeric) if len(r) >= 2]
                 lone_numeric = [b for r in self._split_into_consecutive_runs(numeric) if len(r) < 2 for b in r]
 
-                # Серия считается завершённой только если этот run — единственный
-                # числовой блок и нет одиночных томов за его пределами.
-                # Пример: [1,2] + lone [4] → series_complete=False (есть том 4, серия продолжается).
-                _has_extra_numeric = bool(lone_numeric) or len(valid_runs) > 1
+                # Серия считается завершённой только если нет одиночных томов за пределами
+                # этого рана. Наличие других ранов (напр. arc 13) не делает run {1,2,3}
+                # незавершённым — каждый ран оценивается независимо.
                 for run in valid_runs:
                     # Детектируем паттерн N.M (том.часть): если ВСЕ книги в run
                     # получили sort_source='dot_part', то volume_range = диапазон томов,
@@ -1062,7 +1061,7 @@ class FB2CompilerService:
                         duplicate_paths=duplicate_paths if first_group else [],
                         alphabetical_order=False,
                         part_count=run_part_count,
-                        series_complete=not _has_extra_numeric,
+                        series_complete=not bool(lone_numeric),
                     ))
                     first_group = False
 
@@ -2236,7 +2235,7 @@ class FB2CompilerService:
         # «Отзвуки серебряного ветра\1. Мы — были!» → '1' из начала подсерии.
         if not parent_num and '\\' in (rec.proposed_series or ''):
             _sub_leading_part = (rec.proposed_series or '').split('\\', 1)[1].strip()
-            _sub_lead_m = re.match(r'^(\d{1,4})[.\s\-–—]', _sub_leading_part)
+            _sub_lead_m = re.match(r'^(\d{1,4})[.\s]', _sub_leading_part)
             if _sub_lead_m:
                 _pl = int(_sub_lead_m.group(1))
                 if _pl < 1900:
