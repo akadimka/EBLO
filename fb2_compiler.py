@@ -2778,9 +2778,16 @@ class FB2CompilerService:
                             f"берём {len(to_add)} томов начиная с {first_new}"
                         )
                     for i, (_vol, sec_title, sec_body) in enumerate(to_add):
-                        bodies.append((sec_title, _remap_image_refs(sec_body)))
-                        # Обложка: только у первой секции этой предкомпиляции
-                        book_cover_ids.append(book_cover_id if i == 0 else None)
+                        remapped_body = _remap_image_refs(sec_body)
+                        bodies.append((sec_title, remapped_body))
+                        # Обложка секции: ищем dedicated cover-image внутри тела.
+                        # Для нашего формата это <section><image/></section> перед контентом.
+                        # Для внешних предкомпиляций — первый <image> в секции.
+                        sec_cover = self._extract_section_cover_id(sec_body, id_remap)
+                        if sec_cover is None and i == 0:
+                            # Фоллбек: общая обложка предкомпиляции для первой секции
+                            sec_cover = book_cover_id
+                        book_cover_ids.append(sec_cover)
                     covered_hi = max(covered_hi, b_hi)
                 else:
                     # Обычная книга — берём целиком.
@@ -3256,6 +3263,35 @@ class FB2CompilerService:
             text, re.DOTALL | re.IGNORECASE,
         )
         return m.group(1) if m else None
+
+    @staticmethod
+    def _extract_section_cover_id(body_xml: str, id_remap: dict) -> Optional[str]:
+        """Найти обложку конкретной секции body_xml и вернуть переименованный ID.
+
+        Ищет первую `<section>` которая содержит ТОЛЬКО `<image>` (dedicated cover).
+        Если такой нет — берёт первый `<image>` в любой секции.
+        Возвращает id_remap[orig_id] или None.
+        """
+        # Паттерн 1: <section[attrs]>\s*<image l:href="#id"/>\s*</section>  (dedicated cover)
+        _COVER_SEC = re.compile(
+            r'<(?:fb:)?section[^>]*>\s*<(?:fb:)?image[^>]+l:href=["\']#?([^"\']+)["\'][^>]*/?\s*>(?:\s*</(?:fb:)?image>)?\s*</(?:fb:)?section>',
+            re.IGNORECASE | re.DOTALL,
+        )
+        m = _COVER_SEC.search(body_xml)
+        if m:
+            orig = m.group(1).lstrip('#')
+            return id_remap.get(orig)
+
+        # Паттерн 2: первый <image> в теле (менее строгий)
+        _ANY_IMG = re.compile(
+            r'<(?:fb:)?image[^>]+l:href=["\']#?([^"\']+)["\']',
+            re.IGNORECASE,
+        )
+        m2 = _ANY_IMG.search(body_xml)
+        if m2:
+            orig = m2.group(1).lstrip('#')
+            return id_remap.get(orig)
+        return None
 
     def _extract_binaries(self, book: CompilationBook) -> List[str]:
         """Извлечь все <binary>...</binary> блоки из файла.
