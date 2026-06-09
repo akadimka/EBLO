@@ -492,9 +492,13 @@ class FB2CompilerService:
             _all_subs = {r.proposed_series.strip().split('\\', 1)[1]
                          for r in recs if '\\' in r.proposed_series}
             _s0 = recs[0].proposed_series.strip()
-            if len(_all_subs) == 1 and '\\' in _s0:
+            # Первая запись с подсерией ('\\') — используем её как источник серии
+            # если recs[0] оказался плоской записью (folder_dataset без arc-детекции).
+            _s_with_sub = next((r.proposed_series.strip() for r in recs
+                                if '\\' in r.proposed_series), None)
+            if len(_all_subs) == 1 and _s_with_sub:
                 # Единственная подсерия — берём полный путь как есть
-                series = _s0
+                series = _s_with_sub
             else:
                 if '\\' in _s0:
                     _root = _s0.split('\\')[0].strip()
