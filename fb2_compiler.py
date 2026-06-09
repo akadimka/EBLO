@@ -936,6 +936,20 @@ class FB2CompilerService:
                             duplicate_paths.append(other_book.abs_path)
                         else:
                             books.append(other_book)
+                            # Индивидуальные книги в диапазоне [other_lo..other_hi]
+                            # дублируют контент предкомпиляции → помечаем к удалению.
+                            # Пример: «Щегол 6-11» + individual 6,7,8,9,10 →
+                            # individual 6-10 в дубли (книга 11 есть только в предкомп.).
+                            _cov = [r for r in list(books)
+                                    if r is not other_book
+                                    and (n := _vol_num(r)) is not None
+                                    and other_lo <= n <= other_hi]
+                            for r in _cov:
+                                duplicate_paths.append(r.abs_path)
+                                try:
+                                    books.remove(r)
+                                except ValueError:
+                                    pass
             else:
                 books = regular_books
 
