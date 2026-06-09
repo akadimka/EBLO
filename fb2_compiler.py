@@ -2699,7 +2699,9 @@ class FB2CompilerService:
             seen_binary_ids: set = set()
 
             cover_image_id: Optional[str] = None  # ID бинаря обложки первой книги (для <coverpage>)
-            book_cover_ids: List[Optional[str]] = []  # ID обложки каждой книги (по порядку)
+            # book_cover_ids[i] — обложка i-го элемента bodies (параллельный список).
+            # Заполняется одновременно с bodies, поэтому len == len(bodies) всегда.
+            book_cover_ids: List[Optional[str]] = []
 
             _excluded_set = {p.resolve() for p in (group.excluded_paths or [])}
 
@@ -2710,7 +2712,9 @@ class FB2CompilerService:
                 # Префикс для бинарей этой книги — исключает коллизии ID между томами
                 vol_prefix = f'vol{book_idx}_'
 
-                # Собираем бинари: переименовываем id в vol_N_<orig_id>
+                # Собираем бинари: переименовываем id в vol_N_<orig_id>.
+                # seen_binary_ids предотвращает дубликаты если один и тот же id
+                # встречается дважды внутри одного исходника.
                 id_remap: dict = {}  # orig_id -> new_id
                 for bin_block in self._extract_binaries(book):
                     id_m = re.search(r'<binary([^>]+)id=["\']([^"\']+)["\']', bin_block, re.IGNORECASE)
@@ -2718,6 +2722,10 @@ class FB2CompilerService:
                         continue
                     orig_id = id_m.group(2)
                     new_id = vol_prefix + orig_id
+                    if new_id in seen_binary_ids:
+                        id_remap[orig_id] = new_id  # remap нужен, но бинарь уже есть
+                        continue
+                    seen_binary_ids.add(new_id)
                     id_remap[orig_id] = new_id
                     # Заменяем id в теге <binary>
                     new_block = re.sub(
@@ -2727,15 +2735,16 @@ class FB2CompilerService:
                     )
                     collected_binaries.append(new_block)
 
-                # Запоминаем ID обложки каждой книги (для вставки в начало тела)
+                # Вычисляем cover_id этой книги — используем ниже при добавлении body.
                 book_cover_id: Optional[str] = None
                 if id_remap:
                     cover_orig = self._extract_coverpage_id(book)
                     if cover_orig and cover_orig in id_remap:
                         book_cover_id = id_remap[cover_orig]
-                book_cover_ids.append(book_cover_id)
                 if book_idx == 1:
                     cover_image_id = book_cover_id
+                # Примечание: book_cover_ids.append вызывается только вместе с bodies.append
+                # чтобы len(book_cover_ids) == len(bodies) всегда.
 
                 def _remap_image_refs(xml: str, remap: dict = id_remap) -> str:
                     """Обновить все <image l:href="#orig"> → <image l:href="#new">."""
@@ -2768,8 +2777,10 @@ class FB2CompilerService:
                             f"(уже покрыты до тома {covered_hi}), "
                             f"берём {len(to_add)} томов начиная с {first_new}"
                         )
-                    for _vol, sec_title, sec_body in to_add:
+                    for i, (_vol, sec_title, sec_body) in enumerate(to_add):
                         bodies.append((sec_title, _remap_image_refs(sec_body)))
+                        # Обложка: только у первой секции этой предкомпиляции
+                        book_cover_ids.append(book_cover_id if i == 0 else None)
                     covered_hi = max(covered_hi, b_hi)
                 else:
                     # Обычная книга — берём целиком.
@@ -2781,6 +2792,7 @@ class FB2CompilerService:
                         continue
                     title, body_xml = self._extract_body(book)
                     bodies.append((title, _remap_image_refs(body_xml)))
+                    book_cover_ids.append(book_cover_id)
                     if sn:
                         covered_hi = max(covered_hi, sn)
 
