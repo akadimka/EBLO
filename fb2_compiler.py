@@ -2774,11 +2774,18 @@ class FB2CompilerService:
             # Пример: Сафари 1 (Дилогия) + Сафари 2 (Трилогия) + Сафари 3 (Трилогия)
             # → arc_count=3, total_books=8 → «Трилогия в 8 книгах».
             _arc_part_count = 0
-            _all_arc_point = all(
-                self._precompiled_range(b, group.series)[0] ==
-                self._precompiled_range(b, group.series)[1] > 0
-                for b in group.books
-            )
+            # Arc-unit: книга либо является arc-point предкомпиляцией (lo==hi>0),
+            # либо занимает ровно одну плоскую arc-позицию (sk=(0,N,0,0)).
+            # Второй случай позволяет считать «в N книгах» даже когда одна дуга
+            # представлена одиночным файлом без сервисного слова в имени.
+            def _is_arc_unit(b: 'CompilationBook') -> bool:
+                lo, hi = self._precompiled_range(b, group.series)
+                if lo == hi > 0:
+                    return True
+                return (b.sort_key[0] == 0 and b.sort_key[1] > 0
+                        and b.sort_key[2] == 0)
+
+            _all_arc_point = bool(group.books) and all(_is_arc_unit(b) for b in group.books)
             if _all_arc_point:
                 _swords_idx = {kw.lower(): idx
                                for idx, kw in enumerate(self._SERIES_WORDS) if kw}
@@ -2787,22 +2794,26 @@ class FB2CompilerService:
                     re.IGNORECASE | re.UNICODE,
                 )
                 for b in group.books:
-                    _st = (b.abs_path.stem + ' ' + (b.record.file_title or '')).lower()
-                    _m = _swords_pat.search(_st)
-                    if _m:
-                        _arc_part_count += _swords_idx[_m.group(0).lower()]
-                    else:
-                        # Фоллбек: ищем диапазон N-M в стеме (внутренние книги arc'а).
-                        # «Брия 1. Книга Длинного Солнца 1-2» → "1-2" после точки = 2 книги.
-                        _rng_in_stem = re.search(r'(\d+)\s*[-–—]\s*(\d+)', b.abs_path.stem)
-                        if _rng_in_stem:
-                            _r_lo, _r_hi = int(_rng_in_stem.group(1)), int(_rng_in_stem.group(2))
-                            if _r_hi > _r_lo and _r_hi - _r_lo < 50:
-                                _arc_part_count += _r_hi - _r_lo + 1
+                    lo, hi = self._precompiled_range(b, group.series)
+                    if lo == hi > 0:
+                        # Arc-point предкомпиляция: считаем по сервисному слову/диапазону
+                        _st = (b.abs_path.stem + ' ' + (b.record.file_title or '')).lower()
+                        _m = _swords_pat.search(_st)
+                        if _m:
+                            _arc_part_count += _swords_idx[_m.group(0).lower()]
+                        else:
+                            _rng_in_stem = re.search(r'(\d+)\s*[-–—]\s*(\d+)', b.abs_path.stem)
+                            if _rng_in_stem:
+                                _r_lo, _r_hi = int(_rng_in_stem.group(1)), int(_rng_in_stem.group(2))
+                                if _r_hi > _r_lo and _r_hi - _r_lo < 50:
+                                    _arc_part_count += _r_hi - _r_lo + 1
+                                else:
+                                    _arc_part_count += 1
                             else:
                                 _arc_part_count += 1
-                        else:
-                            _arc_part_count += 1  # одиночная книга
+                    else:
+                        # Одиночная книга на плоской arc-позиции → 1 книга
+                        _arc_part_count += 1
                 if _arc_part_count <= n_volumes:
                     _arc_part_count = 0  # не имеет смысла если не больше числа arc'ов
 

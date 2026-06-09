@@ -739,32 +739,37 @@ class CompilerDialog:
             sc = group.series_complete
             # Суммарное число томов для arc-позиционных предкомпиляций
             _arc_part_count = 0
-            _all_arc_point = all(
-                self._service._precompiled_range(b, group.series)[0] ==
-                self._service._precompiled_range(b, group.series)[1] > 0
-                for b in group.books
-            ) if group.books else False
+            def _is_arc_unit_gui(b):
+                lo, hi = self._service._precompiled_range(b, group.series)
+                if lo == hi > 0:
+                    return True
+                return (b.sort_key[0] == 0 and b.sort_key[1] > 0
+                        and b.sort_key[2] == 0)
+            _all_arc_point = bool(group.books) and all(_is_arc_unit_gui(b) for b in group.books)
             if _all_arc_point:
                 _swords_idx = {kw.lower(): idx
                                for idx, kw in enumerate(self._service._SERIES_WORDS) if kw}
                 _swords_pat = _re.compile(
                     '|'.join(_re.escape(k) for k in _swords_idx), _re.IGNORECASE)
                 for b in group.books:
-                    _st = (b.abs_path.stem + ' ' + (b.record.file_title or '')).lower()
-                    _m = _swords_pat.search(_st)
-                    if _m:
-                        _arc_part_count += _swords_idx[_m.group(0).lower()]
-                    else:
-                        # Фоллбек: диапазон N-M в стеме = внутренние книги arc'а
-                        _rng = _re.search(r'(\d+)\s*[-–—]\s*(\d+)', b.abs_path.stem)
-                        if _rng:
-                            _r_lo, _r_hi = int(_rng.group(1)), int(_rng.group(2))
-                            if _r_hi > _r_lo and _r_hi - _r_lo < 50:
-                                _arc_part_count += _r_hi - _r_lo + 1
+                    _lo, _hi = self._service._precompiled_range(b, group.series)
+                    if _lo == _hi > 0:
+                        _st = (b.abs_path.stem + ' ' + (b.record.file_title or '')).lower()
+                        _m = _swords_pat.search(_st)
+                        if _m:
+                            _arc_part_count += _swords_idx[_m.group(0).lower()]
+                        else:
+                            _rng = _re.search(r'(\d+)\s*[-–—]\s*(\d+)', b.abs_path.stem)
+                            if _rng:
+                                _r_lo, _r_hi = int(_rng.group(1)), int(_rng.group(2))
+                                if _r_hi > _r_lo and _r_hi - _r_lo < 50:
+                                    _arc_part_count += _r_hi - _r_lo + 1
+                                else:
+                                    _arc_part_count += 1
                             else:
                                 _arc_part_count += 1
-                        else:
-                            _arc_part_count += 1
+                    else:
+                        _arc_part_count += 1
                 if _arc_part_count <= n_volumes:
                     _arc_part_count = 0
             # Если пользователь исключил книги — серия неполная, всегда т. N-M
