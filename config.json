@@ -1,7 +1,7 @@
 {
   "library_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/EBook Library",
   "last_scan_path": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test2",
-  "normalizer_folder": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test2",
+  "normalizer_folder": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1",
   "genres_file_path": "C:\\Temp\\fb2parser\\genres.xml",
   "genre_association_method": "context_menu",
   "window_sizes": {
@@ -548,7 +548,8 @@
     "Кондакова Анна": "Райро А.(Кондакова Анна)",
     "Райро А.": "Райро А.(Кондакова Анна)",
     "Базилио": "Базилио (Риддер Аристарх)",
-    "Постельгио": "Постегильо"
+    "Постельгио": "Постегильо",
+    "Гвор Михаил": "Рагимов Михаил"
   },
   "genre_category_words": [
     "фантастический",
