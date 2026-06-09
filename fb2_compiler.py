@@ -978,7 +978,14 @@ class FB2CompilerService:
                         for b in books:
                             folder = str(b.abs_path.parent)
                             vol = _eff_vol(b) or None
-                            if folder != dominant_folder and vol and vol in dominant_vols:
+                            # Предкомпиляция с диапазоном N-M, у которой hi > max(dominant_vols):
+                            # содержит уникальный контент за пределами доминирующей папки.
+                            rng_pre = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', b.volume_label or '')
+                            has_unique = rng_pre and any(
+                                v not in dominant_vols
+                                for v in range(int(rng_pre.group(1)), int(rng_pre.group(2)) + 1)
+                            )
+                            if folder != dominant_folder and vol and vol in dominant_vols and not has_unique:
                                 duplicate_paths.append(b.abs_path)
                             else:
                                 new_books.append(b)
@@ -2751,10 +2758,15 @@ class FB2CompilerService:
                         bodies.append((sec_title, _remap_image_refs(sec_body)))
                     covered_hi = max(covered_hi, b_hi)
                 else:
-                    # Обычная книга — берём целиком
+                    # Обычная книга — берём целиком.
+                    # Если позиция уже покрыта предкомпиляцией (covered_hi ≥ sn),
+                    # пропускаем: контент этого тома уже есть в ранее добавленном диапазоне.
+                    sn = book.sort_key[1] if book.sort_key[0] == 0 else 0
+                    if sn and sn <= covered_hi:
+                        self._log(f"  ℹ Пропуск {book.abs_path.name} — позиция {sn} покрыта до {covered_hi}")
+                        continue
                     title, body_xml = self._extract_body(book)
                     bodies.append((title, _remap_image_refs(body_xml)))
-                    sn = book.sort_key[1] if book.sort_key[0] == 0 else 0
                     if sn:
                         covered_hi = max(covered_hi, sn)
 
