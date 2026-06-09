@@ -773,14 +773,17 @@ class CompilerDialog:
                 if _arc_part_count <= n_volumes:
                     _arc_part_count = 0
             # Если пользователь исключил книги — серия неполная, всегда т. N-M
-            # Проверка пробелов в arc-позициях
-            _top_arc_pos = sorted({
-                b.sort_key[1] for b in group.books
-                if b.sort_key[0] == 0 and b.sort_key[1]
-            })
-            _arc_has_gaps = (
-                len(_top_arc_pos) >= 2 and
-                _top_arc_pos != list(range(_top_arc_pos[0], _top_arc_pos[-1] + 1))
+            # Проверка пробелов в arc-позициях (с учётом volume_label для предкомпиляций)
+            def _vl_hi_gui(b):
+                rng = _re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', b.volume_label or '')
+                return int(rng.group(2)) if rng else b.sort_key[1]
+            _arc_books_s = sorted(
+                [b for b in group.books if b.sort_key[0] == 0 and b.sort_key[1]],
+                key=lambda b: b.sort_key[1],
+            )
+            _arc_has_gaps = bool(_arc_books_s) and len(_arc_books_s) >= 2 and any(
+                _arc_books_s[i].sort_key[1] > _vl_hi_gui(_arc_books_s[i - 1]) + 1
+                for i in range(1, len(_arc_books_s))
             )
             _sc = True if _arc_part_count > 0 else sc
             _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths)

@@ -39,6 +39,10 @@ def _import_pipeline():
 def _predict_filename(service, group) -> str:
     """Вычислить предсказанное имя файла для группы (без GUI)."""
     try:
+        if getattr(group, 'cleanup_only', False) or not group.books:
+            kept = getattr(group, 'kept_paths', None)
+            kname = kept[0].name if kept else '—'
+            return f'[cleanup] kept={kname}'
         clean_series = service._clean_series_name(group.series)
         safe_author  = re.sub(r'[\\/:*?"<>|]', '_', group.author)
         part_count   = getattr(group, 'part_count', 0)
@@ -77,13 +81,16 @@ def _predict_filename(service, group) -> str:
             if _arc_part_count <= n_volumes:
                 _arc_part_count = 0
 
-        _top_arc_pos = sorted({
-            b.sort_key[1] for b in group.books
-            if b.sort_key[0] == 0 and b.sort_key[1]
-        })
-        _arc_has_gaps = (
-            len(_top_arc_pos) >= 2 and
-            _top_arc_pos != list(range(_top_arc_pos[0], _top_arc_pos[-1] + 1))
+        def _vl_hi_r(b):
+            rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', b.volume_label or '')
+            return int(rng.group(2)) if rng else b.sort_key[1]
+        _arc_books_r = sorted(
+            [b for b in group.books if b.sort_key[0] == 0 and b.sort_key[1]],
+            key=lambda b: b.sort_key[1],
+        )
+        _arc_has_gaps = len(_arc_books_r) >= 2 and any(
+            _arc_books_r[i].sort_key[1] > _vl_hi_r(_arc_books_r[i - 1]) + 1
+            for i in range(1, len(_arc_books_r))
         )
         _sc = True if _arc_part_count > 0 else sc
         _has_exclusions = bool(getattr(group, 'excluded_paths', None) or

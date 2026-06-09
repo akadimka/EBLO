@@ -1,6 +1,6 @@
 {
   "meta": {
-    "timestamp": "2026-06-09T11:09:01.035918",
+    "timestamp": "2026-06-09T12:41:26.736140",
     "scan_dir": "C:/Users/dmitriy.murov/Downloads/TriblerDownloads/Test1"
   },
   "data": [
@@ -214,7 +214,7 @@
       "kept": [
         "MARHUZ. Развоплощённый 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=MARHUZ. Развоплощённый 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -250,7 +250,7 @@
       "kept": [
         "Navuhodonosr. 01. Invincible! I'm Invincible!.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Navuhodonosr. 01. Invincible! I'm Invincible!.fb2",
       "sort_sources": []
     },
     {
@@ -395,7 +395,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "А_З_К - Маневры (т. 1-3).fb2",
+      "predicted_file": "А_З_К - Маневры (Трилогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -689,7 +689,7 @@
       "kept": [
         "Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Авраменко Александр - Солдат удачи (Солдат удачи. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -872,7 +872,7 @@
       "kept": [
         "Алейникова Юлия. Тайное сокровище Айвазовского. Проклятие Ивана Грозного и его сына Ивана.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Алейникова Юлия. Тайное сокровище Айвазовского. Проклятие Ивана Грозного и его сына Ивана.fb2",
       "sort_sources": []
     },
     {
@@ -889,7 +889,7 @@
       "kept": [
         "Александрова Наталья. Венец Чингисхана. Проклятие Осириса.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Венец Чингисхана. Проклятие Осириса.fb2",
       "sort_sources": []
     },
     {
@@ -906,7 +906,7 @@
       "kept": [
         "Александрова Наталья. Волшебный город. Тайна золота инков.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Волшебный город. Тайна золота инков.fb2",
       "sort_sources": []
     },
     {
@@ -923,7 +923,7 @@
       "kept": [
         "Александрова Наталья. Волшебный компас Колумба. Неизвестный шедевр Рембрандта.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Волшебный компас Колумба. Неизвестный шедевр Рембрандта.fb2",
       "sort_sources": []
     },
     {
@@ -940,7 +940,7 @@
       "kept": [
         "Александрова Наталья. Дар царицы Савской. Абиссинское заклинание.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Дар царицы Савской. Абиссинское заклинание.fb2",
       "sort_sources": []
     },
     {
@@ -957,7 +957,7 @@
       "kept": [
         "Александрова Наталья. Завещание короля Балдуина. Ожерелье богини Кали.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Завещание короля Балдуина. Ожерелье богини Кали.fb2",
       "sort_sources": []
     },
     {
@@ -974,7 +974,7 @@
       "kept": [
         "Александрова Наталья. Зеркало Лукреции Борджиа. Клинок князя Дракулы.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Зеркало Лукреции Борджиа. Клинок князя Дракулы.fb2",
       "sort_sources": []
     },
     {
@@ -991,7 +991,7 @@
       "kept": [
         "Александрова Наталья. Золото Атлантиды. Осколок тунгусского метеорита.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Золото Атлантиды. Осколок тунгусского метеорита.fb2",
       "sort_sources": []
     },
     {
@@ -1009,7 +1009,7 @@
       "kept": [
         "Александрова Наталья. Огненный рубин апостола Петра. Священный изумруд апостола Петра.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Огненный рубин апостола Петра. Священный изумруд апостола Петра.fb2",
       "sort_sources": []
     },
     {
@@ -1026,7 +1026,7 @@
       "kept": [
         "Александрова Наталья. Клавесин Марии-Антуанетты. Шкатулка Люцифера.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Клавесин Марии-Антуанетты. Шкатулка Люцифера.fb2",
       "sort_sources": []
     },
     {
@@ -1043,7 +1043,7 @@
       "kept": [
         "Александрова Наталья. Клад Наполеона. Завещание алхимика.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Клад Наполеона. Завещание алхимика.fb2",
       "sort_sources": []
     },
     {
@@ -1060,7 +1060,7 @@
       "kept": [
         "Александрова Наталья. Ларец графа Сен-Жермен. Монета Александра Македонского.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Ларец графа Сен-Жермен. Монета Александра Македонского.fb2",
       "sort_sources": []
     },
     {
@@ -1077,7 +1077,7 @@
       "kept": [
         "Александрова Наталья. Медальон инквизитора. Маска Нерона.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Медальон инквизитора. Маска Нерона.fb2",
       "sort_sources": []
     },
     {
@@ -1094,7 +1094,7 @@
       "kept": [
         "Александрова Наталья. Меч с берегов Валгаллы. Звезда ассирийского царя.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Меч с берегов Валгаллы. Звезда ассирийского царя.fb2",
       "sort_sources": []
     },
     {
@@ -1111,7 +1111,7 @@
       "kept": [
         "Александрова Наталья. Перстень Екатерины Великой. Ожерелье казненной королевы.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Перстень Екатерины Великой. Ожерелье казненной королевы.fb2",
       "sort_sources": []
     },
     {
@@ -1128,7 +1128,7 @@
       "kept": [
         "Александрова Наталья. Последний ученик да Винчи. Талисман египетской царицы.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Последний ученик да Винчи. Талисман египетской царицы.fb2",
       "sort_sources": []
     },
     {
@@ -1145,7 +1145,7 @@
       "kept": [
         "Александрова Наталья. Последняя загадка Ивана Грозного. Легенда о Ночном дозоре.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Последняя загадка Ивана Грозного. Легенда о Ночном дозоре.fb2",
       "sort_sources": []
     },
     {
@@ -1162,7 +1162,7 @@
       "kept": [
         "Александрова Наталья. Приворотный амулет Казановы. Наследство Марко Поло.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Приворотный амулет Казановы. Наследство Марко Поло.fb2",
       "sort_sources": []
     },
     {
@@ -1179,7 +1179,7 @@
       "kept": [
         "Александрова Наталья. Табакерка Робеспьера. Дублон капитана Флинта.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Табакерка Робеспьера. Дублон капитана Флинта.fb2",
       "sort_sources": []
     },
     {
@@ -1196,7 +1196,7 @@
       "kept": [
         "Александрова Наталья. Таинственный сапфир апостола Петра. Магический камень апостола Петра.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Александрова Наталья. Таинственный сапфир апостола Петра. Магический камень апостола Петра.fb2",
       "sort_sources": []
     },
     {
@@ -1430,7 +1430,7 @@
       "kept": [
         "Неандерталец 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Неандерталец 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -1470,7 +1470,7 @@
       "kept": [
         "Лео Андрей. Сделай, что сможешь 1-2.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Лео Андрей. Сделай, что сможешь 1-2.fb2",
       "sort_sources": []
     },
     {
@@ -1490,7 +1490,7 @@
       "kept": [
         "Анисимов Сергей - Вариант «Бис» (Вариант «Бис». Дилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Анисимов Сергей - Вариант «Бис» (Вариант «Бис». Дилогия).fb2",
       "sort_sources": []
     },
     {
@@ -1604,7 +1604,7 @@
       "kept": [
         "Арсеньева Елена. Бабочки Креза. Камень богини любви.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Арсеньева Елена. Бабочки Креза. Камень богини любви.fb2",
       "sort_sources": []
     },
     {
@@ -1621,7 +1621,7 @@
       "kept": [
         "Арсеньева Елена. Ключ к сердцу императрицы. Личный оборотень королевы.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Арсеньева Елена. Ключ к сердцу императрицы. Личный оборотень королевы.fb2",
       "sort_sources": []
     },
     {
@@ -1860,7 +1860,7 @@
       "kept": [
         "Астахов Андрей. RPG 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Астахов Андрей. RPG 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -2068,7 +2068,7 @@
       "kept": [
         "Ахметов Михаил - Free Space 3. Разрушители звезд.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Ахметов Михаил - Free Space 3. Разрушители звезд.fb2",
       "sort_sources": []
     },
     {
@@ -2274,7 +2274,7 @@
       "kept": [
         "Барчук Павел - Веер миров 1. Охотники за Попаданцами.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Барчук Павел - Веер миров 1. Охотники за Попаданцами.fb2",
       "sort_sources": []
     },
     {
@@ -2731,7 +2731,7 @@
       "kept": [
         "Барчук Павел, Ларин Павел. Участковый 1-2.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Барчук Павел, Ларин Павел. Участковый 1-2.fb2",
       "sort_sources": []
     },
     {
@@ -2861,7 +2861,7 @@
       "kept": [
         "Батыршин Борис. Комонс 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Батыршин Борис. Комонс 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -3129,7 +3129,7 @@
       "kept": [
         "Белянин Андрей. Багдадский вор 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Белянин Андрей. Багдадский вор 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -3200,7 +3200,7 @@
       "kept": [
         "Берг Александр. Антиблицкриг 1-7.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Берг Александр. Антиблицкриг 1-7.fb2",
       "sort_sources": []
     },
     {
@@ -3422,7 +3422,7 @@
     },
     {
       "author": "Бирюков Александр, Сердитый Глеб",
-      "series": "Человек-саламандра",
+      "series": "Человек-Саламандра",
       "volume_range": "1-2",
       "series_complete": true,
       "cleanup_only": false,
@@ -3436,7 +3436,7 @@
         "2. По следу Саламандры.fb2"
       ],
       "kept": [],
-      "predicted_file": "Бирюков Александр, Сердитый Глеб - Человек-саламандра (Дилогия).fb2",
+      "predicted_file": "Бирюков Александр, Сердитый Глеб - Человек-Саламандра (Дилогия).fb2",
       "sort_sources": [
         "series_number"
       ]
@@ -3571,7 +3571,7 @@
       "kept": [
         "Цивилизация 2.0 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Цивилизация 2.0 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -3626,7 +3626,7 @@
       "kept": [
         "Бор Жорж, Винокуров Юрий. Первый среди Равных 1-16.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Бор Жорж, Винокуров Юрий. Первый среди Равных 1-16.fb2",
       "sort_sources": []
     },
     {
@@ -3769,7 +3769,7 @@
         "Боярский Андрей. Неудержимый 31-43.fb2"
       ],
       "kept": [],
-      "predicted_file": "Боярский Андрей - Неудержимый (т. 1-45).fb2",
+      "predicted_file": "Боярский Андрей - Неудержимый (в 57 книгах).fb2",
       "sort_sources": [
         "filename_range"
       ]
@@ -3828,7 +3828,7 @@
         "Бредвик. Цикл «Войд». Том 2.fb2"
       ],
       "kept": [],
-      "predicted_file": "Бредвик Алекс - Войд (т. 1-6).fb2",
+      "predicted_file": "Бредвик Алекс - Войд (Гексалогия).fb2",
       "sort_sources": [
         "filename_range"
       ]
@@ -4159,7 +4159,7 @@
         "Быченин. Цикл «Оружейники». Том 2.fb2"
       ],
       "kept": [],
-      "predicted_file": "Быченин Александр - Оружейники (т. 1-7).fb2",
+      "predicted_file": "Быченин Александр - Оружейники (Гепталогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -4204,7 +4204,7 @@
       "kept": [
         "1. Дурак космического масштаба (2023).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=1. Дурак космического масштаба (2023).fb2",
       "sort_sources": []
     },
     {
@@ -4300,7 +4300,7 @@
       "kept": [
         "Валетов Ян - Ничья земля (Ничья земля. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Валетов Ян - Ничья земля (Ничья земля. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -4432,7 +4432,7 @@
         "4. Стальная империя.fb2"
       ],
       "kept": [],
-      "predicted_file": "Васильев Сергей - Император из стали (т. 1-5).fb2",
+      "predicted_file": "Васильев Сергей - Император из стали (Пенталогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -4490,7 +4490,7 @@
       "kept": [
         "Васильев Сергей - Эпоха перемен (Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Васильев Сергей - Эпоха перемен (Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -4510,7 +4510,7 @@
       "kept": [
         "Вебер Дэвид, Уайт Стив. Галактический шторм 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Вебер Дэвид, Уайт Стив. Галактический шторм 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -4566,12 +4566,12 @@
       "kept": [
         "Верещагин Олег - Я иду искать! (Я иду искать! Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Верещагин Олег - Я иду искать! (Я иду искать! Тетралогия).fb2",
       "sort_sources": []
     },
     {
       "author": "Ветер",
-      "series": "Не ГГ 2-3\\Курсанты",
+      "series": "Не ГГ",
       "volume_range": "1-4",
       "series_complete": true,
       "cleanup_only": false,
@@ -4584,7 +4584,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Ветер - Не ГГ 2-3. Курсанты (Тетралогия).fb2",
+      "predicted_file": "Ветер - Не ГГ (Тетралогия).fb2",
       "sort_sources": [
         "series_number"
       ]
@@ -4608,7 +4608,7 @@
       "kept": [
         "Ветров Клим. Чужие степи 1-7.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Ветров Клим. Чужие степи 1-7.fb2",
       "sort_sources": []
     },
     {
@@ -5200,7 +5200,7 @@
       "kept": [
         "Пленники Зоны. Кровь цвета хаки.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Пленники Зоны. Кровь цвета хаки.fb2",
       "sort_sources": []
     },
     {
@@ -5217,7 +5217,7 @@
       "kept": [
         "1. Вторжение.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=1. Вторжение.fb2",
       "sort_sources": []
     },
     {
@@ -5462,7 +5462,7 @@
       "kept": [
         "Володин Григорий. История Телепата (Газлайтер) 1-40.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Володин Григорий. История Телепата (Газлайтер) 1-40.fb2",
       "sort_sources": []
     },
     {
@@ -5538,17 +5538,17 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Воронков Николай. Мертвые земли 1-8.fb2"
-      ],
-      "kept": [
         "Воронков Николай. Мёртвые земли 1-8.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Воронков Николай. Мертвые земли 1-8.fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Воронков Николай. Мертвые земли 1-8.fb2",
       "sort_sources": []
     },
     {
       "author": "Воронцов Александр",
-      "series": "Вторая жизнь сержанта Зверева",
+      "series": "Вторая жизнь сержанта Зверева 2-3\\Мальчик-убийца",
       "volume_range": "1-5",
       "series_complete": true,
       "cleanup_only": false,
@@ -5562,7 +5562,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Воронцов Александр - Вторая жизнь сержанта Зверева (Пенталогия).fb2",
+      "predicted_file": "Воронцов Александр - Вторая жизнь сержанта Зверева 2-3. Мальчик-убийца (Пенталогия).fb2",
       "sort_sources": [
         "series_number"
       ]
@@ -5763,7 +5763,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Вэнс Джек - Умирающая Земля (т. 1-4).fb2",
+      "predicted_file": "Вэнс Джек - Умирающая Земля (Тетралогия).fb2",
       "sort_sources": [
         "filename_range"
       ]
@@ -5983,7 +5983,7 @@
       "kept": [
         "Гарцевич Евгений. Я - Легенда! 1-6.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Гарцевич Евгений. Я - Легенда! 1-6.fb2",
       "sort_sources": []
     },
     {
@@ -6000,7 +6000,7 @@
       "kept": [
         "01_Эффект присутствия.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=01_Эффект присутствия.fb2",
       "sort_sources": []
     },
     {
@@ -6017,7 +6017,7 @@
       "kept": [
         "_Второй шанс 1-8.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=_Второй шанс 1-8.fb2",
       "sort_sources": []
     },
     {
@@ -6127,7 +6127,7 @@
       "kept": [
         "_Преисподняя. Книги 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=_Преисподняя. Книги 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -6165,7 +6165,7 @@
       "kept": [
         "_Семь кругов Бастиона. Книги 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=_Семь кругов Бастиона. Книги 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -6200,11 +6200,11 @@
       "kept": [
         "01_Пожарный СССР. Начало.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=01_Пожарный СССР. Начало.fb2",
       "sort_sources": []
     },
     {
-      "author": "Гвор Виктор, Гвор Михаил",
+      "author": "Гвор Виктор, Рагимов Михаил",
       "series": "Волхвы Скрытной Управы",
       "volume_range": "1-2",
       "series_complete": true,
@@ -6216,7 +6216,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Гвор Виктор, Гвор Михаил - Волхвы Скрытной Управы (Дилогия).fb2",
+      "predicted_file": "Гвор Виктор, Рагимов Михаил - Волхвы Скрытной Управы (Дилогия).fb2",
       "sort_sources": [
         "series_number"
       ]
@@ -6361,7 +6361,7 @@
       "kept": [
         "Гнаденберг Вадим. Аврия 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Гнаденберг Вадим. Аврия 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -6735,12 +6735,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Городецкий Иван. Другой мир 1-5.fb2"
-      ],
-      "kept": [
         "Городецкий Иван (Varfonum). Другой мир 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Городецкий Иван. Другой мир 1-5.fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Городецкий Иван. Другой мир 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -6914,7 +6914,7 @@
       "kept": [
         "1-3. Ужас Дикого Леса.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=1-3. Ужас Дикого Леса.fb2",
       "sort_sources": []
     },
     {
@@ -7060,7 +7060,7 @@
       "kept": [
         "Градинар Дмитрий - Звёздный патент (Трижды погибший. Трилогия + Мир приливов 1).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Градинар Дмитрий - Звёздный патент (Трижды погибший. Трилогия + Мир приливов 1).fb2",
       "sort_sources": []
     },
     {
@@ -7147,7 +7147,7 @@
       "kept": [
         "Злотников Роман, Гринчевский Игорь. Американец 1-6.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Злотников Роман, Гринчевский Игорь. Американец 1-6.fb2",
       "sort_sources": []
     },
     {
@@ -7186,7 +7186,7 @@
       "kept": [
         "Громов Борис. Терской фронт 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Громов Борис. Терской фронт 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -7256,7 +7256,7 @@
       "kept": [
         "Тарасов Ник, Громов Ян. Старатель. Золотая лихорадка. Урал. 19 век 1-6.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Тарасов Ник, Громов Ян. Старатель. Золотая лихорадка. Урал. 19 век 1-6.fb2",
       "sort_sources": []
     },
     {
@@ -7339,7 +7339,7 @@
       "kept": [
         "Гросов Виктор. Ювелир 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Гросов Виктор. Ювелир 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -7420,7 +7420,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Губарев Алексей - Герой земли (т. 1-4).fb2",
+      "predicted_file": "Губарев Алексей - Герой земли (Тетралогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -7898,7 +7898,7 @@
       "kept": [
         "_Боксер Назад в СССР 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=_Боксер Назад в СССР 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -7949,7 +7949,7 @@
       "kept": [
         "01_Мурка.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=01_Мурка.fb2",
       "sort_sources": []
     },
     {
@@ -8397,7 +8397,7 @@
       "kept": [
         "Дай Андрей. Поводырь 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дай Андрей. Поводырь 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -8411,12 +8411,12 @@
       "duplicates": [
         "Дакар Даниэль - Тёмная для кошки 1. Легионер.fb2",
         "Дакар Даниэль - Тёмная для кошки 2. Консультант.fb2",
-        "Дакар Даниэль. Темная для кошки 1-4.fb2"
-      ],
-      "kept": [
         "Дакар Даниэль. Тёмная для кошки 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Дакар Даниэль. Темная для кошки 1-4.fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Дакар Даниэль. Темная для кошки 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -8437,7 +8437,7 @@
       "kept": [
         "Дакар Даниэль - Джокер (Фабрика героев. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дакар Даниэль - Джокер (Фабрика героев. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -8573,7 +8573,7 @@
       "kept": [
         "Дамиров Рафаэль. Курсант. Назад в СССР 1-14.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дамиров Рафаэль. Курсант. Назад в СССР 1-14.fb2",
       "sort_sources": []
     },
     {
@@ -8673,7 +8673,7 @@
       "kept": [
         "Дамиров Рафаэль. Последний Герой 1-10.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дамиров Рафаэль. Последний Герой 1-10.fb2",
       "sort_sources": []
     },
     {
@@ -8744,7 +8744,7 @@
       "kept": [
         "_Аномальщик 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=_Аномальщик 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -8796,7 +8796,7 @@
       "kept": [
         "Данильченко Олег - Имперский вояж (Имперский вояж. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Данильченко Олег - Имперский вояж (Имперский вояж. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -8831,7 +8831,7 @@
       "kept": [
         "Даррелл Джеральд - Моя семья и другие звери.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Даррелл Джеральд - Моя семья и другие звери.fb2",
       "sort_sources": []
     },
     {
@@ -8971,7 +8971,7 @@
       "kept": [
         "Дель Торо Гильермо, Хоган Чак - Архивы Блэквуда 1. Незримые.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дель Торо Гильермо, Хоган Чак - Архивы Блэквуда 1. Незримые.fb2",
       "sort_sources": []
     },
     {
@@ -9026,12 +9026,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Демченко. Боярич (Воздушный стрелок 1-3).fb2"
-      ],
-      "kept": [
         "Демченко Антон - Боярич (Воздушный стрелок 1-3).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Демченко. Боярич (Воздушный стрелок 1-3).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Демченко. Боярич (Воздушный стрелок 1-3).fb2",
       "sort_sources": []
     },
     {
@@ -9087,7 +9087,7 @@
       "kept": [
         "Демченко Антон - Хольмградские истории (Хольмградские истории. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Демченко Антон - Хольмградские истории (Хольмградские истории. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -9099,12 +9099,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Денисов. Герои нашего племени (Герои нашего племени. Трилогия).fb2"
-      ],
-      "kept": [
         "Денисов Вадим - Герои нашего племени (Герои нашего племени. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Денисов. Герои нашего племени (Герои нашего племени. Трилогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Денисов. Герои нашего племени (Герои нашего племени. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -9197,7 +9197,7 @@
       "kept": [
         "Дженнингс Гэри - Ацтек 1. Ацтек.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дженнингс Гэри - Ацтек 1. Ацтек.fb2",
       "sort_sources": []
     },
     {
@@ -9214,7 +9214,7 @@
       "kept": [
         "Дженнингс Гэри - Путешественник.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дженнингс Гэри - Путешественник.fb2",
       "sort_sources": []
     },
     {
@@ -9588,10 +9588,10 @@
         "11_Кавказский рубеж. Книга 11.fb2"
       ],
       "duplicates": [
-        "Дорин Михаил - Рубеж 5. Сирийский рубеж.fb2",
-        "Дорин Михаил - Рубеж 6. Сирийский рубеж 2.fb2",
-        "Дорин Михаил - Рубеж 7. Сирийский рубеж 3.fb2",
-        "Дорин Михаил - Рубеж 8. Сирийский рубеж 4.fb2"
+        "Дорин Михаил - Рубеж 1. Афганский рубеж.fb2",
+        "Дорин Михаил - Рубеж 2. Афганский рубеж 2.fb2",
+        "Дорин Михаил - Рубеж 3. Афганский рубеж 3.fb2",
+        "Дорин Михаил - Рубеж 4. Афганский рубеж 4.fb2"
       ],
       "kept": [],
       "predicted_file": "Дорин Михаил - Рубеж (в 11 книгах).fb2",
@@ -9601,20 +9601,20 @@
     },
     {
       "author": "Дорин Михаил",
-      "series": "Рубеж 5-8 1-4\\Афганский рубеж",
-      "volume_range": "1-4",
+      "series": "Рубеж 1-4 5-8\\Сирийский рубеж",
+      "volume_range": "5-8",
       "series_complete": true,
       "cleanup_only": false,
       "book_count": 4,
       "books": [
-        "Дорин Михаил - Рубеж 1. Афганский рубеж.fb2",
-        "Дорин Михаил - Рубеж 2. Афганский рубеж 2.fb2",
-        "Дорин Михаил - Рубеж 3. Афганский рубеж 3.fb2",
-        "Дорин Михаил - Рубеж 4. Афганский рубеж 4.fb2"
+        "Дорин Михаил - Рубеж 5. Сирийский рубеж.fb2",
+        "Дорин Михаил - Рубеж 6. Сирийский рубеж 2.fb2",
+        "Дорин Михаил - Рубеж 7. Сирийский рубеж 3.fb2",
+        "Дорин Михаил - Рубеж 8. Сирийский рубеж 4.fb2"
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Дорин Михаил - Рубеж 5-8 1-4. Афганский рубеж (Тетралогия).fb2",
+      "predicted_file": "Дорин Михаил - Рубеж 1-4 5-8. Сирийский рубеж (т. 5-8).fb2",
       "sort_sources": [
         "series_number"
       ]
@@ -9706,7 +9706,7 @@
       "kept": [
         "Дорничев Дмитрий. Возвращение Великого. Я великий друид которому 400 лет! 1-11.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дорничев Дмитрий. Возвращение Великого. Я великий друид которому 400 лет! 1-11.fb2",
       "sort_sources": []
     },
     {
@@ -9743,7 +9743,7 @@
       "kept": [
         "Дравин Игорь. Чужак 0-11.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дравин Игорь. Чужак 0-11.fb2",
       "sort_sources": []
     },
     {
@@ -9761,7 +9761,7 @@
       "kept": [
         "Дроздов Анатолий. Божья коровка 1-2.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дроздов Анатолий. Божья коровка 1-2.fb2",
       "sort_sources": []
     },
     {
@@ -9993,7 +9993,7 @@
       "kept": [
         "Егорова Алина. Ангел-хранитель. Дар богов.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Егорова Алина. Ангел-хранитель. Дар богов.fb2",
       "sort_sources": []
     },
     {
@@ -10010,7 +10010,7 @@
       "kept": [
         "Егорова Алина. Ведьмино яблоко раздора. Драгоценности Жозефины.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Егорова Алина. Ведьмино яблоко раздора. Драгоценности Жозефины.fb2",
       "sort_sources": []
     },
     {
@@ -10027,7 +10027,7 @@
       "kept": [
         "Егорова Алина. Сапфиры Айседоры Дункан. Рубины леди Гамильтон.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Егорова Алина. Сапфиры Айседоры Дункан. Рубины леди Гамильтон.fb2",
       "sort_sources": []
     },
     {
@@ -10183,7 +10183,7 @@
       "kept": [
         "Емельянов Антон, Савинов Сергей. Второй Сибирский. Японская война 1-9.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Емельянов Антон, Савинов Сергей. Второй Сибирский. Японская война 1-9.fb2",
       "sort_sources": []
     },
     {
@@ -10401,7 +10401,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Желязны Роджер - Хроники Амбера (т. 1-4).fb2",
+      "predicted_file": "Желязны Роджер - Хроники Амбера (Тетралогия).fb2",
       "sort_sources": [
         "filename_range"
       ]
@@ -10505,7 +10505,7 @@
       "kept": [
         "Коловрат. Трилогия.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Коловрат. Трилогия.fb2",
       "sort_sources": []
     },
     {
@@ -10525,7 +10525,7 @@
       "kept": [
         "Живой Алексей - Небесный король (Небесный король. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Живой Алексей - Небесный король (Небесный король. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -10575,7 +10575,7 @@
       "kept": [
         "Сборник Легион. Компиляция. кн. 1-9.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Сборник Легион. Компиляция. кн. 1-9.fb2",
       "sort_sources": []
     },
     {
@@ -10595,7 +10595,7 @@
       "kept": [
         "Риддер Аристарх, Базилио (Живцов Николай). Настоящий американец 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Риддер Аристарх, Базилио (Живцов Николай). Настоящий американец 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -10766,7 +10766,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Зайцев Николай - Пластуны (т. 1-6).fb2",
+      "predicted_file": "Зайцев Николай - Пластуны (Гексалогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -10804,12 +10804,12 @@
       "kept": [
         "Соболев Николай (Замполит Д.Н.). Неверный ленинец 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Соболев Николай (Замполит Д.Н.). Неверный ленинец 1-4.fb2",
       "sort_sources": []
     },
     {
       "author": "Зан Тимоти",
-      "series": "Траун",
+      "series": "Траун 2-3\\Приквелы",
       "volume_range": "1-3",
       "series_complete": true,
       "cleanup_only": false,
@@ -10822,7 +10822,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Зан Тимоти - Траун (Трилогия в 4 книгах).fb2",
+      "predicted_file": "Зан Тимоти - Траун 2-3. Приквелы (Трилогия в 4 книгах).fb2",
       "sort_sources": [
         "series_number"
       ]
@@ -10880,7 +10880,7 @@
       "kept": [
         "Земляной Андрей. Волшебник 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Земляной Андрей. Волшебник 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -10898,7 +10898,7 @@
         "Земляной Андрей - Драконы Сарда 2. Войны Сарда.fb2"
       ],
       "kept": [],
-      "predicted_file": "Земляной Андрей - Драконы Сарда (т. 1-3).fb2",
+      "predicted_file": "Земляной Андрей - Драконы Сарда (Трилогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -10959,7 +10959,7 @@
       "kept": [
         "Земляной Андрей - Один на миллион (Один на миллион. Трилогия) - 2021.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Земляной Андрей - Один на миллион (Один на миллион. Трилогия) - 2021.fb2",
       "sort_sources": []
     },
     {
@@ -11016,7 +11016,7 @@
       "kept": [
         "Земляной Андрей - Пентаграмма войны (Пентаграмма войны. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Земляной Андрей - Пентаграмма войны (Пентаграмма войны. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -11099,7 +11099,7 @@
       "kept": [
         "Земляной Андрей - Проект «Оборотень» (Странник. Пенталогия) - 2010.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Земляной Андрей - Проект «Оборотень» (Странник. Пенталогия) - 2010.fb2",
       "sort_sources": []
     },
     {
@@ -11144,7 +11144,7 @@
       "kept": [
         "Зендкер Ян-Филипп - Искусство слышать стук сердца. Сердце, живущее в согласии.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Зендкер Ян-Филипп - Искусство слышать стук сердца. Сердце, живущее в согласии.fb2",
       "sort_sources": []
     },
     {
@@ -11161,7 +11161,7 @@
       "kept": [
         "Зещинский Владимир - Наяль Давье (Наяль Давье 1-3).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Зещинский Владимир - Наяль Давье (Наяль Давье 1-3).fb2",
       "sort_sources": []
     },
     {
@@ -11367,7 +11367,7 @@
       "kept": [
         "Злотников Роман, Николаев Андрей. Охота на охотника 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Злотников Роман, Николаев Андрей. Охота на охотника 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -11848,7 +11848,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Иггульден Конн - Император (т. 1-5).fb2",
+      "predicted_file": "Иггульден Конн - Император (Пенталогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -11868,7 +11868,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Иггульден Конн - Чингисхан (т. 1-5).fb2",
+      "predicted_file": "Иггульден Конн - Чингисхан (Пенталогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -11903,7 +11903,7 @@
       "kept": [
         "Игнатов Михаил. Путь 1-18.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Игнатов Михаил. Путь 1-18.fb2",
       "sort_sources": []
     },
     {
@@ -11920,7 +11920,7 @@
       "kept": [
         "Изверин Алексей . Королевство 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Изверин Алексей . Королевство 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -11995,7 +11995,7 @@
       "kept": [
         "Видум Инди. Сангрелар 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Видум Инди. Сангрелар 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -12071,7 +12071,7 @@
       "kept": [
         "1 Тень предков.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=1 Тень предков.fb2",
       "sort_sources": []
     },
     {
@@ -12109,7 +12109,7 @@
       "kept": [
         "Казьми Михаил. Через семь гробов 1-2.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Казьми Михаил. Через семь гробов 1-2.fb2",
       "sort_sources": []
     },
     {
@@ -12186,7 +12186,7 @@
       "kept": [
         "Калбазов Константин - Вепрь (Вепрь. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Калбазов Константин - Вепрь (Вепрь. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -12198,12 +12198,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Калбазов. Кукловод (Кукловод. Тетралогия).fb2"
-      ],
-      "kept": [
         "Калбазов Константин - Кукловод (Кукловод. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Калбазов. Кукловод (Кукловод. Тетралогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Калбазов. Кукловод (Кукловод. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -12275,7 +12275,7 @@
       "kept": [
         "Калбазов Константин - Фронтир (Фронтир. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Калбазов Константин - Фронтир (Фронтир. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -12310,7 +12310,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Калинин Алексей - Аристо из другого мира (т. 1-4).fb2",
+      "predicted_file": "Калинин Алексей - Аристо из другого мира (Тетралогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -12374,7 +12374,7 @@
         "01_Зверь. Том 1.fb2"
       ],
       "kept": [],
-      "predicted_file": "Калинин Алексей - Зверь (т. 1-5).fb2",
+      "predicted_file": "Калинин Алексей - Зверь (Пенталогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -12684,12 +12684,12 @@
         "2. Наемник (2018).fb2",
         "3. Офицер(2018).fb2",
         "4. Барон(2019).fb2",
-        "Каменев. Макс Вольф (Макс Вольф. Тетралогия).fb2"
-      ],
-      "kept": [
         "Каменев Алекс - Макс Вольф (Макс Вольф. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Каменев. Макс Вольф (Макс Вольф. Тетралогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Каменев. Макс Вольф (Макс Вольф. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -12825,7 +12825,7 @@
       "kept": [
         "Карелин Сергей, Фабер Ник. Адвокат Империи 1-17.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Карелин Сергей, Фабер Ник. Адвокат Империи 1-17.fb2",
       "sort_sources": []
     },
     {
@@ -12882,7 +12882,7 @@
       "kept": [
         "Орлов Андрей, Каспаров Сергей. Бастард Императора 1-25.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Орлов Андрей, Каспаров Сергей. Бастард Императора 1-25.fb2",
       "sort_sources": []
     },
     {
@@ -12913,12 +12913,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Катлас Эдуард - Акренор (Акренор. Трилогия + 2 рассказа).fb2"
-      ],
-      "kept": [
         "Катлас. Акренор (Акренор. Трилогия + 2 рассказа).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Катлас Эдуард - Акренор (Акренор. Трилогия + 2 рассказа).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Катлас Эдуард - Акренор (Акренор. Трилогия + 2 рассказа).fb2",
       "sort_sources": []
     },
     {
@@ -13412,7 +13412,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Киров Никита - Тот, кто ждет (т. 1-4).fb2",
+      "predicted_file": "Киров Никита - Тот, кто ждет (Тетралогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -13858,7 +13858,7 @@
       "kept": [
         "Ковтунов Алексей, Сапфир Олег. Демонолог 1-15.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Ковтунов Алексей, Сапфир Олег. Демонолог 1-15.fb2",
       "sort_sources": []
     },
     {
@@ -13893,14 +13893,14 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
+        "Кожевников Олег - Библия выживальщиков (Библия выживальщиков. Трилогия).fb2",
         "Кожевников Олег - Библия выживальщиков 1. Эпоха выживания.fb2",
-        "Кожевников Олег - Библия выживальщиков 2. Мародерские хроники.fb2",
-        "Кожевников. Библия выживальщиков (Библия выживальщиков. Трилогия).fb2"
+        "Кожевников Олег - Библия выживальщиков 2. Мародерские хроники.fb2"
       ],
       "kept": [
-        "Кожевников Олег - Библия выживальщиков (Библия выживальщиков. Трилогия).fb2"
+        "Кожевников. Библия выживальщиков (Библия выживальщиков. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Кожевников. Библия выживальщиков (Библия выживальщиков. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -13940,7 +13940,7 @@
       "kept": [
         "Кожевников Олег - Михаил II (Великий князь. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Кожевников Олег - Михаил II (Великий князь. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -14219,7 +14219,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Корнуэлл Бернард - Поиски Грааля (т. 1-4).fb2",
+      "predicted_file": "Корнуэлл Бернард - Поиски Грааля (Тетралогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -14288,7 +14288,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Корнуэлл Бернард - Саксонские хроники (т. 1-13).fb2",
+      "predicted_file": "Корнуэлл Бернард - Саксонские хроники (в 13 книгах).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -14548,7 +14548,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Коткин Андрей - Почти Целитель (т. 1-6).fb2",
+      "predicted_file": "Коткин Андрей - Почти Целитель (Гексалогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -14673,7 +14673,7 @@
       "kept": [
         "Сотник 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Сотник 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -14731,7 +14731,7 @@
       "kept": [
         "Кронос Александр. Щенки косуль. Его звали Тони 1-11.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Кронос Александр. Щенки косуль. Его звали Тони 1-11.fb2",
       "sort_sources": []
     },
     {
@@ -14768,7 +14768,7 @@
       "kept": [
         "Кружевский Дмитрий - Искатель (Искатель. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Кружевский Дмитрий - Искатель (Искатель. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -14874,12 +14874,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Кузмичёв Иван - Поступь империи (Поступь империи. Тетралогия).fb2"
-      ],
-      "kept": [
         "Кузмичев. Поступь империи (Поступь империи. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Кузмичёв Иван - Поступь империи (Поступь империи. Тетралогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Кузмичёв Иван - Поступь империи (Поступь империи. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -15056,16 +15056,16 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Кумин Вячеслав - Битва за звёзды (Исход. Тетралогия).fb2",
         "Кумин Вячеслав - Исход 1. Исход.fb2",
         "Кумин Вячеслав - Исход 2. Реванш.fb2",
         "Кумин Вячеслав - Исход 3. Прыжок Феникса.fb2",
-        "Кумин Вячеслав - Исход 4. Воссоединение.fb2"
-      ],
-      "kept": [
+        "Кумин Вячеслав - Исход 4. Воссоединение.fb2",
         "Кумин. Битва за звёзды (Исход. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Кумин Вячеслав - Битва за звёзды (Исход. Тетралогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Кумин Вячеслав - Битва за звёзды (Исход. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -15141,7 +15141,7 @@
       "kept": [
         "Кумин Вячеслав - Цербер (Цербер. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Кумин Вячеслав - Цербер (Цербер. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -15578,7 +15578,7 @@
       "kept": [
         "Ларин Павел. Петров, к доске! 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Ларин Павел. Петров, к доске! 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -15618,7 +15618,7 @@
       "kept": [
         "01_Артиллерист. Назад в СССР.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=01_Артиллерист. Назад в СССР.fb2",
       "sort_sources": []
     },
     {
@@ -15734,12 +15734,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Лернер. Дороги в неизвестность (Дорога без возврата. Трилогия).fb2"
-      ],
-      "kept": [
         "Лернер Марик - Дороги в неизвестность (Дорога без возврата. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Лернер. Дороги в неизвестность (Дорога без возврата. Трилогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Лернер. Дороги в неизвестность (Дорога без возврата. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -15775,7 +15775,7 @@
       "kept": [
         "Лесина Екатерина. Бабочка маркизы Помпадур. Кольцо златовласой ведьмы.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Лесина Екатерина. Бабочка маркизы Помпадур. Кольцо златовласой ведьмы.fb2",
       "sort_sources": []
     },
     {
@@ -15792,7 +15792,7 @@
       "kept": [
         "Лесина Екатерина. Маска короля. Ошейник Жеводанского зверя.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Лесина Екатерина. Маска короля. Ошейник Жеводанского зверя.fb2",
       "sort_sources": []
     },
     {
@@ -15809,7 +15809,7 @@
       "kept": [
         "Лесина Екатерина. Музыкальная шкатулка Анны Монс. Медальон льва и солнца.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Лесина Екатерина. Музыкальная шкатулка Анны Монс. Медальон льва и солнца.fb2",
       "sort_sources": []
     },
     {
@@ -15826,7 +15826,7 @@
       "kept": [
         "Лесина Екатерина. Поверженный демон Врубеля. Тайная страсть Гойи.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Лесина Екатерина. Поверженный демон Врубеля. Тайная страсть Гойи.fb2",
       "sort_sources": []
     },
     {
@@ -15843,7 +15843,7 @@
       "kept": [
         "Лесина Екатерина. Счастливый доллар. Кольцо князя-оборотня.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Лесина Екатерина. Счастливый доллар. Кольцо князя-оборотня.fb2",
       "sort_sources": []
     },
     {
@@ -15860,7 +15860,7 @@
       "kept": [
         "Лесина Екатерина. Улыбка золотого бога. Фотограф смерти.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Лесина Екатерина. Улыбка золотого бога. Фотограф смерти.fb2",
       "sort_sources": []
     },
     {
@@ -15877,7 +15877,7 @@
       "kept": [
         "Лесина Екатерина. Хризантема императрицы. Серп языческой богини.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Лесина Екатерина. Хризантема императрицы. Серп языческой богини.fb2",
       "sort_sources": []
     },
     {
@@ -15936,7 +15936,7 @@
       "kept": [
         "Ливадный Андрей - Титановая лоза (Титановая лоза. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Ливадный Андрей - Титановая лоза (Титановая лоза. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -15971,7 +15971,7 @@
       "kept": [
         "Линдквист Йон Айвиде - Впусти меня.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Линдквист Йон Айвиде - Впусти меня.fb2",
       "sort_sources": []
     },
     {
@@ -16006,7 +16006,7 @@
       "kept": [
         "Ло Оливер, Ткачев Андрей. Вернувшийся мечник 1-6.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Ло Оливер, Ткачев Андрей. Вернувшийся мечник 1-6.fb2",
       "sort_sources": []
     },
     {
@@ -16018,12 +16018,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Логинов. Феодал (Феодал. Трилогия).fb2"
-      ],
-      "kept": [
         "Логинов Александр - Феодал (Феодал. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Логинов. Феодал (Феодал. Трилогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Логинов. Феодал (Феодал. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -16241,7 +16241,7 @@
     },
     {
       "author": "Лысак Сергей",
-      "series": "Романы из цикла «Ведьма с «Летающей ведьмы»",
+      "series": "Романы из цикла «Ведьма с «Летающей ведьмы»»",
       "volume_range": "",
       "series_complete": true,
       "cleanup_only": true,
@@ -16253,7 +16253,7 @@
       "kept": [
         "Лысак Сергей - Снежная Королева (Романы из цикла «Ведьма с «Летающей ведьмы»).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Лысак Сергей - Снежная Королева (Романы из цикла «Ведьма с «Летающей ведьмы»).fb2",
       "sort_sources": []
     },
     {
@@ -16338,12 +16338,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Мазин. Стратегия (Стратегия. Трилогия).fb2"
-      ],
-      "kept": [
         "Мазин Александр - Стратегия (Стратегия. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Мазин. Стратегия (Стратегия. Трилогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Мазин. Стратегия (Стратегия. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -16403,7 +16403,7 @@
       "kept": [
         "Мазур Степан. Цикл Скорпиона 1-8.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Мазур Степан. Цикл Скорпиона 1-8.fb2",
       "sort_sources": []
     },
     {
@@ -16535,7 +16535,7 @@
       "kept": [
         "Макколлум Майкл. Антарес 1-2.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Макколлум Майкл. Антарес 1-2.fb2",
       "sort_sources": []
     },
     {
@@ -16607,7 +16607,7 @@
       "kept": [
         "Максимов. Ментовский вояж (Ментовский вояж. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Максимов. Ментовский вояж (Ментовский вояж. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -16728,7 +16728,7 @@
       "kept": [
         "Малыгин Владимир - Другая Русь (Другая Русь. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Малыгин Владимир - Другая Русь (Другая Русь. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -16805,7 +16805,7 @@
       "kept": [
         "Мамбурин Харитон. Невыносимый святой. Джо 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Мамбурин Харитон. Невыносимый святой. Джо 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -16959,7 +16959,7 @@
       "kept": [
         "Марков-Бабкин Владимир, Сергеев Виталий. Петр Третий 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Марков-Бабкин Владимир, Сергеев Виталий. Петр Третий 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -17279,7 +17279,7 @@
       "kept": [
         "Мартьянов Андрей - Войти в бездну (Войти в Бездну. Пенталогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Мартьянов Андрей - Войти в бездну (Войти в Бездну. Пенталогия).fb2",
       "sort_sources": []
     },
     {
@@ -17291,14 +17291,14 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
+        "Мартьянов Андрей - Беовульф (След Фафнира. Дилогия + внецикл. роман).fb2",
         "Мартьянов Андрей - След Фафнира 1. След Фафнира.fb2",
-        "Мартьянов Андрей - След Фафнира 2. Мировой кризис.fb2",
-        "Мартьянов. Беовульф (След Фафнира. Дилогия + внецикл. роман).fb2"
+        "Мартьянов Андрей - След Фафнира 2. Мировой кризис.fb2"
       ],
       "kept": [
-        "Мартьянов Андрей - Беовульф (След Фафнира. Дилогия + внецикл. роман).fb2"
+        "Мартьянов. Беовульф (След Фафнира. Дилогия + внецикл. роман).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Мартьянов. Беовульф (След Фафнира. Дилогия + внецикл. роман).fb2",
       "sort_sources": []
     },
     {
@@ -17546,7 +17546,7 @@
       "kept": [
         "Матвиенко Анатолий - Телефон милиции 02 (Алло, милиция. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Матвиенко Анатолий - Телефон милиции 02 (Алло, милиция. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -17563,7 +17563,7 @@
       "kept": [
         "Матвиенко Анатолий. Гений автопрома 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Матвиенко Анатолий. Гений автопрома 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -17657,7 +17657,7 @@
       "kept": [
         "Мах Макс - Мастер войны (Карл Ругер. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Мах Макс - Мастер войны (Карл Ругер. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -17853,16 +17853,16 @@
       "book_count": 3,
       "books": [
         "Метельский Николай - Новый враг (Унесённый ветром 4-6).fb2",
-        "Метельский Николай - Унесённый ветром (Унесённый ветром 1-3).fb2",
-        "Метельский Николай - Утверждение власти (Унесённый ветром 7-9).fb2"
+        "Метельский Николай - Утверждение власти (Унесённый ветром 7-9).fb2",
+        "Метельский. Унесённый ветром (Унесённый ветром 1-3).fb2"
       ],
       "duplicates": [
+        "Метельский Николай - Унесённый ветром (Унесённый ветром 1-3).fb2",
         "Метельский. Новый враг (Унесённый ветром 4-6).fb2",
-        "Метельский. Унесённый ветром (Унесённый ветром 1-3).fb2",
         "Метельский. Утверждение власти (Унесённый ветром 7-9).fb2"
       ],
       "kept": [],
-      "predicted_file": "Метельский Николай - Унесенный ветром (т. 1-9).fb2",
+      "predicted_file": "Метельский Николай - Унесенный ветром (Ноналогия).fb2",
       "sort_sources": [
         "filename_range"
       ]
@@ -18333,12 +18333,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Михеев М. Призрак неведомой войны (Призрак неведомой войны. Трилогия).fb2"
-      ],
-      "kept": [
         "Михеев Михаил - Призрак неведомой войны (Призрак неведомой войны. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Михеев М. Призрак неведомой войны (Призрак неведомой войны. Трилогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Михеев М. Призрак неведомой войны (Призрак неведомой войны. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -18581,7 +18581,7 @@
         "Мороз Игорь - Клич стаи.fb2"
       ],
       "kept": [],
-      "predicted_file": "Мороз Игорь - Сталь и песок (т. 1-5).fb2",
+      "predicted_file": "Мороз Игорь - Сталь и песок (Пенталогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -18643,7 +18643,7 @@
       "kept": [
         "Мосс Кейт - Лангедокская трилогия 1. Лабиринт.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Мосс Кейт - Лангедокская трилогия 1. Лабиринт.fb2",
       "sort_sources": []
     },
     {
@@ -18696,7 +18696,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Муравьев Константин - Где-то там (т. 1-4).fb2",
+      "predicted_file": "Муравьев Константин - Где-то там (Тетралогия).fb2",
       "sort_sources": [
         "filename_range"
       ]
@@ -18714,7 +18714,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Муравьев Константин - Живучий (т. 1-6).fb2",
+      "predicted_file": "Муравьев Константин - Живучий (Гексалогия).fb2",
       "sort_sources": [
         "filename_range"
       ]
@@ -18733,7 +18733,7 @@
       "kept": [
         "Муравьев Константин. Неучтенный 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Муравьев Константин. Неучтенный 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -18813,7 +18813,7 @@
       "kept": [
         "Муравьёв Константин - Технарь (Технарь. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Муравьёв Константин - Технарь (Технарь. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -18832,7 +18832,7 @@
       "kept": [
         "Муравьёв Константин - Серый (Серый. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Муравьёв Константин - Серый (Серый. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -18869,7 +18869,7 @@
       "kept": [
         "Мусаниф Сергей - Имперские войны (Имперские танцы. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Мусаниф Сергей - Имперские войны (Имперские танцы. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -19379,7 +19379,7 @@
       "kept": [
         "Новиков Николай. Первый среди карапузов 1-13.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Новиков Николай. Первый среди карапузов 1-13.fb2",
       "sort_sources": []
     },
     {
@@ -19446,7 +19446,7 @@
       "kept": [
         "Номен Квинтус. Шарлатан 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Номен Квинтус. Шарлатан 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -19519,7 +19519,7 @@
       "kept": [
         "Оловянная Ирина - Самурай (Маленький дьявол. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Оловянная Ирина - Самурай (Маленький дьявол. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -20516,7 +20516,7 @@
       "kept": [
         "Петров Максим. Злой Лёд. Хозяин стужи 1-9.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Петров Максим. Злой Лёд. Хозяин стужи 1-9.fb2",
       "sort_sources": []
     },
     {
@@ -20725,7 +20725,7 @@
       "kept": [
         "Побережник Николай - Потерянный берег (Потерянный берег. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Побережник Николай - Потерянный берег (Потерянный берег. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -20946,7 +20946,7 @@
       "kept": [
         "Поляков Влад. Борджиа 1-9.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Поляков Влад. Борджиа 1-9.fb2",
       "sort_sources": []
     },
     {
@@ -21009,7 +21009,7 @@
         "Попов Борис. Неожиданность 5. Болгарская неожиданность.fb2"
       ],
       "kept": [],
-      "predicted_file": "Попов Борис - Неожиданность (т. 1-5).fb2",
+      "predicted_file": "Попов Борис - Неожиданность (Пенталогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -21091,7 +21091,7 @@
       "kept": [
         "Порошин Влад. Тафгай 1-10.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Порошин Влад. Тафгай 1-10.fb2",
       "sort_sources": []
     },
     {
@@ -21108,7 +21108,7 @@
       "kept": [
         "Поселягин Владимир. Адмирал 1-3 (СИ).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Поселягин Владимир. Адмирал 1-3 (СИ).fb2",
       "sort_sources": []
     },
     {
@@ -21127,7 +21127,7 @@
       "kept": [
         "Поселягин Владимир - Аномалия (Аномалия. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Поселягин Владимир - Аномалия (Аномалия. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -21335,7 +21335,7 @@
       "kept": [
         "Поселягин Владимир. Наёмник 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Поселягин Владимир. Наёмник 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -21355,7 +21355,7 @@
       "kept": [
         "Поселягин Владимир - Освобождённый (Освобождённый. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Поселягин Владимир - Освобождённый (Освобождённый. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -21392,7 +21392,7 @@
       "kept": [
         "Поселягин Владимир - Охотник (Охотник. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Поселягин Владимир - Охотник (Охотник. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -21451,7 +21451,7 @@
       "kept": [
         "Поселягин Владимир. Сопротивленец 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Поселягин Владимир. Сопротивленец 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -21551,7 +21551,7 @@
       "kept": [
         "Поселягин Владимир. Четвёртое измерение 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Поселягин Владимир. Четвёртое измерение 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -21607,7 +21607,7 @@
       "kept": [
         "Боярин 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Боярин 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -21647,7 +21647,7 @@
       "kept": [
         "Варвар (трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Варвар (трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -21694,7 +21694,7 @@
       "kept": [
         "Гладиатор. Трилогия.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Гладиатор. Трилогия.fb2",
       "sort_sources": []
     },
     {
@@ -21769,7 +21769,7 @@
       "kept": [
         "Орда (Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Орда (Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -21830,7 +21830,7 @@
       "kept": [
         "Сокол. Трилогия.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Сокол. Трилогия.fb2",
       "sort_sources": []
     },
     {
@@ -21852,7 +21852,7 @@
       "kept": [
         "Царьград. Гексалогия.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Царьград. Гексалогия.fb2",
       "sort_sources": []
     },
     {
@@ -21868,7 +21868,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Посняков Андрей, Прозоров Александр - Драконы Севера (т. 1-6).fb2",
+      "predicted_file": "Посняков Андрей, Прозоров Александр - Драконы Севера (Гексалогия).fb2",
       "sort_sources": [
         "filename_range"
       ]
@@ -21919,7 +21919,7 @@
       "kept": [
         "Престон Дуглас, Чайлд Линкольн. Пендергаст 1-21.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Престон Дуглас, Чайлд Линкольн. Пендергаст 1-21.fb2",
       "sort_sources": []
     },
     {
@@ -21975,7 +21975,7 @@
       "kept": [
         "Цикл Ведун. Книги 1-18.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Цикл Ведун. Книги 1-18.fb2",
       "sort_sources": []
     },
     {
@@ -21992,7 +21992,7 @@
       "kept": [
         "Прозоров Александр - Тёмный лорд (Тёмный лорд. Пенталогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Прозоров Александр - Тёмный лорд (Тёмный лорд. Пенталогия).fb2",
       "sort_sources": []
     },
     {
@@ -22009,7 +22009,7 @@
       "kept": [
         "Прокофьев Роман. Звёздная Кровь 1-10.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Прокофьев Роман. Звёздная Кровь 1-10.fb2",
       "sort_sources": []
     },
     {
@@ -22374,7 +22374,7 @@
       "kept": [
         "Райс Энн - Вампирские хроники 1-3 книги.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Райс Энн - Вампирские хроники 1-3 книги.fb2",
       "sort_sources": []
     },
     {
@@ -22498,7 +22498,7 @@
       "kept": [
         "Раткевич Сергей - Два цвета вечности. Тетралогия.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Раткевич Сергей - Два цвета вечности. Тетралогия.fb2",
       "sort_sources": []
     },
     {
@@ -22656,12 +22656,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Раух Елена, Самылов Алексей. Тёмный Космос 1-8.fb2"
-      ],
-      "kept": [
         "Раух Елена, Самылов Алексей. Темный Космос 1-8.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Раух Елена, Самылов Алексей. Тёмный Космос 1-8.fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Раух Елена, Самылов Алексей. Тёмный Космос 1-8.fb2",
       "sort_sources": []
     },
     {
@@ -22698,7 +22698,7 @@
       "kept": [
         "Ренгач Евгений. Кланы вне закона 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Ренгач Евгений. Кланы вне закона 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -22934,7 +22934,7 @@
       "kept": [
         "Романов Герман. Маршал 1-9 (без иллюстраций).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Романов Герман. Маршал 1-9 (без иллюстраций).fb2",
       "sort_sources": []
     },
     {
@@ -23039,7 +23039,7 @@
       "kept": [
         "Романов Николай - Экспансия (Экспансия. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Романов Николай - Экспансия (Экспансия. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -23197,7 +23197,7 @@
     },
     {
       "author": "Ротфусс Патрик",
-      "series": "Хроника Убийцы Короля 2\\День второй",
+      "series": "Хроника Убийцы Короля",
       "volume_range": "1-2",
       "series_complete": true,
       "cleanup_only": false,
@@ -23209,7 +23209,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Ротфусс Патрик - Хроника Убийцы Короля 2. День второй (Дилогия в 3 книгах).fb2",
+      "predicted_file": "Ротфусс Патрик - Хроника Убийцы Короля (Дилогия в 3 книгах).fb2",
       "sort_sources": [
         "inline_title",
         "series_number"
@@ -23422,7 +23422,7 @@
       "kept": [
         "Забытая Атлантида дилогия.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Забытая Атлантида дилогия.fb2",
       "sort_sources": []
     },
     {
@@ -23479,7 +23479,7 @@
       "kept": [
         "Колдун. Трилогия.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Колдун. Трилогия.fb2",
       "sort_sources": []
     },
     {
@@ -23706,7 +23706,7 @@
       "kept": [
         "Логофет Базилевса (Александр Санфиров).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Логофет Базилевса (Александр Санфиров).fb2",
       "sort_sources": []
     },
     {
@@ -24072,7 +24072,7 @@
     },
     {
       "author": "Сахаров Василий",
-      "series": "Война за Врата",
+      "series": "Война за врата",
       "volume_range": "1-4",
       "series_complete": true,
       "cleanup_only": false,
@@ -24085,7 +24085,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Сахаров Василий - Война за Врата (Тетралогия).fb2",
+      "predicted_file": "Сахаров Василий - Война за врата (Тетралогия).fb2",
       "sort_sources": [
         "series_number"
       ]
@@ -24183,7 +24183,7 @@
       "kept": [
         "Север Евгений. Хакер 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Север Евгений. Хакер 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -24323,7 +24323,7 @@
     },
     {
       "author": "Сейлор Стивен",
-      "series": "Рим",
+      "series": "Рим 2\\Империя",
       "volume_range": "1-2",
       "series_complete": true,
       "cleanup_only": false,
@@ -24337,7 +24337,7 @@
         "Сейлор. Рим 2. Империя. Роман об имперском Риме.fb2"
       ],
       "kept": [],
-      "predicted_file": "Сейлор Стивен - Рим (Дилогия).fb2",
+      "predicted_file": "Сейлор Стивен - Рим 2. Империя (Дилогия).fb2",
       "sort_sources": [
         "parent_num",
         "series_number"
@@ -24475,15 +24475,15 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Сергеев Станислав - Призрак Родины (Солдаты Армагеддона. Трилогия).fb2",
         "Сергеев Станислав - Солдаты Армагеддона 1.fb2",
         "Сергеев Станислав - Солдаты Армагеддона 2. Призрак Родины.fb2",
-        "Сергеев Станислав - Солдаты Армагеддона 3. Дорога в пустоте.fb2"
-      ],
-      "kept": [
+        "Сергеев Станислав - Солдаты Армагеддона 3. Дорога в пустоте.fb2",
         "Сергеев. Призрак Родины (Солдаты Армагеддона. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Сергеев Станислав - Призрак Родины (Солдаты Армагеддона. Трилогия).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Сергеев Станислав - Призрак Родины (Солдаты Армагеддона. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -24673,7 +24673,7 @@
       "kept": [
         "Дрейк Сириус. Дорогой барон! 1-36.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Дрейк Сириус. Дорогой барон! 1-36.fb2",
       "sort_sources": []
     },
     {
@@ -24734,7 +24734,7 @@
       "kept": [
         "Попаданец на рыбалке. Книги 1-7.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Попаданец на рыбалке. Книги 1-7.fb2",
       "sort_sources": []
     },
     {
@@ -24751,7 +24751,7 @@
       "kept": [
         "Скворцов. Сурск (Сурск 1-4).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Скворцов. Сурск (Сурск 1-4).fb2",
       "sort_sources": []
     },
     {
@@ -24791,7 +24791,7 @@
       "kept": [
         "Скороходов Артем. Черный дождь 1-3.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Скороходов Артем. Черный дождь 1-3.fb2",
       "sort_sources": []
     },
     {
@@ -24841,16 +24841,16 @@
       "book_count": 3,
       "books": [
         "Скэрроу Саймон - Орёл 1-2. Римский орел. Орел-завоеватель.fb2",
-        "Скэрроу Саймон - Орёл 3-4. Орел нападает. Орел и Волки.fb2",
-        "Скэрроу Саймон - Орёл 5-6. Добыча золотого орла. Пророчество орла.fb2"
-      ],
-      "duplicates": [
-        "Скэрроу. Орёл 1-2. Римский орел. Орел-завоеватель.fb2",
         "Скэрроу. Орёл 3-4. Орел нападает. Орел и Волки.fb2",
         "Скэрроу. Орёл 5-6. Добыча золотого орла. Пророчество орла.fb2"
       ],
+      "duplicates": [
+        "Скэрроу Саймон - Орёл 3-4. Орел нападает. Орел и Волки.fb2",
+        "Скэрроу Саймон - Орёл 5-6. Добыча золотого орла. Пророчество орла.fb2",
+        "Скэрроу. Орёл 1-2. Римский орел. Орел-завоеватель.fb2"
+      ],
       "kept": [],
-      "predicted_file": "Скэрроу Саймон - Орел (т. 1-6).fb2",
+      "predicted_file": "Скэрроу Саймон - Орел (Гексалогия).fb2",
       "sort_sources": [
         "filename_range"
       ]
@@ -24869,7 +24869,7 @@
       "kept": [
         "Смирнов Андрей - Чародеи (Дэвид Брендом. Пенталогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Смирнов Андрей - Чародеи (Дэвид Брендом. Пенталогия).fb2",
       "sort_sources": []
     },
     {
@@ -24983,7 +24983,7 @@
       "kept": [
         "Смолин Павел. Ван Ван из Чайны 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Смолин Павел. Ван Ван из Чайны 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -25012,7 +25012,7 @@
     },
     {
       "author": "Смолин Павел",
-      "series": "Самый лучший пионер 3-9\\Самый лучший комсомолец",
+      "series": "Самый лучший пионер",
       "volume_range": "1-10",
       "series_complete": true,
       "cleanup_only": false,
@@ -25031,7 +25031,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Смолин Павел - Самый лучший пионер 3-9. Самый лучший комсомолец (Декалогия).fb2",
+      "predicted_file": "Смолин Павел - Самый лучший пионер (Декалогия).fb2",
       "sort_sources": [
         "series_number"
       ]
@@ -25097,7 +25097,7 @@
       "kept": [
         "Сойер. Старплекс.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Сойер. Старплекс.fb2",
       "sort_sources": []
     },
     {
@@ -25278,7 +25278,7 @@
       "kept": [
         "Ткачев Андрей, Сомхиев Георгий. Профессор магии на полставки 1-7.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Ткачев Андрей, Сомхиев Георгий. Профессор магии на полставки 1-7.fb2",
       "sort_sources": []
     },
     {
@@ -25353,7 +25353,7 @@
       "kept": [
         "Спасская Мария. Роковой оберег Марины Цветаевой. Кукла крымского мага.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Спасская Мария. Роковой оберег Марины Цветаевой. Кукла крымского мага.fb2",
       "sort_sources": []
     },
     {
@@ -25474,7 +25474,7 @@
       "kept": [
         "Старый Денис. Внук Петра 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Старый Денис. Внук Петра 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -25615,7 +25615,7 @@
       "kept": [
         "2_Снова в пути (гл 1-10).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=2_Снова в пути (гл 1-10).fb2",
       "sort_sources": []
     },
     {
@@ -25690,7 +25690,7 @@
       "kept": [
         "Стюарт Мэри - Гром небесный. Дерево, увитое плющом. Терновая обитель.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Стюарт Мэри - Гром небесный. Дерево, увитое плющом. Терновая обитель.fb2",
       "sort_sources": []
     },
     {
@@ -25707,7 +25707,7 @@
       "kept": [
         "Стюарт Мэри - Костер в ночи. Мой брат Майкл. Башня из слоновой кости.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Стюарт Мэри - Костер в ночи. Мой брат Майкл. Башня из слоновой кости.fb2",
       "sort_sources": []
     },
     {
@@ -25724,7 +25724,7 @@
       "kept": [
         "Сугралинов Данияр, Фонд А. Двадцать два несчастья 1-4.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Сугралинов Данияр, Фонд А. Двадцать два несчастья 1-4.fb2",
       "sort_sources": []
     },
     {
@@ -25997,7 +25997,7 @@
       "kept": [
         "Тарасевич Ольга. Альбом страсти Пикассо. Плачущий ангел Шагала.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Тарасевич Ольга. Альбом страсти Пикассо. Плачущий ангел Шагала.fb2",
       "sort_sources": []
     },
     {
@@ -26014,7 +26014,7 @@
       "kept": [
         "Тарасевич Ольга. Золотой венец Трои. Сокровище князей Радзивиллов (сборник).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Тарасевич Ольга. Золотой венец Трои. Сокровище князей Радзивиллов (сборник).fb2",
       "sort_sources": []
     },
     {
@@ -26031,7 +26031,7 @@
       "kept": [
         "Тарасевич Ольга. Подарок Мэрилин Монро. Смертельный аромат № 5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Тарасевич Ольга. Подарок Мэрилин Монро. Смертельный аромат № 5.fb2",
       "sort_sources": []
     },
     {
@@ -26048,7 +26048,7 @@
       "kept": [
         "Тарасевич Ольга. Тайна «Красной Москвы». Карты великого мага.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Тарасевич Ольга. Тайна «Красной Москвы». Карты великого мага.fb2",
       "sort_sources": []
     },
     {
@@ -26068,7 +26068,7 @@
       "kept": [
         "Тарасенко Вадим - Волк с планеты Земля (Волк с планеты Земля. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Тарасенко Вадим - Волк с планеты Земля (Волк с планеты Земля. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -26584,7 +26584,7 @@
       "kept": [
         "Ткачев Сергей. Эра подземелий (Путь культиватора) 1-32.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Ткачев Сергей. Эра подземелий (Путь культиватора) 1-32.fb2",
       "sort_sources": []
     },
     {
@@ -26601,7 +26601,7 @@
       "kept": [
         "Тойн Саймон - Соломон Крид 01. Искупление.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Тойн Саймон - Соломон Крид 01. Искупление.fb2",
       "sort_sources": []
     },
     {
@@ -26626,7 +26626,7 @@
       "kept": [
         "Токсик Саша. Аквилон. Маг воды 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Токсик Саша. Аквилон. Маг воды 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -26875,7 +26875,7 @@
       "kept": [
         "Точинов Виктор - Пасть (Пасть. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Точинов Виктор - Пасть (Пасть. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -27007,7 +27007,7 @@
       "kept": [
         "Трофимов Ерофей - Пёс войны (Пёс войны. Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Трофимов Ерофей - Пёс войны (Пёс войны. Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -27025,7 +27025,7 @@
       "kept": [
         "Трофимов Ерофей - Поступь Слейпнира (Поступь Слейпнира. Дилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Трофимов Ерофей - Поступь Слейпнира (Поступь Слейпнира. Дилогия).fb2",
       "sort_sources": []
     },
     {
@@ -27202,7 +27202,7 @@
     },
     {
       "author": "Тюрин Виктор",
-      "series": "Чужой среди своих",
+      "series": "Чужой Среди Своих",
       "volume_range": "1-2",
       "series_complete": true,
       "cleanup_only": false,
@@ -27213,7 +27213,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Тюрин Виктор - Чужой среди своих (Дилогия).fb2",
+      "predicted_file": "Тюрин Виктор - Чужой Среди Своих (Дилогия).fb2",
       "sort_sources": [
         "assumed_first",
         "series_number"
@@ -27233,7 +27233,7 @@
       "kept": [
         "Тюрин Виктор - Смерти вопреки (Чужой среди своих и Ангел с железными крыльями. Дилогии).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Тюрин Виктор - Смерти вопреки (Чужой среди своих и Ангел с железными крыльями. Дилогии).fb2",
       "sort_sources": []
     },
     {
@@ -27336,7 +27336,7 @@
       "kept": [
         "Уланов. Однажды на Диком Западе (Однажды на Диком Западе. Тетралогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Уланов. Однажды на Диком Западе (Однажды на Диком Западе. Тетралогия).fb2",
       "sort_sources": []
     },
     {
@@ -27430,7 +27430,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Уэллс Марта - Дневники Киллербота (т. 1-7).fb2",
+      "predicted_file": "Уэллс Марта - Дневники Киллербота (Гепталогия).fb2",
       "sort_sources": [
         "filename_range",
         "series_number"
@@ -27643,7 +27643,7 @@
       "kept": [
         "Филимонов Олег - Злой среди чужих (Сид 1. Принцип талиона 1. Геката 1).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Филимонов Олег - Злой среди чужих (Сид 1. Принцип талиона 1. Геката 1).fb2",
       "sort_sources": []
     },
     {
@@ -28274,7 +28274,7 @@
       "kept": [
         "Харрис Роберт - Цицерон. Трилогия (Империй. Люструм. Диктатор).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Харрис Роберт - Цицерон. Трилогия (Империй. Люструм. Диктатор).fb2",
       "sort_sources": []
     },
     {
@@ -28730,7 +28730,7 @@
       "kept": [
         "Чайка Дмитрий. Третий Рим 1-16.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Чайка Дмитрий. Третий Рим 1-16.fb2",
       "sort_sources": []
     },
     {
@@ -28767,13 +28767,13 @@
       "books": [],
       "duplicates": [
         "Чакраборти Шеннон - Трилогия Дэвабада 1. Латунный город.fb2",
-        "Чакраборти Шеннон - Трилогия Дэвабада 2. Медное королевство.fb2",
+        "Чакраборти Шеннон - Трилогия Дэвабада 3. Золотая империя.fb2",
         "Чакраборти Шеннон - Трилогия Дэвабада. Серебряная река (рассказы).fb2"
       ],
       "kept": [
-        "Чакраборти Шеннон - Трилогия Дэвабада 3. Золотая империя.fb2"
+        "Чакраборти Шеннон - Трилогия Дэвабада 2. Медное королевство.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Чакраборти Шеннон - Трилогия Дэвабада 2. Медное королевство.fb2",
       "sort_sources": []
     },
     {
@@ -28981,12 +28981,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Чижовский Алекс - Инженер с Земли (Инженер с Земли 1-3).fb2"
-      ],
-      "kept": [
         "Чижовский. Инженер с Земли (Инженер с Земли 1-3).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Чижовский Алекс - Инженер с Земли (Инженер с Земли 1-3).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Чижовский Алекс - Инженер с Земли (Инженер с Земли 1-3).fb2",
       "sort_sources": []
     },
     {
@@ -29066,7 +29066,7 @@
       "kept": [
         "Чинцов Вадим - Спецназ 1. В горниле 1941-го.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Чинцов Вадим - Спецназ 1. В горниле 1941-го.fb2",
       "sort_sources": []
     },
     {
@@ -29215,12 +29215,12 @@
       "book_count": 0,
       "books": [],
       "duplicates": [
-        "Широков, Шапочкин. Варлок (Варлок 1-3).fb2"
-      ],
-      "kept": [
         "Широков Алексей, Шапочкин Александр - Варлок (Варлок 1-3).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "kept": [
+        "Широков, Шапочкин. Варлок (Варлок 1-3).fb2"
+      ],
+      "predicted_file": "[cleanup] kept=Широков, Шапочкин. Варлок (Варлок 1-3).fb2",
       "sort_sources": []
     },
     {
@@ -29717,7 +29717,7 @@
       "kept": [
         "Шиленко Сергей. Искатель 1-17.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Шиленко Сергей. Искатель 1-17.fb2",
       "sort_sources": []
     },
     {
@@ -29863,7 +29863,7 @@
       "kept": [
         "Шопперт Андрей. И опять Пожарский 1-7.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Шопперт Андрей. И опять Пожарский 1-7.fb2",
       "sort_sources": []
     },
     {
@@ -29889,7 +29889,7 @@
       "kept": [
         "Шопперт Андрей. Красавчик 1-7.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Шопперт Андрей. Красавчик 1-7.fb2",
       "sort_sources": []
     },
     {
@@ -29975,7 +29975,7 @@
       "kept": [
         "Шу Алекс. Последний солдат СССР 1-5.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Шу Алекс. Последний солдат СССР 1-5.fb2",
       "sort_sources": []
     },
     {
@@ -30211,7 +30211,7 @@
       "kept": [
         "Эльтеррус Иар - Росская империя (Трилогия).fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Эльтеррус Иар - Росская империя (Трилогия).fb2",
       "sort_sources": []
     },
     {
@@ -30293,7 +30293,7 @@
     },
     {
       "author": "Юшкин Вячеслав",
-      "series": "Тысяча и три ночи 2-3\\Синие московские метели",
+      "series": "Тысяча и три ночи",
       "volume_range": "1-3",
       "series_complete": true,
       "cleanup_only": false,
@@ -30305,7 +30305,7 @@
       ],
       "duplicates": [],
       "kept": [],
-      "predicted_file": "Юшкин Вячеслав - Тысяча и три ночи 2-3. Синие московские метели (Трилогия).fb2",
+      "predicted_file": "Юшкин Вячеслав - Тысяча и три ночи (Трилогия).fb2",
       "sort_sources": [
         "series_number"
       ]
@@ -30348,7 +30348,7 @@
       "kept": [
         "Яманов Александр. Бесноватый Цесаревич 1-6.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Яманов Александр. Бесноватый Цесаревич 1-6.fb2",
       "sort_sources": []
     },
     {
@@ -30391,7 +30391,7 @@
       "kept": [
         "Янов Алексей. Декабристы. Перезагрузка 2.fb2"
       ],
-      "predicted_file": "ERROR: not enough values to unpack (expected 5, got 4)",
+      "predicted_file": "[cleanup] kept=Янов Алексей. Декабристы. Перезагрузка 2.fb2",
       "sort_sources": []
     },
     {

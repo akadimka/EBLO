@@ -2835,17 +2835,23 @@ class FB2CompilerService:
                     _arc_part_count = 0  # не имеет смысла если не больше числа arc'ов
 
             # Проверяем пробелы в top-level arc-позициях.
-            # Если arc-позиции не образуют непрерывный ряд (например {1,3,4} без 2),
-            # серия неполная → не используем сервисное слово (Трилогия и т.п.).
-            _top_arc_positions = sorted({
-                b.sort_key[1] for b in group.books
-                if b.sort_key[0] == 0 and b.sort_key[1]
-            })
-            _arc_has_gaps = (
-                len(_top_arc_positions) >= 2 and
-                _top_arc_positions != list(range(_top_arc_positions[0],
-                                                 _top_arc_positions[-1] + 1))
+            # Для предкомпиляций используем volume_label («1-2», «3-4»…): если hi+1 >= lo
+            # следующего диапазона — пробела нет. Иначе проверяем по позициям.
+            def _vl_hi(b: 'CompilationBook') -> int:
+                rng = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', b.volume_label or '')
+                return int(rng.group(2)) if rng else b.sort_key[1]
+
+            _arc_books_sorted = sorted(
+                [b for b in group.books if b.sort_key[0] == 0 and b.sort_key[1]],
+                key=lambda b: b.sort_key[1],
             )
+            if len(_arc_books_sorted) < 2:
+                _arc_has_gaps = False
+            else:
+                _arc_has_gaps = any(
+                    _arc_books_sorted[i].sort_key[1] > _vl_hi(_arc_books_sorted[i - 1]) + 1
+                    for i in range(1, len(_arc_books_sorted))
+                )
 
             _sc_compile = not (group.excluded_paths or group.auto_excluded_paths) and getattr(group, 'series_complete', True)
             _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths)
