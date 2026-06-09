@@ -1537,22 +1537,16 @@ class Pass2SeriesFilename:
                 # «Флибер 4-7\Джони» — часть серии, есть другие тома вне дуги.
                 # Если же ВСЕ тома серии принадлежат этой дуге — диапазон лишний:
                 # «Вторая жизнь\Нагнуть Европу», а не «Вторая жизнь 1-2\Нагнуть Европу».
-                is_partial_arc = len(arc_entries) < len(entries)
-                if is_partial_arc:
-                    # Диапазон «lo-hi» ставим только если нет пробелов.
-                    # Если hi - lo + 1 > len(arc_entries) — есть gap (тома 7 и 9 без 8):
-                    # арк с разрывом не создаём — все книги остаются плоскими.
-                    _arc_is_dense = (hi - lo + 1) == len(arc_entries)
-                    if lo != hi and not _arc_is_dense:
-                        continue  # разрывный арк — пропускаем
-                    range_suffix = f' {lo}-{hi}' if lo != hi else f' {lo}'
-                else:
-                    range_suffix = ''
-                # Берём корень до первого '\' чтобы избежать двойного вложения
-                # если предыдущая итерация уже добавила '\' к proposed_series.
+                # Диапазон арка: если есть пробел — пропускаем (разрывный арк не создаём).
+                _arc_is_dense = (hi - lo + 1) == len(arc_entries)
+                if not _arc_is_dense:
+                    continue
+                # Диапазон НЕ добавляем в корень серии — позиция уже в sn.
+                # «Мент\Одесса-мама» вместо «Мент 10-11\Одесса-мама»:
+                # range в корне ломает bucket-ключи и вызывает неверную группировку.
                 _ps0 = entries[0][0].proposed_series
                 series_root = re.sub(r'\s*\[[^\]]*\]\s*$', '', _ps0.split('\\')[0]).strip()
-                new_series = f'{series_root}{range_suffix}\\{arc_canonical}'
+                new_series = f'{series_root}\\{arc_canonical}'
                 for rec, vol_num, _ in arc_entries:
                     rec.proposed_series = new_series
                     rec.series_number = str(vol_num)
@@ -1647,24 +1641,11 @@ class Pass2SeriesFilename:
                     _rec.series_source = 'filename_named_arc'
                 continue
 
-            # Диапазон нужен только когда дуга — подмножество серии.
-            # Признак: дуга не начинается с тома 1 (lo > 1) — значит есть предшествующие тома.
-            # Это надёжнее чем счётчик записей, который не видит плоские тома из других групп.
-            is_partial_arc = lo > 1
-            if is_partial_arc:
-                # Диапазон «lo-hi» ставим только если нет пробелов (все позиции заняты).
-                # Если hi - lo + 1 > len(arc_entries) — есть gap (напр. тома 7 и 9 без 8),
-                # диапазон «7-9» вводит в заблуждение → используем только lo.
-                _arc_is_dense = (hi - lo + 1) == len(arc_entries)
-                if lo != hi and _arc_is_dense:
-                    range_suffix = f' {lo}-{hi}'
-                else:
-                    range_suffix = f' {lo}'
-            else:
-                range_suffix = ''
+            # Диапазон НЕ добавляем в корень — позиция уже в sn.
+            # «Мент\Одесса-мама» вместо «Мент 10-11\Одесса-мама».
             root_base = arc_entries[0][2]
             arc_display = arc_entries[0][3]
-            new_series = f'{root_base}{range_suffix}\\{arc_display}'
+            new_series = f'{root_base}\\{arc_display}'
             for rec, vol_num, _, _ in arc_entries:
                 rec.proposed_series = new_series
                 rec.series_number = str(vol_num)
