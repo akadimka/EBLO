@@ -189,7 +189,7 @@ class FB2CompilerService:
         """
         level0 = [b for b in books if b.sort_key[0] == 0]
         if not level0:
-            return 1, 1, len(books), False
+            return 1, 1, len(books), False, None
 
         _RNG = re.compile(r'^(\d+)\s*[-–—]\s*(\d+)$')
 
@@ -754,27 +754,44 @@ class FB2CompilerService:
                 # Берём предкомпиляцию с максимальным охватом
                 best_pre, best_lo, best_hi = max(precompiled, key=lambda t: t[2] - t[1])
                 best_count = best_hi - best_lo + 1
+
+                # Фаза 1: дедуплицировать контент-дубли (файлы с одинаковым диапазоном).
+                # Для каждой группы (lo,hi): оставляем best_pre если он в группе, иначе первый.
+                # Остальные → duplicate_paths. Это предотвращает взаимное покрытие:
+                # Орёл: [1-2 Саймон] + [1-2 Скэрроу.] → Скэрроу. → дубль, Саймон остаётся.
+                # Кожевников: [1-3 Олег] + [1-3 "."] → обе разные → одна остаётся.
+                _by_range: dict = {}
+                for entry in precompiled:
+                    b, lo, hi = entry
+                    _by_range.setdefault((lo, hi), []).append(entry)
+                precompiled_unique: List[Tuple] = []
+                for rng, entries in _by_range.items():
+                    if len(entries) == 1:
+                        precompiled_unique.append(entries[0])
+                        continue
+                    # Среди нескольких файлов с одинаковым диапазоном:
+                    # сохраняем best_pre (если в группе) или первый по порядку
+                    winner = next((e for e in entries if e[0] is best_pre), entries[0])
+                    precompiled_unique.append(winner)
+                    for e in entries:
+                        if e is not winner:
+                            duplicate_paths.append(e[0].abs_path)
+                precompiled = precompiled_unique
+
+                # Фаза 2: range coverage — проверяем только файлы с разными диапазонами.
                 # Прочие предкомпиляции — на удаление ТОЛЬКО если их диапазон полностью
-                # покрыт хотя бы одной другой предкомпиляцией (best или иной).
-                # Пример: [1-42]+[31-43]+[31-45] → [31-43] покрыт [31-45] → дубликат;
-                #          [31-45] не покрыт [1-42] (45>42) → источник (содержит тома 43-45).
+                # покрыт хотя бы одной другой (best или иной).
                 other_precompiled: List[Tuple] = []
                 for entry in precompiled:
                     book, lo, hi = entry
                     if book is best_pre:
                         continue
-                    # Дубликат только если диапазон ПОЛНОСТЬЮ покрыт любой другой предкомпиляцией.
-                    # Пример: best=[1-42], other=[31-43] → [31-43] не покрыт [1-42] (43>42).
-                    #          Но если есть ещё [31-45], то [31-43] покрыт [31-45] → дубликат.
-                    # Это корректнее чем проверять только против best_pre:
-                    # [1-42]+[31-43]+[31-45] → [31-43] дублируется [31-45], [31-45] уникален.
                     # Arc-point pre-compilations (lo==hi) не дедуплицируем друг против друга:
                     # два файла с одинаковым arc-position могут покрывать РАЗНЫЙ внутренний
                     # контент (например, Брия 1 кн.1-2 и Брия 1 кн.3-4 оба имеют arc-pos 1).
                     # Для подсерий (is_subseries) нужна проверка series_number — иначе
                     # «Дилогия арк 3» (lo=1,hi=2) ошибочно покроется «Тетралогией арк 2»
                     # (lo=1,hi=4), хотя это разные арки одной родительской серии.
-                    # Для плоских серий series_number не разграничивает арки → только диапазон.
                     _is_arc_point = (lo == hi)
                     _book_sn = (book.record.series_number or '').strip()
                     _is_subseries_bucket = '\\' in series
