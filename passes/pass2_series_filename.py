@@ -1036,7 +1036,8 @@ class Pass2SeriesFilename:
 
         # Если папка НЕ дала series → пробуем extraction из filename
         series_candidate = self._extract_series_from_filename(
-            record.file_path, validate=False, metadata_series=record.metadata_series
+            record.file_path, validate=False, metadata_series=record.metadata_series,
+            known_series=record.proposed_series or ''
         )
 
         if series_candidate:
@@ -2848,7 +2849,7 @@ class Pass2SeriesFilename:
                             record.proposed_series = top_series
                             record.series_source = "author-consensus"
 
-    def _extract_series_from_filename(self, file_path: str, validate: bool = True, metadata_series: str = "") -> str:
+    def _extract_series_from_filename(self, file_path: str, validate: bool = True, metadata_series: str = "", known_series: str = "") -> str:
         """
         Извлечь серию из имени файла, используя паттерны из конфига.
         
@@ -2925,13 +2926,15 @@ class Pass2SeriesFilename:
             _sub_name  = _tl.group(3).strip()
             _meta_low  = _meta_norm(metadata_series.strip())
             if _meta_low == _meta_norm(_root_name) or _meta_low == _meta_norm(_sub_name):
-                # Если metadata подтверждает sub (не root) и root содержит '. ' —
-                # первый токен до '. ' вероятно авторский префикс: «Аберкромби. Земной круг».
+                # Корень серии: сначала берём из уже известной серии (папка/файл),
+                # затем подтверждаем метой. Это надёжнее чем парсить из filename где
+                # может быть авторский префикс («Аберкромби. Земной круг»).
                 _root_out = _root_name
-                if _meta_low == _meta_norm(_sub_name) and '. ' in _root_name:
-                    _after = _root_name.split('. ', 1)[1].strip()
-                    if _after:
-                        _root_out = _after
+                if known_series:
+                    _known_root = known_series.split('\\')[0].strip()
+                    _known_root = re.sub(r'\s+\d+\s*$', '', _known_root).strip()
+                    if _known_root and _meta_norm(_root_name).endswith(_meta_norm(_known_root)):
+                        _root_out = _known_root
                 return f'{_root_out} {_root_num}\\{_sub_name}'
         # Вариант Б: metadata подтверждает root-серию, подсерия без номера
         _tl2 = _TWO_LEVEL_TOM_RE.match(_name_after_dash)
