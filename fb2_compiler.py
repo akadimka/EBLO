@@ -371,12 +371,9 @@ class FB2CompilerService:
             if '\\' in series:
                 _arc_root = series.split('\\')[0].strip()
                 _arc_base = re.sub(r'\s+\d{1,4}(?:\s*[-–—]\s*\d{1,4})?\s*$', '', _arc_root).strip()
-                if _arc_base != _arc_root:
-                    # Корень с числом → ключ = корень без числа (сливаем с плоскими томами)
-                    sk = _punct_norm(_arc_base)
-                else:
-                    # Корень без числа → подсерия независима, используем полный путь
-                    sk = _series_group_key(series)
+                # Всегда используем корень как ключ — именованная дуга (Серия\Арка)
+                # должна попасть в тот же бакет, что и книги зонтичной серии (Серия).
+                sk = _punct_norm(_arc_base)
             else:
                 sk = _series_group_key(series)
             key = (_norm_key(author), sk)
