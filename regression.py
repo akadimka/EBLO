@@ -322,6 +322,22 @@ def cmd_snapshot(args):
 def cmd_compare(args):
     stage = args.stage
     stages = ['csv', 'groups'] if stage == 'all' else [stage]
+
+    # Всегда запускаем пайплайн заново для свежего снапшота
+    scan_dir = getattr(args, 'dir', None)
+    if not scan_dir:
+        try:
+            import json as _j
+            cfg = _j.loads((PROJECT_DIR / 'config.json').read_text(encoding='utf-8'))
+            scan_dir = cfg.get('last_scan_path', str(PROJECT_DIR / 'Test1'))
+        except Exception:
+            scan_dir = str(PROJECT_DIR / 'Test1')
+
+    records, groups = run_pipeline(scan_dir, stage)
+    RegenCSVService, FB2CompilerService, Logger = _import_pipeline()
+    compiler = FB2CompilerService(logger=Logger())
+    meta = {'timestamp': datetime.now().isoformat(), 'scan_dir': scan_dir}
+
     for s in stages:
         baseline_path = get_baseline_path(s)
         if not baseline_path.exists():
@@ -329,19 +345,10 @@ def cmd_compare(args):
             print(f'  Запустите: python regression.py snapshot --stage={s}  затем approve')
             continue
 
-        # Найти последний снапшот (не baseline)
-        candidates = sorted(
-            [f for f in SNAPSHOTS_DIR.glob(f'{s}_*.json') if 'baseline' not in f.name],
-            key=lambda p: p.stat().st_mtime
-        )
-        if not candidates:
-            print(f'  Нет снапшотов для сравнения ({s}). Запустите snapshot.')
-            continue
-
-        current_path = candidates[-1]
+        snap = {'meta': meta, 'data': snapshot_csv(records, scan_dir) if s == 'csv' else snapshot_groups(compiler, groups)}
+        current_path = save_snapshot(snap, s)
         baseline = load_snapshot(baseline_path)
-        current  = load_snapshot(current_path)
-        print(f'\n{compare_snapshots(baseline, current, s)}')
+        print(f'\n{compare_snapshots(baseline, snap, s)}')
         print(f'\n  (baseline: {baseline_path.name}, current: {current_path.name})')
 
 
@@ -422,6 +429,7 @@ def main():
     for cmd_name in ('compare', 'approve'):
         p = sub.add_parser(cmd_name)
         p.add_argument('--stage', default='groups', choices=['csv', 'groups', 'all'])
+        p.add_argument('--dir', default=default_dir)
 
     args = parser.parse_args()
     if not args.cmd:

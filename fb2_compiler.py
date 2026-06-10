@@ -228,18 +228,18 @@ class FB2CompilerService:
         if all_dot_part:
             n_volumes = len({b.sort_key[1] for b in level0})
         else:
-            _covered: set = set()
-            _extra = 0
+            # Диапазоны считаем через объединение множеств (чтобы не задваивать пересечения).
+            # Индивидуальные книги считаем по +1 — у них нет пересечений после dedup.
+            _range_covered: set = set()
+            _individual = 0
             for b in level0:
                 vl = (b.volume_label or '').strip()
                 m = _RNG.match(vl)
                 if m:
-                    _covered.update(range(int(m.group(1)), int(m.group(2)) + 1))
-                elif b.sort_key[1]:
-                    _covered.add(b.sort_key[1])
+                    _range_covered.update(range(int(m.group(1)), int(m.group(2)) + 1))
                 else:
-                    _extra += 1
-            n_volumes = len(_covered) + _extra
+                    _individual += 1
+            n_volumes = len(_range_covered) + _individual
 
         # Для групп с подсериями (has_subseries=True) определяем число верхних дуг —
         # различных значений sort_key[1]. Именно они определяют слово «Пенталогия» и т.п.,
@@ -371,9 +371,12 @@ class FB2CompilerService:
             if '\\' in series:
                 _arc_root = series.split('\\')[0].strip()
                 _arc_base = re.sub(r'\s+\d{1,4}(?:\s*[-–—]\s*\d{1,4})?\s*$', '', _arc_root).strip()
-                # Всегда используем корень как ключ — именованная дуга (Серия\Арка)
-                # должна попасть в тот же бакет, что и книги зонтичной серии (Серия).
-                sk = _punct_norm(_arc_base)
+                if _arc_base != _arc_root:
+                    # Корень с числом → ключ = корень без числа (сливаем с плоскими томами)
+                    sk = _punct_norm(_arc_base)
+                else:
+                    # Корень без числа → подсерия потенциально независима, используем полный путь
+                    sk = _series_group_key(series)
             else:
                 sk = _series_group_key(series)
             key = (_norm_key(author), sk)
@@ -475,6 +478,28 @@ class FB2CompilerService:
                         if src_key != canon_key and src_key in buckets:
                             buckets.setdefault(canon_key, []).extend(buckets.pop(src_key))
                     merged = True
+
+        # Дополнительный проход: объединяем бакет «Серия» с «Серия\Арка» того же автора,
+        # если оба существуют. Это нужно когда часть книг имеет plain proposed_series,
+        # а другие — proposed_series с именованной дугой (Серия\Дуга).
+        # Пример: «Не ГГ» (тт.1,4) + «Не ГГ\Курсанты» (тт.2-3) → одна группа «Не ГГ».
+        # В отличие от общего цикла выше, этот проход не трогает независимые подсерии
+        # (Антиблицкриг\ВоенТур без umbrella), потому что там нет plain-бакета.
+        _all_keys = list(buckets.keys())
+        for (ak, sk) in _all_keys:
+            if (ak, sk) not in buckets:
+                continue
+            # Ищем бакеты того же автора, чей ключ начинается с sk + backslash
+            for (ak2, sk2) in list(buckets.keys()):
+                if ak2 != ak or sk2 == sk:
+                    continue
+                if (ak2, sk2) not in buckets:
+                    continue
+                sk2_norm = _norm_key(sk2)
+                sk_norm  = _norm_key(sk)
+                if sk2_norm.startswith(sk_norm + '\\'):
+                    # sk — plain umbrella, sk2 — её подсерия → сливаем в umbrella
+                    buckets[(ak, sk)].extend(buckets.pop((ak2, sk2)))
 
         groups: List[CompilationGroup] = []
 
