@@ -228,11 +228,18 @@ class FB2CompilerService:
         if all_dot_part:
             n_volumes = len({b.sort_key[1] for b in level0})
         else:
-            n_volumes = 0
+            _covered: set = set()
+            _extra = 0
             for b in level0:
                 vl = (b.volume_label or '').strip()
                 m = _RNG.match(vl)
-                n_volumes += int(m.group(2)) - int(m.group(1)) + 1 if m else 1
+                if m:
+                    _covered.update(range(int(m.group(1)), int(m.group(2)) + 1))
+                elif b.sort_key[1]:
+                    _covered.add(b.sort_key[1])
+                else:
+                    _extra += 1
+            n_volumes = len(_covered) + _extra
 
         # Для групп с подсериями (has_subseries=True) определяем число верхних дуг —
         # различных значений sort_key[1]. Именно они определяют слово «Пенталогия» и т.п.,
