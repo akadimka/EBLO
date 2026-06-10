@@ -2570,7 +2570,8 @@ class FB2CompilerService:
             а не одиночную книгу (иначе теряется контент за пределами диапазона).
             """
             eff = FB2CompilerService._book_eff_pos(b)
-            sk = (0, eff, 0, 0) if b.sort_key[0] == 0 and b.sort_key[1] == 0 and eff > 0 else b.sort_key
+            _is_frac_vl = bool(re.match(r'^\d+\.\d+$', b.volume_label or ''))
+            sk = (0, eff, 0, 0) if b.sort_key[0] == 0 and b.sort_key[1] == 0 and eff > 0 and not _is_frac_vl else b.sort_key
             rng_m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', b.volume_label or '')
             range_hi_neg = -int(rng_m.group(2)) if rng_m else 0  # более широкий диапазон → меньше → первым
             return (
