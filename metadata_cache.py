@@ -2,8 +2,10 @@ import sqlite3
 import json
 import hashlib
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from datetime import datetime
+
+_CONTENT_HASH_BYTES = 256 * 1024  # 256 KB — совпадает с gui_duplicate_finder._file_hash
 
 
 # Файлы парсера, от которых зависит качество извлечения метаданных.
@@ -65,11 +67,18 @@ class MetadataCache:
                 CREATE TABLE IF NOT EXISTS file_metadata (
                     file_path TEXT PRIMARY KEY,
                     file_hash TEXT,
+                    content_hash TEXT,
                     mtime REAL,
                     metadata TEXT,
                     cached_at REAL
                 )
             ''')
+            # Миграция: добавить content_hash если его нет (старая БД)
+            try:
+                conn.execute("ALTER TABLE file_metadata ADD COLUMN content_hash TEXT")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Колонка уже существует
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS cache_meta (
                     key TEXT PRIMARY KEY,
@@ -97,38 +106,50 @@ class MetadataCache:
                     # Не первый запуск — сообщаем о сбросе
                     print(f"[CACHE] Парсер обновлён — кэш метаданных сброшен")
 
-    def get_cached_metadata(self, file_path: Path) -> Optional[Dict[str, Any]]:
-        """Get cached metadata if file hasn't changed."""
+    def get_cached_metadata(self, file_path: Path) -> Tuple[Optional[Dict[str, Any]], str]:
+        """Get cached metadata if file hasn't changed.
+
+        Returns (metadata_dict, content_hash) or (None, '') on miss/error.
+        content_hash — SHA-256 первых 256 КБ содержимого (для поиска дубликатов).
+        """
         try:
             stat = file_path.stat()
             current_mtime = stat.st_mtime
 
             with self._connect() as conn:
                 row = conn.execute(
-                    "SELECT metadata, file_hash FROM file_metadata WHERE file_path = ? AND mtime = ?",
+                    "SELECT metadata, file_hash, content_hash FROM file_metadata WHERE file_path = ? AND mtime = ?",
                     (str(file_path), current_mtime)
                 ).fetchone()
 
                 if row:
-                    metadata_json, cached_hash = row
+                    metadata_json, cached_hash, content_hash = row
                     if self._calculate_hash(file_path) == cached_hash:
-                        return json.loads(metadata_json)
+                        return json.loads(metadata_json), (content_hash or '')
         except (OSError, json.JSONDecodeError):
             pass
-        return None
+        return None, ''
 
-    def cache_metadata(self, file_path: Path, metadata: Dict[str, Any]):
-        """Store metadata in cache."""
+    def cache_metadata(self, file_path: Path, metadata: Dict[str, Any]) -> str:
+        """Store metadata in cache.
+
+        Returns content_hash (SHA-256 первых 256 КБ) для записи в BookRecord.
+        Вычисляет MD5 и SHA-256 за один read_fb2_bytes вызов.
+        """
+        content_hash = ''
         try:
+            from fb2_utils import read_fb2_bytes
             stat = file_path.stat()
-            file_hash = self._calculate_hash(file_path)
+            raw = read_fb2_bytes(file_path)
+            file_hash = hashlib.md5(raw).hexdigest()
+            content_hash = hashlib.sha256(raw[:_CONTENT_HASH_BYTES]).hexdigest()
 
             with self._connect() as conn:
                 conn.execute(
                     """INSERT OR REPLACE INTO file_metadata
-                       (file_path, file_hash, mtime, metadata, cached_at)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    (str(file_path), file_hash, stat.st_mtime,
+                       (file_path, file_hash, content_hash, mtime, metadata, cached_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (str(file_path), file_hash, content_hash, stat.st_mtime,
                      json.dumps(metadata), datetime.now().timestamp())
                 )
                 conn.commit()
@@ -136,9 +157,10 @@ class MetadataCache:
             # Блокировка БД при параллельной записи — некритично,
             # файл будет перечитан при следующем запуске.
             pass
+        return content_hash
 
     def _calculate_hash(self, file_path: Path) -> str:
-        """Calculate file hash for verification."""
+        """Calculate MD5 hash of raw file bytes for cache validity check."""
         hash_obj = hashlib.md5()
         try:
             with open(file_path, 'rb') as f:
