@@ -2926,15 +2926,21 @@ class Pass2SeriesFilename:
             _sub_name  = _tl.group(3).strip()
             _meta_low  = _meta_norm(metadata_series.strip())
             if _meta_low == _meta_norm(_root_name) or _meta_low == _meta_norm(_sub_name):
-                # Корень серии: сначала берём из уже известной серии (папка/файл),
-                # затем подтверждаем метой. Это надёжнее чем парсить из filename где
-                # может быть авторский префикс («Аберкромби. Земной круг»).
+                # Корень серии: known_series из папки/файла — ground truth.
+                # Если папка серию не дала — fallback: metadata подтверждает sub,
+                # значит root загрязнён авторским префиксом («Аберкромби. Земной круг»).
                 _root_out = _root_name
                 if known_series:
                     _known_root = known_series.split('\\')[0].strip()
                     _known_root = re.sub(r'\s+\d+\s*$', '', _known_root).strip()
                     if _known_root and _meta_norm(_root_name).endswith(_meta_norm(_known_root)):
                         _root_out = _known_root
+                elif _meta_low == _meta_norm(_sub_name) and _meta_low != _meta_norm(_root_name):
+                    # metadata — это sub, не root → root может содержать «Автор. Серия»
+                    if '. ' in _root_name:
+                        _stripped = _root_name.split('. ', 1)[1].strip()
+                        if _stripped:
+                            _root_out = _stripped
                 return f'{_root_out} {_root_num}\\{_sub_name}'
         # Вариант Б: metadata подтверждает root-серию, подсерия без номера
         _tl2 = _TWO_LEVEL_TOM_RE.match(_name_after_dash)
