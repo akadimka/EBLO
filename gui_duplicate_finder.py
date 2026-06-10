@@ -354,19 +354,30 @@ class DuplicateFinderWindow:
                                        progress_callback=_csv_progress) or []
 
             # ── Фаза 2: поиск по хэшу (60–100%) ───────────────────────
+            # Используем content_hash из records (вычислен в PASS 1) — без повторного чтения файлов.
             self.window.after(0, lambda: self.status_var.set('Фаза 2: поиск по хэшу…'))
 
-            files = fb2_rglob(Path(folder))
-            total = len(files)
-
+            folder_path = Path(folder)
             hash_map: dict = {}
-            for i, path in enumerate(files, 1):
+            missing_hash: list = []  # файлы без предвычисленного хэша (ошибки PASS 1)
+
+            for rec in records:
+                h = getattr(rec, 'content_hash', '')
+                path = folder_path / rec.file_path
+                if h:
+                    hash_map.setdefault(h, []).append(path)
+                else:
+                    missing_hash.append(path)
+
+            # Fallback: файлы без хэша читаем с диска (не должно быть много)
+            total = len(missing_hash)
+            for i, path in enumerate(missing_hash, 1):
                 h = _file_hash(path)
                 if h:
                     hash_map.setdefault(h, []).append(path)
                 if i % 20 == 0 or i == total:
                     pct = 60 + int(i / max(total, 1) * 40)
-                    msg = f'Фаза 2: проверено {i} / {total} файлов'
+                    msg = f'Фаза 2: дочитываем {i} / {total} файлов'
                     self.window.after(0, lambda p=pct, m=msg: (
                         self.progress.__setitem__('value', p),
                         self.status_var.set(m),

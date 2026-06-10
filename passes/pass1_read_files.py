@@ -50,15 +50,16 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
         # Try cache first
         cache = MetadataCache() if use_cache else None
         meta = None
+        content_hash = ''
         if cache:
-            meta = cache.get_cached_metadata(fb2_file)
+            meta, content_hash = cache.get_cached_metadata(fb2_file)
 
         if not meta:
             # Parse file
             meta = extractor._extract_all_metadata_at_once(fb2_file)
-            # Cache the metadata
+            # Cache the metadata (returns SHA-256 of first 256KB for dedup)
             if cache:
-                cache.cache_metadata(fb2_file, meta)
+                content_hash = cache.cache_metadata(fb2_file, meta)
 
         # folder_author_map: {str(parent_folder): (author, source)} — precomputed per unique folder
         folder_key = str(fb2_file.parent)
@@ -80,6 +81,7 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
             series_source="",
             metadata_genre=meta['genre'] or "",
             needs_filename_fallback=(author == ""),
+            content_hash=content_hash,
         )
 
         return record.to_tuple()
@@ -153,7 +155,8 @@ class BookRecord:
     extracted_series_candidate: str = ""  # Series found in filename (even if blocked by BL)
     needs_filename_fallback: bool = False  # True if folder parse found nothing, need filename PASS 2
     delete_flag: bool = False     # True if this is an older duplicate superseded by a newer variant
-    
+    content_hash: str = ""        # SHA-256 первых 256 КБ содержимого (для поиска дубликатов)
+
     def to_tuple(self):
         """Convert record to tuple for GUI table display."""
         return (
@@ -167,6 +170,7 @@ class BookRecord:
             self.file_title,
             self.metadata_genre,
             self.series_number,
+            self.content_hash,
         )
 
     @classmethod
@@ -185,6 +189,7 @@ class BookRecord:
             series_number=data[9],
             extracted_series_candidate="",  # defaults
             needs_filename_fallback=(data[2] == ""),  # based on proposed_author
+            content_hash=data[10] if len(data) > 10 else "",
         )
 
 
