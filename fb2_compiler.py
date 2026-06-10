@@ -500,8 +500,14 @@ class FB2CompilerService:
             # если recs[0] оказался плоской записью (folder_dataset без arc-детекции).
             _s_with_sub = next((r.proposed_series.strip() for r in recs
                                 if '\\' in r.proposed_series), None)
-            if len(_all_subs) == 1 and _s_with_sub:
-                # Единственная подсерия — берём полный путь как есть
+            # Если в группе есть записи без подсерии — их название задаёт зонтичную серию.
+            # Пример: "Не ГГ" (тт.1,4) + "Не ГГ\Курсанты" (тт.2-3) → серия = "Не ГГ".
+            _plain = next((r.proposed_series.strip() for r in recs
+                           if '\\' not in r.proposed_series), None)
+            if _plain:
+                series = _plain
+            elif len(_all_subs) == 1 and _s_with_sub:
+                # Единственная подсерия и нет плоских книг — берём полный путь
                 series = _s_with_sub
             else:
                 if '\\' in _s0:
@@ -509,11 +515,6 @@ class FB2CompilerService:
                     series = re.sub(r'\s+\d{1,4}\s*$', '', _root).strip() or _root
                 else:
                     series = _s0
-                # Если в группе есть файлы без подсерии — их название точнее
-                _plain = next((r.proposed_series.strip() for r in recs
-                               if '\\' not in r.proposed_series), None)
-                if _plain:
-                    series = _plain
 
             books = [self._make_book(rec, work_dir) for rec in recs]
             duplicate_paths: List[Path] = []
