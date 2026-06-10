@@ -1546,6 +1546,18 @@ class Pass2SeriesFilename:
                 # range в корне ломает bucket-ключи и вызывает неверную группировку.
                 _ps0 = entries[0][0].proposed_series
                 series_root = re.sub(r'\s*\[[^\]]*\]\s*$', '', _ps0.split('\\')[0]).strip()
+                # Убираем авторский префикс из корня серии, если он туда попал при парсинге.
+                # «Аберкромби. Земной круг 1» → «Земной круг 1» когда автор = «Аберкромби Джо».
+                _auth = (entries[0][0].proposed_author or '').strip()
+                if _auth:
+                    _auth_words_n = {_norm_s(w) for w in _auth.split() if w}
+                    _root_first_word = _norm_s(series_root.split('.')[0].split()[0]) if series_root else ''
+                    if _root_first_word and _root_first_word in _auth_words_n:
+                        _dot_idx = series_root.find('. ')
+                        if _dot_idx > 0:
+                            _candidate = series_root[_dot_idx + 2:].strip()
+                            if _candidate:
+                                series_root = _candidate
                 new_series = f'{series_root}\\{arc_canonical}'
                 for rec, vol_num, _ in arc_entries:
                     rec.proposed_series = new_series
@@ -2913,7 +2925,14 @@ class Pass2SeriesFilename:
             _sub_name  = _tl.group(3).strip()
             _meta_low  = _meta_norm(metadata_series.strip())
             if _meta_low == _meta_norm(_root_name) or _meta_low == _meta_norm(_sub_name):
-                return f'{_root_name} {_root_num}\\{_sub_name}'
+                # Если metadata подтверждает sub (не root) и root содержит '. ' —
+                # первый токен до '. ' вероятно авторский префикс: «Аберкромби. Земной круг».
+                _root_out = _root_name
+                if _meta_low == _meta_norm(_sub_name) and '. ' in _root_name:
+                    _after = _root_name.split('. ', 1)[1].strip()
+                    if _after:
+                        _root_out = _after
+                return f'{_root_out} {_root_num}\\{_sub_name}'
         # Вариант Б: metadata подтверждает root-серию, подсерия без номера
         _tl2 = _TWO_LEVEL_TOM_RE.match(_name_after_dash)
         if _tl2 and metadata_series:
