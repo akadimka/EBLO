@@ -432,11 +432,23 @@ class DuplicateFinderWindow:
                     result[dup]['reasons'].add('Хэш')
 
         # ── Метаданные-дубликаты ───────────────────────────────────────
+        _PLACEHOLDER_TITLES = {'no title', 'без названия', 'untitled', 'unknown'}
+        _RNG_SN = re.compile(r'^\d+\s*[-–—]\s*\d+')  # series_number вида N-M
+
+        def _is_precompilation(rec) -> bool:
+            """True если запись — предкомпиляция (series_number содержит диапазон)."""
+            sn = (getattr(rec, 'series_number', '') or '').strip()
+            return bool(_RNG_SN.match(sn))
+
         title_map: dict = {}  # title_norm → [rec]
         for rec in records:
-            title = _norm_str(getattr(rec, 'file_title', '') or '')
-            if title:
-                title_map.setdefault(title, []).append(rec)
+            raw = getattr(rec, 'file_title', '') or ''
+            title = _norm_str(raw)
+            # Пропускаем плейсхолдеры и слишком короткие тайтлы (< 4 символов) —
+            # они дают ложные группы между совершенно разными файлами.
+            if not title or len(title) < 4 or title in _PLACEHOLDER_TITLES:
+                continue
+            title_map.setdefault(title, []).append(rec)
 
         for title, recs in title_map.items():
             if len(recs) < 2:
@@ -450,6 +462,10 @@ class DuplicateFinderWindow:
                 for rec_b in recs_sorted[i + 1:]:
                     authors_b = _rec_authors(rec_b)
                     if not authors_b or not (authors_a & authors_b):
+                        continue
+                    # Предкомпиляция (sn=N-M) не является дублём отдельной книги (sn=N):
+                    # у них совпадает title тома 1, но это разные сущности.
+                    if _is_precompilation(rec_a) != _is_precompilation(rec_b):
                         continue
                     path_a = self._resolve_path(work_dir, getattr(rec_a, 'file_path', ''))
                     path_b = self._resolve_path(work_dir, getattr(rec_b, 'file_path', ''))
