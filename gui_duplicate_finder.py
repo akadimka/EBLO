@@ -434,11 +434,20 @@ class DuplicateFinderWindow:
         # ── Метаданные-дубликаты ───────────────────────────────────────
         _PLACEHOLDER_TITLES = {'no title', 'без названия', 'untitled', 'unknown'}
         _RNG_SN = re.compile(r'^\d+\s*[-–—]\s*\d+')  # series_number вида N-M
-
         def _is_precompilation(rec) -> bool:
             """True если запись — предкомпиляция (series_number содержит диапазон)."""
             sn = (getattr(rec, 'series_number', '') or '').strip()
             return bool(_RNG_SN.match(sn))
+
+        def _is_subseries_precompilation(rec) -> bool:
+            """True если имя файла — компиляция подсерии: «Автор. Серия. Подсерия N-M».
+
+            Признак: два или более «. » в stem файла.
+            «Автор. Серия N-M» — одна точка, это обычная предкомпиляция.
+            «Автор. Серия. Подсерия N-M» — две точки, это подсерийная предкомпиляция.
+            """
+            stem = Path(getattr(rec, 'file_path', '') or '').stem
+            return stem.count('. ') >= 2
 
         title_map: dict = {}  # title_norm → [rec]
         for rec in records:
@@ -466,6 +475,10 @@ class DuplicateFinderWindow:
                     # Предкомпиляция (sn=N-M) не является дублём отдельной книги (sn=N):
                     # у них совпадает title тома 1, но это разные сущности.
                     if _is_precompilation(rec_a) != _is_precompilation(rec_b):
+                        continue
+                    # Компиляция подсерии («Серия. Подсерия N-M») и компиляция основной серии
+                    # («Серия N-M») — разный контент, разная нумерация → не дубликаты.
+                    if _is_subseries_precompilation(rec_a) != _is_subseries_precompilation(rec_b):
                         continue
                     path_a = self._resolve_path(work_dir, getattr(rec_a, 'file_path', ''))
                     path_b = self._resolve_path(work_dir, getattr(rec_b, 'file_path', ''))

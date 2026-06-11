@@ -147,9 +147,11 @@ def find_duplicates(records: List[SimRecord]) -> Dict[str, DupResult]:
     # Канал 2: метаданные (title + пересечение авторов)
     _PLACEHOLDER_TITLES = {'no title', 'без названия', 'untitled', 'unknown'}
     _RNG_SN = re.compile(r'^\d+\s*[-–—]\s*\d+')
-
     def _is_precomp(r: SimRecord) -> bool:
         return bool(_RNG_SN.match((r.series_number or '').strip()))
+
+    def _is_subseries_precomp(r: SimRecord) -> bool:
+        return Path(r.file_path).stem.count('. ') >= 2
 
     title_map: Dict[str, List[SimRecord]] = defaultdict(list)
     for r in records:
@@ -173,6 +175,9 @@ def find_duplicates(records: List[SimRecord]) -> Dict[str, DupResult]:
                     continue
                 # Предкомпиляция vs отдельная книга — не дубликаты
                 if _is_precomp(ra) != _is_precomp(rb):
+                    continue
+                # Компиляция подсерии vs компиляция основной серии — разный контент
+                if _is_subseries_precomp(ra) != _is_subseries_precomp(rb):
                     continue
                 meta_groups += 1
                 # Оригинал — у кого есть series и глубже путь
