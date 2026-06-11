@@ -147,10 +147,10 @@ class DuplicateFinderWindow:
         mid_wrap = ttk.Frame(root, padding='8 4 8 4')
         mid_wrap.pack(fill=tk.BOTH, expand=True)
 
-        paned = ttk.PanedWindow(mid_wrap, orient=tk.HORIZONTAL)
+        paned = ttk.PanedWindow(mid_wrap, orient=tk.VERTICAL)
         paned.pack(fill=tk.BOTH, expand=True)
 
-        # Левая панель — исходники
+        # Верхняя панель — исходники
         left_pane = ttk.Frame(paned)
         paned.add(left_pane, weight=1)
         left_pane.rowconfigure(1, weight=1)
@@ -174,7 +174,7 @@ class DuplicateFinderWindow:
         hsb_l.grid(row=1, column=0, sticky='ew')
         self.src_list.bind('<<ListboxSelect>>', self._on_src_select)
 
-        # Правая панель — дубликаты (Treeview с чекбоксами)
+        # Нижняя панель — дубликаты (Treeview с чекбоксами)
         right_pane = ttk.Frame(paned)
         paned.add(right_pane, weight=2)
         right_pane.rowconfigure(1, weight=1)
