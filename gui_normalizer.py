@@ -173,8 +173,14 @@ class NamesDialog:
         def _on_frame_configure(event):
             self._canvas.configure(scrollregion=self._canvas.bbox("all"))
 
+        self._resize_after_id = None
+
         def _on_canvas_configure(event):
-            self._canvas.itemconfig(self._win_id, width=event.width)
+            if self._resize_after_id:
+                self.top.after_cancel(self._resize_after_id)
+            self._resize_after_id = self.top.after(
+                50, lambda w=event.width: self._canvas.itemconfig(self._win_id, width=w)
+            )
 
         self._inner.bind("<Configure>", _on_frame_configure)
         self._canvas.bind("<Configure>", _on_canvas_configure)
@@ -256,12 +262,20 @@ class NamesDialog:
             _Tooltip(src_lbl, file_path)
 
         # Автор — кликабельные слова → поле Name
-        author_frame = tk.Frame(row_frame, relief="sunken", bd=1, width=270, height=24)
+        # Используем ttk.Entry (readonly) как контейнер для надёжного отображения
+        # в любой теме; поверх него рисуем кликабельные tk.Label-слова.
+        if not self._default_author_bg:
+            style = ttk.Style()
+            self._default_author_bg = (
+                style.lookup('TFrame', 'background') or
+                style.lookup('TEntry', 'fieldbackground') or
+                '#ffffff'
+            )
+
+        author_frame = tk.Frame(row_frame, relief="sunken", bd=1, width=270, height=24,
+                                bg=self._default_author_bg)
         author_frame.pack(side=tk.LEFT, padx=1)
         author_frame.pack_propagate(False)
-
-        if not self._default_author_bg:
-            self._default_author_bg = author_frame.cget('bg')
 
         # Индекс этой строки в _row_status (для тултипа)
         self._row_status.append('')
@@ -275,7 +289,7 @@ class NamesDialog:
         word_labels = []
         for word in author.split():
             w_lbl = tk.Label(author_frame, text=word, cursor="hand2",
-                             bg=self._default_author_bg, padx=2)
+                             bg=self._default_author_bg, fg='black', padx=2)
             w_lbl.pack(side=tk.LEFT)
             w_lbl.bind("<Button-1>",
                        lambda e, v=word, nv=name_var: nv.set(v))
