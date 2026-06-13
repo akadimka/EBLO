@@ -822,6 +822,7 @@ class CSVNormalizerApp:
         buttons_frame.pack(fill=tk.X, side=tk.BOTTOM)
         
         ttk.Button(buttons_frame, text="Создать CSV", command=self.create_csv).pack(side=tk.LEFT, padx=2)
+        ttk.Button(buttons_frame, text="Имена из CSV", command=self.get_names_from_csv).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Отмена", command=self.cancel).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Получить имена", command=self.get_names).pack(side=tk.LEFT, padx=2)
         ttk.Button(buttons_frame, text="Битые файлы", command=self.show_broken_files).pack(side=tk.LEFT, padx=2)
@@ -1093,6 +1094,106 @@ class CSVNormalizerApp:
             self.log_buffer = []
             self.root.quit()
             
+    def get_names_from_csv(self):
+        """Загрузить имена авторов из CSV-файла (без запуска пайплайна) и открыть NamesDialog."""
+        csv_path = filedialog.askopenfilename(
+            title="Выберите CSV-файл",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialdir=self.folder_path.get() or str(Path.home()),
+        )
+        if not csv_path:
+            return
+
+        # Открыть диалог немедленно (пустым), заливать строки из фонового потока
+        dialog_ref = [None]
+        ready_event = threading.Event()
+
+        def _open_dialog():
+            d = NamesDialog(self.root, [], self.settings_manager)
+            d._loading_var.set("Чтение CSV…")
+            dialog_ref[0] = d
+            ready_event.set()
+
+        self.root.after(0, _open_dialog)
+        ready_event.wait()
+
+        thread = threading.Thread(
+            target=self._load_names_from_csv_thread,
+            args=(csv_path, dialog_ref),
+            daemon=True,
+        )
+        thread.start()
+
+    def _load_names_from_csv_thread(self, csv_path: str, dialog_ref: list):
+        """Фоновый поток: читает CSV, фильтрует авторов, стримит в NamesDialog батчами."""
+        import csv as _csv
+        import re as _re
+
+        BATCH_SIZE = 25
+
+        def _flush(batch):
+            d = dialog_ref[0]
+            if d and d.top.winfo_exists():
+                d.add_rows(batch)
+
+        try:
+            settings = self.settings_manager if self.settings_manager else self.csv_service.settings
+            male_set   = {n.lower() for n in settings.get_male_names()}
+            female_set = {n.lower() for n in settings.get_female_names()}
+
+            seen: set = set()
+            batch: list = []
+            total = 0
+
+            with open(csv_path, encoding='utf-8', newline='') as f:
+                for row in _csv.DictReader(f):
+                    if row.get('delete_flag'):
+                        continue
+                    combined = (row.get('proposed_author') or '').strip()
+                    if not combined or combined == 'Сборник':
+                        continue
+                    for author in (a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()):
+                        if author in seen:
+                            continue
+                        seen.add(author)
+                        parts = author.split()
+                        first_name = parts[1] if len(parts) >= 2 else ''
+                        gender = ''
+                        for word in parts:
+                            w = word.lower()
+                            if w in male_set:
+                                gender = 'Муж.'
+                                break
+                            if w in female_set:
+                                gender = 'Жен.'
+                                break
+                        if gender:
+                            continue
+                        source    = row.get('author_source') or row.get('series_source') or ''
+                        file_path = row.get('file_path') or ''
+                        batch.append((source, author, first_name, gender, file_path))
+                        total += 1
+                        if len(batch) >= BATCH_SIZE:
+                            self.root.after(0, lambda b=batch: _flush(b))
+                            batch = []
+
+            if batch:
+                self.root.after(0, lambda b=batch: _flush(b))
+
+            if total == 0:
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Результат", "Все авторы уже определены (пол известен для всех)."))
+                d = dialog_ref[0]
+                if d and d.top.winfo_exists():
+                    self.root.after(0, d.top.destroy)
+            else:
+                self._log(f"Загружено {total} авторов с неизвестным полом из {Path(csv_path).name}")
+                d = dialog_ref[0]
+                if d and d.top.winfo_exists():
+                    self.root.after(0, lambda: d._loading_var.set(''))
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось прочитать CSV:\n{e}")
+
     def get_names(self):
         """Запустить только авторскую часть pipeline и показать окно имён."""
         folder = self.folder_path.get()
