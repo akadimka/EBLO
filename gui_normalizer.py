@@ -1118,22 +1118,13 @@ class CSVNormalizerApp:
         if not csv_path:
             return
 
-        # Открыть диалог немедленно (пустым), заливать строки из фонового потока
-        dialog_ref = [None]
-        ready_event = threading.Event()
-
-        def _open_dialog():
-            d = NamesDialog(self.root, [], self.settings_manager)
-            d._loading_var.set("Чтение CSV…")
-            dialog_ref[0] = d
-            ready_event.set()
-
-        self.root.after(0, _open_dialog)
-        ready_event.wait()
+        # Мы на UI-потоке — создаём диалог напрямую, без after/wait
+        d = NamesDialog(self.root, [], self.settings_manager)
+        d._loading_var.set("Чтение CSV…")
 
         thread = threading.Thread(
             target=self._load_names_from_csv_thread,
-            args=(csv_path, dialog_ref),
+            args=(csv_path, [d]),
             daemon=True,
         )
         thread.start()
