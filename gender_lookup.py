@@ -145,26 +145,47 @@ class GenderLookupService:
             daemon=True,
         ).start()
 
-    # ── Рабочий поток ────────────────────────────────────────────────────────
+    # ── Рабочий поток (параллельный пул) ─────────────────────────────────────
+
+    _PARALLEL_WORKERS = 3   # одновременных потоков к Wikidata
 
     def _worker(self, items, on_result, on_done):
-        """Последовательный Wikidata-поиск для каждого автора."""
-        for row_idx, author in items:
-            wd_key = '_wd_' + author.lower()
-            if not self._in_cache(wd_key):
-                self._throttle_wikidata()
-                try:
-                    r = self._wikidata_lookup(author)
-                except Exception as exc:
-                    r = LookupResult(status=STATUS_ERROR, error=str(exc))
-                self._set_cache(wd_key, r)
+        """Параллельный Wikidata-поиск: _PARALLEL_WORKERS потоков, общий throttle."""
+        import queue as _queue
 
-        for row_idx, author in items:
-            name_word, result = self._select_result(author)
-            try:
-                on_result(row_idx, name_word, result)
-            except Exception:
-                pass
+        task_q: '_queue.Queue[Tuple[int,str]]' = _queue.Queue()
+        for item in items:
+            task_q.put(item)
+
+        # on_result вызываем сразу по готовности каждого результата
+        def _fetch():
+            while True:
+                try:
+                    row_idx, author = task_q.get_nowait()
+                except _queue.Empty:
+                    return
+                wd_key = '_wd_' + author.lower()
+                if not self._in_cache(wd_key):
+                    self._throttle_wikidata()
+                    try:
+                        r = self._wikidata_lookup(author)
+                    except Exception as exc:
+                        r = LookupResult(status=STATUS_ERROR, error=str(exc))
+                    self._set_cache(wd_key, r)
+                name_word, result = self._select_result(author)
+                try:
+                    on_result(row_idx, name_word, result)
+                except Exception:
+                    pass
+
+        threads = [
+            threading.Thread(target=_fetch, daemon=True)
+            for _ in range(min(self._PARALLEL_WORKERS, len(items)))
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
         try:
             on_done(False)
