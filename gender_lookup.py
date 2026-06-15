@@ -15,11 +15,13 @@
 """
 
 import difflib
+import sqlite3
 import time
 import urllib.request
 import urllib.parse
 import json
 import threading
+from pathlib import Path
 from typing import Dict, List, Tuple, Callable, Optional
 
 # ── Константы ────────────────────────────────────────────────────────────────
@@ -110,6 +112,19 @@ class GenderLookupService:
             except Exception:
                 qids = None
         self._writer_occupations: set = set(qids) if qids else _DEFAULT_WRITER_OCCUPATIONS
+
+        # Персистентный SQLite-кэш — рядом с config.json приложения
+        self._db_path: Optional[Path] = None
+        if settings is not None and hasattr(settings, 'config_path'):
+            self._db_path = Path(settings.config_path).parent / 'gender_cache.db'
+        else:
+            # fallback: рядом со скриптом
+            try:
+                self._db_path = Path(__file__).parent / 'gender_cache.db'
+            except Exception:
+                pass
+        self._db_lock = threading.Lock()
+        self._load_db_cache()
 
     # ── Публичный API ─────────────────────────────────────────────────────────
 
@@ -416,6 +431,59 @@ class GenderLookupService:
 
         return name_word, result
 
+    # ── Персистентный SQLite-кэш ─────────────────────────────────────────────
+
+    def _load_db_cache(self) -> None:
+        """Загрузить все строки из БД в in-memory кэш при старте."""
+        if not self._db_path:
+            return
+        try:
+            with self._db_lock:
+                conn = sqlite3.connect(str(self._db_path))
+                conn.execute(
+                    'CREATE TABLE IF NOT EXISTS gender_cache ('
+                    '  author_key TEXT PRIMARY KEY,'
+                    '  gender_ru  TEXT,'
+                    '  status     TEXT,'
+                    '  source     TEXT,'
+                    '  first_name TEXT'
+                    ')'
+                )
+                conn.commit()
+                rows = conn.execute(
+                    'SELECT author_key, gender_ru, status, source, first_name FROM gender_cache'
+                ).fetchall()
+                conn.close()
+            with self._lock:
+                for author_key, gender_ru, status, source, first_name in rows:
+                    self._cache[author_key] = LookupResult(
+                        gender_ru=gender_ru or None,
+                        probability=1.0 if status == STATUS_FOUND else 0.0,
+                        status=status or STATUS_UNKNOWN,
+                        source=source or '',
+                        first_name=first_name or '',
+                    )
+        except Exception:
+            pass  # БД недоступна — продолжаем без персистентности
+
+    def _persist_result(self, key: str, result: 'LookupResult') -> None:
+        """Сохранить результат в SQLite. Ошибки не кэшируются (transient)."""
+        if not self._db_path or result.status == STATUS_ERROR:
+            return
+        try:
+            with self._db_lock:
+                conn = sqlite3.connect(str(self._db_path))
+                conn.execute(
+                    'INSERT OR REPLACE INTO gender_cache'
+                    ' (author_key, gender_ru, status, source, first_name)'
+                    ' VALUES (?, ?, ?, ?, ?)',
+                    (key, result.gender_ru, result.status, result.source, result.first_name),
+                )
+                conn.commit()
+                conn.close()
+        except Exception:
+            pass
+
     # ── Кеш-хелперы ──────────────────────────────────────────────────────────
 
     def _in_cache(self, key: str) -> bool:
@@ -425,4 +493,5 @@ class GenderLookupService:
     def _set_cache(self, key: str, result: 'LookupResult') -> None:
         with self._lock:
             self._cache[key] = result
+        self._persist_result(key, result)
 
