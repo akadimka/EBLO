@@ -57,7 +57,11 @@ STATUS_FOUND      = 'found'        # пол определён
 STATUS_UNCERTAIN  = 'uncertain'    # зарезервировано
 STATUS_UNKNOWN    = 'unknown'      # имя не найдено в Wikidata
 STATUS_ERROR      = 'error'        # ошибка сети/парсинга
-STATUS_RATE_LIMIT = 'rate_limit'   # зарезервировано
+STATUS_RATE_LIMIT = 'rate_limit'   # HTTP 429 от Wikidata
+
+
+class _RateLimitError(Exception):
+    """Wikidata вернул HTTP 429 — превышен лимит запросов."""
 
 
 # ── Результат ─────────────────────────────────────────────────────────────────
@@ -169,6 +173,30 @@ class GenderLookupService:
                     self._throttle_wikidata()
                     try:
                         r = self._wikidata_lookup(author)
+                    except _RateLimitError:
+                        r = LookupResult(status=STATUS_RATE_LIMIT)
+                        self._set_cache(wd_key, r)
+                        # Сообщаем о текущем авторе
+                        name_word, result = self._select_result(author)
+                        try:
+                            on_result(row_idx, name_word, result)
+                        except Exception:
+                            pass
+                        # Дренируем очередь: все оставшиеся авторы тоже rate_limit
+                        while True:
+                            try:
+                                ri, au = task_q.get_nowait()
+                                rl_key = '_wd_' + au.lower()
+                                if not self._in_cache(rl_key):
+                                    self._set_cache(rl_key, LookupResult(status=STATUS_RATE_LIMIT))
+                                nw, res = self._select_result(au)
+                                try:
+                                    on_result(ri, nw, res)
+                                except Exception:
+                                    pass
+                            except _queue.Empty:
+                                break
+                        return
                     except Exception as exc:
                         r = LookupResult(status=STATUS_ERROR, error=str(exc))
                     self._set_cache(wd_key, r)
@@ -395,8 +423,14 @@ class GenderLookupService:
 
         return LookupResult(status=STATUS_UNKNOWN, source='wikidata')
 
+    @staticmethod
+    def _raise_if_rate_limited(resp) -> None:
+        if resp.status == 429:
+            raise _RateLimitError()
+
     def _wb_search(self, query: str, lang: str, ua: str, limit: int = 5) -> List[str]:
         """Вернуть список QID из wbsearchentities (поиск по labels/aliases)."""
+        import urllib.error as _ue
         params = urllib.parse.urlencode({
             'action':   'wbsearchentities',
             'search':   query,
@@ -409,12 +443,19 @@ class GenderLookupService:
             WIKIDATA_API_URL + '?' + params,
             headers={'User-Agent': ua},
         )
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                self._raise_if_rate_limited(resp)
+                data = json.loads(resp.read().decode('utf-8'))
+        except _ue.HTTPError as e:
+            if e.code == 429:
+                raise _RateLimitError() from e
+            raise
         return [r['id'] for r in data.get('search', [])]
 
     def _wb_fulltext_search(self, query: str, ua: str, limit: int = 10) -> List[str]:
         """Полнотекстовый поиск по Wikidata (действие list=search)."""
+        import urllib.error as _ue
         params = urllib.parse.urlencode({
             'action':      'query',
             'list':        'search',
@@ -427,8 +468,14 @@ class GenderLookupService:
             WIKIDATA_API_URL + '?' + params,
             headers={'User-Agent': ua},
         )
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                self._raise_if_rate_limited(resp)
+                data = json.loads(resp.read().decode('utf-8'))
+        except _ue.HTTPError as e:
+            if e.code == 429:
+                raise _RateLimitError() from e
+            raise
         return [r['title'] for r in data.get('query', {}).get('search', [])]
 
     # ── Итоговый выбор ────────────────────────────────────────────────────────
