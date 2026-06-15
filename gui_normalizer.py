@@ -64,6 +64,11 @@ class NamesDialog:
 
     GENDER_OPTIONS = ("Муж.", "Жен.")
 
+    # Максимум строк в диалоге: каждая строка создаёт ~6 Win32-окон;
+    # при 5000+ строк процесс упирается в лимит USER-объектов Windows (~10k),
+    # и CreateWindow молча возвращает ошибку для новых виджетов.
+    MAX_ROWS = 500
+
     # Цвета подсветки строк онлайн-проверки
     _STATUS_COLORS = {
         'pending':    '#FFFACD',   # лимонный — запрос отправлен
@@ -237,7 +242,11 @@ class NamesDialog:
             return
         start_idx = len(self._row_data)
 
+        skipped = 0
         for row in rows:
+            if len(self._row_data) >= self.MAX_ROWS:
+                skipped += 1
+                continue
             if len(row) >= 5:
                 source, author, name, gender, file_path = (
                     row[0], row[1], row[2], row[3], row[4])
@@ -251,7 +260,12 @@ class NamesDialog:
                                  source, author, name_var, gender_var, file_path)
 
         total = len(self._row_data)
-        self._count_var.set(f"Строк: {total}")
+        if total >= self.MAX_ROWS:
+            self._count_var.set(
+                f"Строк: {total} (лимит {self.MAX_ROWS} — остальные пропущены)"
+            )
+        else:
+            self._count_var.set(f"Строк: {total}")
         if total:
             self._loading_var.set("")
 
@@ -308,16 +322,17 @@ class NamesDialog:
             _Tooltip(w_lbl, _status_tip)
             word_labels.append(w_lbl)
 
-        self._row_ui.append((author_frame, word_labels))
-
         # Имя — редактируемое поле
-        ttk.Entry(row_frame, textvariable=name_var, width=24).pack(
-            side=tk.LEFT, padx=1)
+        name_entry = ttk.Entry(row_frame, textvariable=name_var, width=24)
+        name_entry.pack(side=tk.LEFT, padx=1)
 
         # Пол — выпадающий список
-        ttk.Combobox(row_frame, textvariable=gender_var,
-                     values=self.GENDER_OPTIONS, width=10,
-                     state="readonly").pack(side=tk.LEFT, padx=1)
+        gender_cb = ttk.Combobox(row_frame, textvariable=gender_var,
+                                 values=self.GENDER_OPTIONS, width=10,
+                                 state="readonly")
+        gender_cb.pack(side=tk.LEFT, padx=1)
+
+        self._row_ui.append((author_frame, word_labels, name_entry, gender_cb))
 
     # ------------------------------------------------------------------
     # Цветовая сигнализация
@@ -330,7 +345,7 @@ class NamesDialog:
         if row_idx < len(self._row_status):
             self._row_status[row_idx] = status
         color = self._STATUS_COLORS.get(status, self._default_author_bg)
-        author_frame, word_labels = self._row_ui[row_idx]
+        author_frame, word_labels, *_ = self._row_ui[row_idx]
         try:
             author_frame.configure(bg=color)
             for lbl in word_labels:
