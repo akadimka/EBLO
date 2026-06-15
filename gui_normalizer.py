@@ -218,6 +218,12 @@ class NamesDialog:
             command=self._run_online_check,
         )
         self._online_btn.pack(side=tk.LEFT, padx=5)
+        self._retry_btn = ttk.Button(
+            btn_frame, text="Повторить ошибочные",
+            command=self._retry_errors,
+            state='disabled',
+        )
+        self._retry_btn.pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Отмена",
                    command=self.top.destroy).pack(side=tk.LEFT, padx=5)
 
@@ -429,6 +435,37 @@ class NamesDialog:
             self._online_var.set(
                 f"Онлайн-проверка: завершена ({total})"
             )
+            # Показываем кнопку retry если есть строки со статусом error
+            err_count = sum(1 for s in self._row_status if s == 'error')
+            if err_count and hasattr(self, '_retry_btn'):
+                self._retry_btn.configure(
+                    state='normal',
+                    text=f"Повторить ошибочные ({err_count})",
+                )
+
+    def _retry_errors(self) -> None:
+        """Повторить lookup только для строк со статусом 'error'."""
+        if not self._service:
+            return
+        # Сбросить error из in-memory кэша сервиса чтобы они перезапросились
+        with self._service._lock:
+            error_keys = [
+                k for k, v in self._service._cache.items()
+                if v.status == 'error'
+            ]
+            for k in error_keys:
+                del self._service._cache[k]
+
+        error_items = [
+            (i, self._row_data[i][1])
+            for i, s in enumerate(self._row_status)
+            if s == 'error'
+        ]
+        if not error_items:
+            return
+
+        self._retry_btn.configure(state='disabled', text="Повторить ошибочные")
+        self._start_online_check(error_items)
 
     # ------------------------------------------------------------------
     # Сохранение
