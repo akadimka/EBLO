@@ -54,6 +54,20 @@ def run_author_only_pipeline(
     return records
 
 
+def guess_first_name(author: str, author_source: str) -> str:
+    """Угадать имя автора по формату источника.
+
+    Источник 'filename' хранит автора в западном порядке «Имя Фамилия»,
+    все остальные — в русском «Фамилия Имя».
+    """
+    parts = author.split()
+    if not parts:
+        return ""
+    if author_source == "filename":
+        return parts[0] if len(parts) >= 2 else ""  # западный порядок: первое слово = имя
+    return parts[1] if len(parts) >= 2 else ""      # русский порядок: второе слово = имя
+
+
 def collect_unknown_gender_authors(records: list, male_set: set, female_set: set) -> list:
     """Собрать авторов с неопределённым полом из списка записей.
 
@@ -68,13 +82,14 @@ def collect_unknown_gender_authors(records: list, male_set: set, female_set: set
         combined = rec.proposed_author or ""
         if not combined or combined == "Сборник":
             continue
+        source = rec.author_source or ""
         authors = [a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()]
         for author in authors:
             if author in seen:
                 continue
             seen.add(author)
             parts = author.split()
-            first_name = parts[1] if len(parts) >= 2 else ""
+            first_name = guess_first_name(author, source)
             gender = ""
             for word in parts:
                 w = word.lower()
@@ -86,5 +101,5 @@ def collect_unknown_gender_authors(records: list, male_set: set, female_set: set
                     break
             if gender:
                 continue  # уже известен — пропускаем
-            rows.append((rec.author_source or "", author, first_name, gender, rec.file_path or ""))
+            rows.append((source, author, first_name, gender, rec.file_path or ""))
     return rows

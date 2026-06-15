@@ -1133,6 +1133,10 @@ class CSVNormalizerApp:
         """Фоновый поток: читает CSV, фильтрует авторов, стримит в NamesDialog батчами."""
         import csv as _csv
         import re as _re
+        try:
+            from author_pipeline_service import guess_first_name
+        except ImportError:
+            from .author_pipeline_service import guess_first_name
 
         BATCH_SIZE = 25
 
@@ -1157,12 +1161,14 @@ class CSVNormalizerApp:
                     combined = (row.get('proposed_author') or '').strip()
                     if not combined or combined == 'Сборник':
                         continue
+                    source    = row.get('author_source') or row.get('series_source') or ''
+                    file_path = row.get('file_path') or ''
                     for author in (a.strip() for a in _re.split(r'[,;]+', combined) if a.strip()):
                         if author in seen:
                             continue
                         seen.add(author)
                         parts = author.split()
-                        first_name = parts[1] if len(parts) >= 2 else ''
+                        first_name = guess_first_name(author, source)
                         gender = ''
                         for word in parts:
                             w = word.lower()
@@ -1174,8 +1180,6 @@ class CSVNormalizerApp:
                                 break
                         if gender:
                             continue
-                        source    = row.get('author_source') or row.get('series_source') or ''
-                        file_path = row.get('file_path') or ''
                         batch.append((source, author, first_name, gender, file_path))
                         total += 1
                         if len(batch) >= BATCH_SIZE:
