@@ -438,8 +438,8 @@ class NamesDialog:
         total = self._online_total
         if rate_limited:
             self._online_var.set(
-                f"Онлайн-проверка: ⚠ лимит запросов исчерпан "
-                f"(выполнено {done}/{total}). Добавьте API-ключ в Настройки → Общие"
+                f"Онлайн-проверка: ⚠ Wikidata вернул HTTP 429 — лимит запросов с этого IP. "
+                f"Выполнено {done}/{total}. Попробуйте позже."
             )
             self._online_lbl.configure(fg='#990000')
         elif done < total:
@@ -450,37 +450,37 @@ class NamesDialog:
             self._online_var.set(
                 f"Онлайн-проверка: завершена ({total})"
             )
-            # Показываем кнопку retry если есть строки со статусом error
-            err_count = sum(1 for s in self._row_status if s == 'error')
+            # Показываем кнопку retry для error и rate_limit
+            err_count = sum(1 for s in self._row_status if s in ('error', 'rate_limit'))
             if err_count and hasattr(self, '_retry_btn'):
                 self._retry_btn.configure(
                     state='normal',
-                    text=f"Повторить ошибочные ({err_count})",
+                    text=f"Повторить ({err_count})",
                 )
 
     def _retry_errors(self) -> None:
-        """Повторить lookup только для строк со статусом 'error'."""
+        """Повторить lookup для строк со статусом 'error' или 'rate_limit'."""
         if not self._service:
             return
-        # Сбросить error из in-memory кэша сервиса чтобы они перезапросились
+        # Сбросить error и rate_limit из in-memory кэша — они перезапросятся
         with self._service._lock:
-            error_keys = [
+            stale_keys = [
                 k for k, v in self._service._cache.items()
-                if v.status == 'error'
+                if v.status in ('error', 'rate_limit')
             ]
-            for k in error_keys:
+            for k in stale_keys:
                 del self._service._cache[k]
 
-        error_items = [
+        retry_items = [
             (i, self._row_data[i][1])
             for i, s in enumerate(self._row_status)
-            if s == 'error'
+            if s in ('error', 'rate_limit')
         ]
-        if not error_items:
+        if not retry_items:
             return
 
-        self._retry_btn.configure(state='disabled', text="Повторить ошибочные")
-        self._start_online_check(error_items)
+        self._retry_btn.configure(state='disabled', text="Повторить")
+        self._start_online_check(retry_items)
 
     # ------------------------------------------------------------------
     # Сохранение

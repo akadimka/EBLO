@@ -161,6 +161,8 @@ class GenderLookupService:
         for item in items:
             task_q.put(item)
 
+        rate_limit_hit = [False]  # общий флаг для всех потоков
+
         # on_result вызываем сразу по готовности каждого результата
         def _fetch():
             while True:
@@ -174,6 +176,7 @@ class GenderLookupService:
                     try:
                         r = self._wikidata_lookup(author)
                     except _RateLimitError:
+                        rate_limit_hit[0] = True
                         r = LookupResult(status=STATUS_RATE_LIMIT)
                         self._set_cache(wd_key, r)
                         # Сообщаем о текущем авторе
@@ -216,7 +219,7 @@ class GenderLookupService:
             t.join()
 
         try:
-            on_done(False)
+            on_done(rate_limit_hit[0])
         except Exception:
             pass
 
@@ -517,6 +520,11 @@ class GenderLookupService:
                     '  first_name TEXT'
                     ')'
                 )
+                # Удалить временные статусы, которые не должны переживать сессию
+                conn.execute(
+                    "DELETE FROM gender_cache WHERE status IN (?, ?)",
+                    (STATUS_ERROR, STATUS_RATE_LIMIT),
+                )
                 conn.commit()
                 rows = conn.execute(
                     'SELECT author_key, gender_ru, status, source, first_name FROM gender_cache'
@@ -535,8 +543,8 @@ class GenderLookupService:
             pass  # БД недоступна — продолжаем без персистентности
 
     def _persist_result(self, key: str, result: 'LookupResult') -> None:
-        """Сохранить результат в SQLite. Ошибки не кэшируются (transient)."""
-        if not self._db_path or result.status == STATUS_ERROR:
+        """Сохранить результат в SQLite. Временные состояния не кэшируются."""
+        if not self._db_path or result.status in (STATUS_ERROR, STATUS_RATE_LIMIT):
             return
         try:
             with self._db_lock:
