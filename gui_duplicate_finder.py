@@ -164,7 +164,7 @@ class DuplicateFinderWindow:
         lf.rowconfigure(0, weight=1)
         lf.columnconfigure(0, weight=1)
 
-        self.src_list = tk.Listbox(lf, selectmode=tk.SINGLE,
+        self.src_list = tk.Listbox(lf, selectmode=tk.EXTENDED,
                                    bg='white', font=('', 9), activestyle='none')
         vsb_l = ttk.Scrollbar(lf, command=self.src_list.yview)
         hsb_l = ttk.Scrollbar(lf, orient=tk.HORIZONTAL, command=self.src_list.xview)
@@ -173,6 +173,8 @@ class DuplicateFinderWindow:
         vsb_l.grid(row=0, column=1, sticky='ns')
         hsb_l.grid(row=1, column=0, sticky='ew')
         self.src_list.bind('<<ListboxSelect>>', self._on_src_select)
+        self.src_list.bind('<Control-a>', self._select_all_sources)
+        self.src_list.bind('<Control-A>', self._select_all_sources)
 
         # Нижняя панель — дубликаты (Treeview с чекбоксами)
         right_pane = ttk.Frame(paned)
@@ -581,17 +583,23 @@ class DuplicateFinderWindow:
         self._update_delete_btn()
 
     def _on_src_select(self, _event=None):
-        """Фильтровать дубликаты по выбранному источнику."""
+        """Фильтровать дубликаты по выбранным источникам (один или несколько)."""
         sel = self.src_list.curselection()
         if not sel:
             self._populate_dup_tree(self._all_dups)
             return
-        selected_src = self.src_list.get(sel[0])
+        selected_srcs = {self.src_list.get(i) for i in sel}
         filtered = {
             p: info for p, info in self._all_dups.items()
-            if str(info.get('source', '')) == selected_src
+            if str(info.get('source', '')) in selected_srcs
         }
         self._populate_dup_tree(filtered)
+
+    def _select_all_sources(self, _event=None):
+        """Ctrl+A — выбрать все строки в верхнем списке источников."""
+        self.src_list.select_set(0, tk.END)
+        self._on_src_select()
+        return 'break'  # не пропускать событие дальше
 
     def _on_error(self, msg: str):
         self._searching = False
