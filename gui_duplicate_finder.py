@@ -531,15 +531,20 @@ class DuplicateFinderWindow:
         for s in sources:
             self.src_list.insert(tk.END, s)
 
-        self._populate_dup_tree(all_dups)
+        self._populate_dup_tree(all_dups, check_all=True)
 
         if all_dups:
             self.btn_check_all.configure(state=tk.NORMAL)
             self._update_delete_btn()
 
-    def _populate_dup_tree(self, dups: dict):
-        """Заполнить dup_tree записями из dups, сохраняя состояние чекбоксов."""
-        # Сохранить отмеченные пути
+    def _populate_dup_tree(self, dups: dict, check_all: bool = False):
+        """Заполнить dup_tree записями из dups, сохраняя состояние чекбоксов.
+
+        check_all=True: пометить все строки ✓ независимо от предыдущего состояния
+                        (используется при первоначальном заполнении после поиска).
+        check_all=False: восстановить ✓ только для тех путей, что были отмечены раньше.
+        """
+        # Сохранить отмеченные пути (игнорируем при check_all)
         checked = set()
         for iid in self.dup_tree.get_children():
             vals = self.dup_tree.item(iid, 'values')
@@ -549,7 +554,6 @@ class DuplicateFinderWindow:
         for iid in self.dup_tree.get_children():
             self.dup_tree.delete(iid)
 
-        first_load = not checked  # первая загрузка — отмечаем всё
         dup_size_total = 0
         for dup_path in sorted(dups):
             info = dups[dup_path]
@@ -559,7 +563,7 @@ class DuplicateFinderWindow:
                       else f'{sz / 1_048_576:.1f} МБ')
             reason = '+'.join(sorted(info['reasons']))
             path_str = str(dup_path)
-            is_checked = first_load or path_str in checked
+            is_checked = check_all or path_str in checked
             tag = 'checked' if is_checked else 'unchecked'
             self.dup_tree.insert('', tk.END,
                 values=('✓' if is_checked else '', path_str, reason, info['series'], sz_str),
