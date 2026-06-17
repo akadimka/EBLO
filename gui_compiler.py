@@ -824,29 +824,31 @@ class CompilerDialog:
             group.volume_range = ''
             return
 
-        # Разбиваем на consecutive runs
-        runs = []
-        cur_run = [vol_books[0]]
-        for i in range(1, len(vol_books)):
-            if vol_books[i][0] == vol_books[i-1][0] + 1:
-                cur_run.append(vol_books[i])
+        # Разбиваем на consecutive runs по УНИКАЛЬНЫМ top-level томам.
+        # Несколько книг с одинаковым top-level номером (подсерии 1.1/1.2/1.3) —
+        # одна позиция, а не разрыв; сравнивать нужно уникальные значения.
+        unique_vols = sorted(set(v for v, _ in vol_books))
+        runs_vols: list = []
+        cur_run_vols = [unique_vols[0]]
+        for i in range(1, len(unique_vols)):
+            if unique_vols[i] == unique_vols[i - 1] + 1:
+                cur_run_vols.append(unique_vols[i])
             else:
-                runs.append(cur_run)
-                cur_run = [vol_books[i]]
-        runs.append(cur_run)
+                runs_vols.append(cur_run_vols)
+                cur_run_vols = [unique_vols[i]]
+        runs_vols.append(cur_run_vols)
 
-        if len(runs) > 1:
+        if len(runs_vols) > 1:
             # Есть пробелы — оставляем наибольший run (при равенстве — последний)
-            best_run = max(runs, key=lambda r: (len(r), r[0][0]))
-            best_paths = {b.abs_path.resolve() for _, b in best_run}
-            for _, b in vol_books:
-                if b.abs_path.resolve() not in best_paths:
+            best_vols = max(runs_vols, key=lambda r: (len(r), r[0]))
+            best_vol_set = set(best_vols)
+            for v, b in vol_books:
+                if v not in best_vol_set:
                     group.auto_excluded_paths.append(b.abs_path)
-            group.books = [b for _, b in best_run]
-            lo, hi = best_run[0][0], best_run[-1][0]
+            group.books = [b for v, b in vol_books if v in best_vol_set]
+            lo, hi = best_vols[0], best_vols[-1]
         else:
-            lo_vals = [v for v, _ in vol_books]
-            lo, hi = min(lo_vals), max(lo_vals)
+            lo, hi = unique_vols[0], unique_vols[-1]
 
         group.volume_range = f'{lo}-{hi}' if lo != hi else str(lo)
         group.order_determined = all(not b.order_ambiguous for b in group.books)
