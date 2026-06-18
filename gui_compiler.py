@@ -786,7 +786,7 @@ class CompilerDialog:
                 for i in range(1, len(_arc_books_s))
             )
             _sc = True if _arc_part_count > 0 else sc
-            _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths or group.duplicate_paths)
+            _has_exclusions = bool(group.excluded_paths or group.auto_excluded_paths)
             # Arc-point группы с неполной серией → «ч. N в K книгах»
             _arc_partial = _all_arc_point and _arc_part_count > 0 and not sc
             if _has_exclusions or _arc_has_gaps or _arc_partial:
