@@ -1394,7 +1394,7 @@ class FB2CompilerService:
         3. stem/title содержит сервисное слово (Трилогия → 3 тома) — lo=1, hi=count.
         """
         series_lower = series.lower()
-        series_words = [w for w in series_lower.split() if len(w) >= 4]
+        series_words = [w for w in re.split(r'[\s\\]+', series_lower) if len(w) >= 4]
         is_subseries = '\\' in series
 
         def _has_series_link(txt: str) -> bool:
@@ -1569,15 +1569,15 @@ class FB2CompilerService:
                     return 1, idx
 
         # Критерий 2: series_number — диапазон "N-M" из метаданных (запасной вариант)
-        # Для подсерий пропускаем: series_number ссылается на родительскую серию.
-        if not is_subseries:
-            sn = (book.record.series_number or '').strip()
-            if sn:
-                m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', sn)
-                if m:
-                    lo, hi = int(m.group(1)), int(m.group(2))
-                    if hi > lo:
-                        return lo, hi
+        # Для подсерий допускаем только явный диапазон: одиночное число означает позицию
+        # в родительской серии и не является признаком предкомпиляции подсерии.
+        sn = (book.record.series_number or '').strip()
+        if sn:
+            m = re.match(r'^(\d+)\s*[-–—]\s*(\d+)$', sn)
+            if m:
+                lo, hi = int(m.group(1)), int(m.group(2))
+                if hi > lo:
+                    return lo, hi
 
         # Критерий 3: title содержит сервисное слово + признак серии.
         # (stem уже проверен в Критерии 2.5)
