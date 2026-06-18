@@ -803,7 +803,8 @@ class CompilerDialog:
                 suffix = self._service._series_suffix(n_volumes, top_lo, top_hi,
                                                       _arc_part_count or part_count,
                                                       series_complete=_sc)
-            fname       = f'{safe_author} - {safe_series} ({suffix}).fb2'
+            suffix      = self._service._suppress_redundant_suffix(safe_series, suffix)
+            fname       = f'{safe_author} - {safe_series} ({suffix}).fb2' if suffix else f'{safe_author} - {safe_series}.fb2'
             self._fname_var.set(fname)
         except Exception:
             self._fname_var.set('—')

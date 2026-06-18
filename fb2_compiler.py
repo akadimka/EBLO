@@ -297,6 +297,24 @@ class FB2CompilerService:
             return f'{_base} в {n_books_total} книгах'
         return _base
 
+    @staticmethod
+    def _suppress_redundant_suffix(safe_series: str, suffix: str) -> str:
+        """Убрать из суффикса «в N книгах/томах» если серия уже содержит то же число."""
+        import re as _re
+        _SERIES_COUNT = _re.compile(
+            r'\bв\s+(\d+)\s+(?:томах|книгах)\b|\b(\d+)\s+томов\b|\b(\d+)\s+книг(?:и)?\b',
+            _re.IGNORECASE,
+        )
+        m = _SERIES_COUNT.search(safe_series)
+        if not m:
+            return suffix
+        count = int(next(g for g in m.groups() if g is not None))
+        m_suf = _re.search(r'\bв\s+(\d+)\s+(?:томах|книгах)\b', suffix, _re.IGNORECASE)
+        if m_suf and int(m_suf.group(1)) == count:
+            stripped = suffix[:m_suf.start()].rstrip(' ,;–-')
+            return stripped
+        return suffix
+
     def __init__(self, logger=None):
         self.logger = logger
 
@@ -2702,7 +2720,8 @@ class FB2CompilerService:
                     safe_author = re.sub(r'[\\/:*?"<>|]', '_', group.author)
                     safe_series = re.sub(r'[/:*?"<>|]', '_',
                                         self._series_to_display(clean_series))
-                    new_name = f"{safe_author} - {safe_series} ({suffix}).fb2"
+                    suffix = self._suppress_redundant_suffix(safe_series, suffix)
+                    new_name = f"{safe_author} - {safe_series} ({suffix}).fb2" if suffix else f"{safe_author} - {safe_series}.fb2"
                     new_path = old_path.parent / new_name
                     if old_path != new_path:
                         try:
@@ -2981,7 +3000,8 @@ class FB2CompilerService:
             )
 
             # --- Имя выходного файла ---
-            fname = f"{safe_author} - {safe_series} ({suffix}).fb2"
+            suffix = self._suppress_redundant_suffix(safe_series, suffix)
+            fname = f"{safe_author} - {safe_series} ({suffix}).fb2" if suffix else f"{safe_author} - {safe_series}.fb2"
 
             output_path = dest_dir / fname
             output_path.parent.mkdir(parents=True, exist_ok=True)
