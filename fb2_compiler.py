@@ -677,13 +677,29 @@ class FB2CompilerService:
                     _book.volume_label = str(_matched_arcs[0])
                     _book.sort_source = 'inferred_sbornik'
                     _book.order_ambiguous = False
-                    # Все книги совпавших дуг → дубликаты
+                    # Все книги совпавших дуг → дубликаты Сборника.
+                    # Сборник эмитируется как cleanup_only группа и убирается из books,
+                    # чтобы оставшиеся дуги обрабатывались независимо.
                     _all_arc_books_to_remove: set = set()
+                    _sbornik_dup_paths = []
                     for _arc_num in _matched_arcs:
                         for _arc_book in _arc_map2[_arc_num]['books']:
-                            duplicate_paths.append(_arc_book.abs_path)
+                            _sbornik_dup_paths.append(_arc_book.abs_path)
                             _all_arc_books_to_remove.add(_arc_book.abs_path)
                     books = [b for b in books if b.abs_path not in _all_arc_books_to_remove]
+                    _arc_range = (
+                        f'{_matched_arcs[0]}-{_matched_arcs[-1]}'
+                        if len(_matched_arcs) > 1 else str(_matched_arcs[0])
+                    )
+                    _emit(CompilationGroup(
+                        author=author, series=series, books=[],
+                        order_determined=True,
+                        volume_range=_arc_range,
+                        duplicate_paths=_sbornik_dup_paths,
+                        kept_paths=[_book.abs_path],
+                        cleanup_only=True,
+                    ))
+                    books = [b for b in books if b.abs_path != _book.abs_path]
 
             # --- Групповая коррекция: если большинство книг группы используют
             # series_number из метаданных, то книги где filename перебил метаданные
