@@ -628,16 +628,31 @@ class CompilerDialog:
                     tags=('kept',),
                 )
                 self._det_paths[_iid] = kept_path
+            if not group.kept_paths:
+                # Подсерия перекрыта родительской компиляцией — kept_paths пуст,
+                # потому что родительский файл ещё не создан (post-pass подавил группу).
+                _parent = group.series.rsplit('\\', 1)[0] if '\\' in group.series else ''
+                _info_lbl = f'→ Будет перекрыто компиляцией: {_parent}' if _parent else '→ Будет перекрыто родительской компиляцией'
+                self._det_tree.insert(
+                    '', tk.END,
+                    values=('', _info_lbl, '', '', '', ''),
+                    tags=('excluded',),
+                )
             offset = len(group.kept_paths or [])
-            for pos, dup_path in enumerate(group.duplicate_paths, offset + 1):
+            for pos, dup_path in enumerate(group.duplicate_paths or [], offset + 1):
                 _iid = self._det_tree.insert(
                     '', tk.END,
                     values=(pos, dup_path.stem, dup_path.name, '🗑 К удалению', '—', _fmt_size(dup_path)),
                     tags=('to_delete',),
                 )
                 self._det_paths[_iid] = dup_path
-            kept_label = f'Уже скомпилировано: {group.volume_range}' if group.volume_range else 'Уже скомпилировано'
+            if group.kept_paths:
+                kept_label = f'Уже скомпилировано: {group.volume_range}' if group.volume_range else 'Уже скомпилировано'
+            else:
+                _parent = group.series.rsplit('\\', 1)[0] if '\\' in group.series else group.series
+                kept_label = f'Перекрыто компиляцией: {_parent}'
             self._fname_var.set(kept_label)
+            self._overlap_var.set('')
             return
 
         # Сохраняем оригинальный список книг при первом показе (для возможности восстановить)
