@@ -1243,6 +1243,50 @@ class FB2CompilerService:
                     ))
                     first_group = False
 
+        # ── POST-PASS: подавить compile-группы, полностью покрытые другой группой.
+        # Используем два критерия (оба должны выполняться):
+        #   1. Серия малой группы является подсерией большой (prefix + '\\')
+        #   2. Диапазон томов малой группы строго входит в диапазон большой
+        # Это обнаруживает случай «подсерия и родительская серия компилируются
+        # одновременно»: Рубеж\Сирийский рубеж (т. 5-8) ⊂ Рубеж (1-11).
+        # Резервный критерий (если диапазоны не определены): content_hash включение.
+        _compile_only = [g for g in groups if not g.cleanup_only]
+        if len(_compile_only) > 1:
+            def _vols(g):
+                vs = [b.sort_key[1] for b in g.books
+                      if b.sort_key and b.sort_key[0] == 0 and b.sort_key[1] > 0]
+                return (min(vs), max(vs)) if vs else None
+
+            def _hashes(g):
+                return {b.record.content_hash for b in g.books if b.record.content_hash}
+
+            _suppressed: set = set()
+            for _small in _compile_only:
+                if id(_small) in _suppressed:
+                    continue
+                for _large in _compile_only:
+                    if _large is _small or id(_large) in _suppressed:
+                        continue
+                    # Критерий 1: подсерия
+                    _is_sub = _small.series.startswith(_large.series + '\\')
+                    if not _is_sub:
+                        continue
+                    # Критерий 2a: диапазон томов
+                    _sr, _lr = _vols(_small), _vols(_large)
+                    if _sr and _lr and _sr[0] >= _lr[0] and _sr[1] <= _lr[1]:
+                        _covered = True
+                    # Критерий 2b: резерв — content_hash включение
+                    else:
+                        _sh, _lh = _hashes(_small), _hashes(_large)
+                        _covered = bool(_sh) and bool(_lh) and _sh <= _lh
+                    if _covered:
+                        _small.cleanup_only = True
+                        _small.duplicate_paths = [b.abs_path for b in _small.books]
+                        _small.kept_paths = []
+                        _small.books = []
+                        _suppressed.add(id(_small))
+                        break
+
         groups.sort(key=lambda g: (g.author.lower(), g.series.lower()))
         self._log(f"Найдено групп для компиляции: {len(groups)}")
         return groups

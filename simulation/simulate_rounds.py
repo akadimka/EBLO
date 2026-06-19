@@ -179,7 +179,8 @@ def main():
     #   2. Все дубликаты из cleanup-групп Раунда 1 (они удаляются в рамках cleanup)
     r1_source_names = {b.abs_path.name for g in r1_compile for b in g.books}
     r1_cleanup_dup_names = {p.name for g in r1_groups if g.cleanup_only for p in (g.duplicate_paths or [])}
-    deleted_names = r1_source_names | r1_cleanup_dup_names
+    r1_compile_dup_names = {p.name for g in r1_compile for p in (g.duplicate_paths or [])}
+    deleted_names = r1_source_names | r1_cleanup_dup_names | r1_compile_dup_names
     records_r3 = [r for r in records_r2 if Path(r.file_path).name not in deleted_names]
     print(f'\n  → Раунд 3: убираем {len(deleted_names)} файлов '
           f'({len(r1_source_names)} compile-исходников + {len(r1_cleanup_dup_names)} cleanup-дублей), '
