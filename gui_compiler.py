@@ -466,7 +466,12 @@ class CompilerDialog:
         iid = str(id(g))
         self._group_by_iid[iid] = g
         if getattr(g, 'cleanup_only', False):
-            dup_count = len(g.duplicate_paths)
+            dup_count = len(g.duplicate_paths or [])
+            if g.kept_paths:
+                order_txt = '✓ Уже скомпилировано'
+            else:
+                _parent = g.series.rsplit('\\', 1)[0] if '\\' in g.series else g.series
+                order_txt = f'⊘ Перекрыто: {_parent}'
             self._tree.insert(
                 '', tk.END,
                 iid=iid,
@@ -474,7 +479,7 @@ class CompilerDialog:
                     g.author,
                     g.series,
                     f'0 (удалить: {dup_count})',
-                    '✓ Уже скомпилировано',
+                    order_txt,
                     g.volume_range or '—',
                 ),
                 tags=('cleanup',),
