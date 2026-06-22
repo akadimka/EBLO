@@ -528,15 +528,6 @@ class CompilerDialog:
 
     def _finalize_scan(self, groups: List[CompilationGroup]):
         """Вызывается после find_groups: пересортировать строки, обновить статус, включить кнопки."""
-        try:
-            self._finalize_scan_impl(groups)
-        except Exception as _e:
-            import traceback as _tb, pathlib as _pl
-            _pl.Path('C:/Temp/fb2parser/finalize_debug.txt').write_text(
-                _tb.format_exc(), encoding='utf-8')
-            self._status_var.set(f'Ошибка: {_e}')
-
-    def _finalize_scan_impl(self, groups: List[CompilationGroup]):
         self._scanning = False
         self._progressbar.pack_forget()
         folder = self._dir_var.get().strip()
@@ -555,21 +546,6 @@ class CompilerDialog:
         cleanup_groups    = [g for g in groups if getattr(g, 'cleanup_only', False)]
         total      = len(compilable_groups)
         compilable = total or len(cleanup_groups)
-
-        # Перерисовать строки, изменённые post-pass (on_group добавил их до post-pass).
-        # Если группа теперь cleanup_only, а строка имеет тег compile — удаляем и вставляем заново.
-        _compile_tags = {'ok', 'warn', 'alpha', 'overlap'}
-        try:
-            for g in groups:
-                iid = str(id(g))
-                if not self._tree.exists(iid):
-                    continue
-                current_tags = set(self._tree.item(iid, 'tags'))
-                if getattr(g, 'cleanup_only', False) and current_tags & _compile_tags:
-                    self._tree.delete(iid)
-                    self._add_group_row(g)
-        except Exception:
-            pass
 
         # Пересортировать строки дерева в соответствии с итоговым отсортированным порядком.
         # find_groups вернул groups уже отсортированными; перемещаем строки в этот порядок.
@@ -608,21 +584,16 @@ class CompilerDialog:
             f'  |  Объём исходников: {_fmt_size(freed_bytes)}'
         )
         if cleanup_groups:
-            cleanup_dups = sum(len(g.duplicate_paths or []) for g in cleanup_groups)
+            cleanup_dups = sum(len(g.duplicate_paths) for g in cleanup_groups)
             status += f'  |  Устаревших: {cleanup_dups}'
         if alpha:
             status += f'  |  По названию: {alpha}'
         if warn:
             status += f'  |  Частично: {warn}'
+        self._status_var.set(status)
 
-        # Ставим статус через after(0) — после всех оставшихся on_group коллбэков,
-        # которые могут затирать статус "Найдено групп: N…" из-за очереди Tkinter.
-        _compilable = compilable
-        def _set_final_status():
-            self._status_var.set(status)
-            self._sel_all_btn.configure(state=tk.NORMAL if _compilable else tk.DISABLED)
-            self._compile_btn.configure(state=tk.NORMAL if _compilable else tk.DISABLED)
-        self._win.after(0, _set_final_status)
+        self._sel_all_btn.configure(state=tk.NORMAL if compilable else tk.DISABLED)
+        self._compile_btn.configure(state=tk.NORMAL if compilable else tk.DISABLED)
 
     # ------------------------------------------------------------------
     # Взаимодействие
