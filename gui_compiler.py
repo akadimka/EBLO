@@ -547,6 +547,22 @@ class CompilerDialog:
         total      = len(compilable_groups)
         compilable = total or len(cleanup_groups)
 
+        # Исправить строки, добавленные как compile до post-pass, но ставшие cleanup.
+        _compile_tags = {'ok', 'warn', 'alpha', 'overlap'}
+        for g in cleanup_groups:
+            iid = str(id(g))
+            if self._tree.exists(iid) and set(self._tree.item(iid, 'tags')) & _compile_tags:
+                dup_count = len(g.duplicate_paths or [])
+                if g.kept_paths:
+                    _order = '✓ Уже скомпилировано'
+                else:
+                    _p = g.series.rsplit('\\', 1)[0] if '\\' in g.series else g.series
+                    _order = f'⊘ Перекрыто: {_p}'
+                self._tree.item(iid, tags=('cleanup',),
+                                values=(g.author, g.series,
+                                        f'0 (удалить: {dup_count})',
+                                        _order, g.volume_range or '—'))
+
         # Пересортировать строки дерева в соответствии с итоговым отсортированным порядком.
         # find_groups вернул groups уже отсортированными; перемещаем строки в этот порядок.
         for pos, g in enumerate(groups):
