@@ -1244,12 +1244,16 @@ class FB2CompilerService:
                     first_group = False
 
         # ── POST-PASS: подавить compile-группы, полностью покрытые другой группой.
-        # Используем два критерия (оба должны выполняться):
-        #   1. Серия малой группы является подсерией большой (prefix + '\\')
-        #   2. Диапазон томов малой группы строго входит в диапазон большой
-        # Это обнаруживает случай «подсерия и родительская серия компилируются
-        # одновременно»: Рубеж\Сирийский рубеж (т. 5-8) ⊂ Рубеж (1-11).
-        # Резервный критерий (если диапазоны не определены): content_hash включение.
+        #
+        # Случай A (parent-child): серия малой группы — подсерия большой (prefix + '\\')
+        #   + диапазон томов входит в диапазон большой.
+        #   Пример: Рубеж\Сирийский рубеж (т. 5-8) ⊂ Рубеж (1-11).
+        #
+        # Случай B (content-hash дубль): разные серии одного автора с полным
+        #   совпадением content_hash книг — одни и те же файлы под разными именами серий.
+        #   Побеждает группа с «правильной» серией: предпочитаем подсерийный путь (\\),
+        #   потом более длинное имя серии, потом большее число книг.
+        #   Пример: «Покоряя небо» (папка-сборник) vs «Авиатор\Назад в СССР» (правильное).
         _compile_only = [g for g in groups if not g.cleanup_only]
         if len(_compile_only) > 1:
             def _vols(g):
@@ -1260,6 +1264,13 @@ class FB2CompilerService:
             def _hashes(g):
                 return {b.record.content_hash for b in g.books if b.record.content_hash}
 
+            def _series_quality(g):
+                """Чем выше — тем «правильнее» серия. Выбираем победителя при hash-дубле."""
+                has_sub  = 1 if '\\' in g.series else 0
+                ser_len  = len(g.series)
+                n_books  = len(g.books)
+                return (has_sub, ser_len, n_books)
+
             _suppressed: set = set()
             for _small in _compile_only:
                 if id(_small) in _suppressed:
@@ -1267,25 +1278,57 @@ class FB2CompilerService:
                 for _large in _compile_only:
                     if _large is _small or id(_large) in _suppressed:
                         continue
-                    # Критерий 1: подсерия
-                    _is_sub = _small.series.startswith(_large.series + '\\')
-                    if not _is_sub:
-                        continue
-                    # Критерий 2a: диапазон томов
-                    _sr, _lr = _vols(_small), _vols(_large)
-                    if _sr and _lr and _sr[0] >= _lr[0] and _sr[1] <= _lr[1]:
-                        _covered = True
-                    # Критерий 2b: резерв — content_hash включение
+
+                    # ── Случай A: parent-child ──────────────────────────
+                    if _small.series.startswith(_large.series + '\\'):
+                        _sr, _lr = _vols(_small), _vols(_large)
+                        if _sr and _lr and _sr[0] >= _lr[0] and _sr[1] <= _lr[1]:
+                            _covered = True
+                        else:
+                            _sh, _lh = _hashes(_small), _hashes(_large)
+                            _covered = bool(_sh) and bool(_lh) and _sh <= _lh
+                        if _covered:
+                            _small.cleanup_only = True
+                            _small.duplicate_paths = [b.abs_path for b in _small.books]
+                            _small.kept_paths = []
+                            _small.books = []
+                            _suppressed.add(id(_small))
+                            break
+
+                    # ── Случай B/C: разные серии одного автора ──────────
                     else:
                         _sh, _lh = _hashes(_small), _hashes(_large)
-                        _covered = bool(_sh) and bool(_lh) and _sh <= _lh
-                    if _covered:
-                        _small.cleanup_only = True
-                        _small.duplicate_paths = [b.abs_path for b in _small.books]
-                        _small.kept_paths = []
-                        _small.books = []
-                        _suppressed.add(id(_small))
-                        break
+                        _covered = False
+
+                        # B: content_hash включение — файлы идентичны побайтово
+                        if _sh and _lh and _sh <= _lh:
+                            if _sh < _lh or _series_quality(_small) < _series_quality(_large):
+                                _covered = True
+
+                        # C: title-overlap — одни и те же книги под разными именами серий
+                        # (хэши не совпадают из-за разных метаданных/редакций).
+                        # Запускаем когда Case B не сработал И у large серия «лучше».
+                        if not _covered and _series_quality(_small) < _series_quality(_large):
+                            def _nt(s):
+                                s = re.sub(r'\[.*?\]|\(.*?\)', '', (s or '').lower())
+                                s = s.replace('ё', 'е')
+                                return re.sub(r'\s+', ' ', s).strip()
+                            _tl = {_nt(b.record.file_title) for b in _large.books}
+                            _matches = sum(
+                                1 for b in _small.books
+                                if len(_nt(b.record.file_title)) > 8
+                                and _nt(b.record.file_title) in _tl
+                            )
+                            if _small.books and _matches / len(_small.books) >= 0.75:
+                                _covered = True
+
+                        if _covered:
+                            _small.cleanup_only = True
+                            _small.duplicate_paths = [b.abs_path for b in _small.books]
+                            _small.kept_paths = []
+                            _small.books = []
+                            _suppressed.add(id(_small))
+                            break
 
         groups.sort(key=lambda g: (g.author.lower(), g.series.lower()))
         self._log(f"Найдено групп для компиляции: {len(groups)}")
