@@ -1271,75 +1271,73 @@ class FB2CompilerService:
                 n_books  = len(g.books)
                 return (has_sub, ser_len, n_books)
 
-            _suppressed: set = set()
-            for _small in _compile_only:
-                if id(_small) in _suppressed:
-                    continue
-                for _large in _compile_only:
-                    if _large is _small or id(_large) in _suppressed:
-                        continue
+            def _nt(s):
+                s = re.sub(r'\[.*?\]|\(.*?\)', '', (s or '').lower())
+                s = s.replace('ё', 'е')
+                return re.sub(r'\s+', ' ', s).strip()
 
-                    # ── Случай A: parent-child ──────────────────────────
-                    if _small.series.startswith(_large.series + '\\'):
-                        _sr, _lr = _vols(_small), _vols(_large)
-                        if _sr and _lr and _sr[0] >= _lr[0] and _sr[1] <= _lr[1]:
-                            _covered = True
+            # Группируем по автору — сравниваем только внутри одного автора.
+            from collections import defaultdict as _dd
+            _by_author = _dd(list)
+            for _g in _compile_only:
+                _by_author[_g.author].append(_g)
+
+            _suppressed: set = set()
+            for _author_groups in _by_author.values():
+                if len(_author_groups) < 2:
+                    continue
+                for _small in _author_groups:
+                    if id(_small) in _suppressed:
+                        continue
+                    for _large in _author_groups:
+                        if _large is _small or id(_large) in _suppressed:
+                            continue
+
+                        # ── Случай A: parent-child ──────────────────────────
+                        if _small.series.startswith(_large.series + '\\'):
+                            _sr, _lr = _vols(_small), _vols(_large)
+                            if _sr and _lr and _sr[0] >= _lr[0] and _sr[1] <= _lr[1]:
+                                _covered = True
+                            else:
+                                _sh, _lh = _hashes(_small), _hashes(_large)
+                                _covered = bool(_sh) and bool(_lh) and _sh <= _lh
+                            if _covered:
+                                _small.cleanup_only = True
+                                _small.duplicate_paths = [b.abs_path for b in _small.books]
+                                _small.kept_paths = []
+                                _small.books = []
+                                _suppressed.add(id(_small))
+                                break
+
+                        # ── Случай B/C: разные серии одного автора ──────────
                         else:
                             _sh, _lh = _hashes(_small), _hashes(_large)
-                            _covered = bool(_sh) and bool(_lh) and _sh <= _lh
-                        if _covered:
-                            _small.cleanup_only = True
-                            _small.duplicate_paths = [b.abs_path for b in _small.books]
-                            _small.kept_paths = []
-                            _small.books = []
-                            _suppressed.add(id(_small))
-                            break
+                            _covered = False
 
-                    # ── Случай B/C: разные серии одного автора ──────────
-                    else:
-                        _sh, _lh = _hashes(_small), _hashes(_large)
-                        _covered = False
+                            # B: content_hash включение — файлы идентичны побайтово
+                            if _sh and _lh and _sh <= _lh:
+                                if _sh < _lh or _series_quality(_small) < _series_quality(_large):
+                                    _covered = True
 
-                        # B: content_hash включение — файлы идентичны побайтово
-                        if _sh and _lh and _sh <= _lh:
-                            if _sh < _lh or _series_quality(_small) < _series_quality(_large):
-                                _covered = True
+                            # C: title-overlap — одни и те же книги под разными именами серий
+                            # (хэши отличаются из-за разных метаданных/редакций).
+                            if not _covered and _series_quality(_small) < _series_quality(_large):
+                                _tl = {_nt(b.record.file_title) for b in _large.books}
+                                _matches = sum(
+                                    1 for b in _small.books
+                                    if len(_nt(b.record.file_title)) > 8
+                                    and _nt(b.record.file_title) in _tl
+                                )
+                                if _small.books and _matches / len(_small.books) >= 0.75:
+                                    _covered = True
 
-                        # C: title-overlap — одни и те же книги под разными именами серий
-                        # (хэши не совпадают из-за разных метаданных/редакций).
-                        # Запускаем когда Case B не сработал И у large серия «лучше».
-                        if not _covered and _series_quality(_small) < _series_quality(_large):
-                            def _nt(s):
-                                s = re.sub(r'\[.*?\]|\(.*?\)', '', (s or '').lower())
-                                s = s.replace('ё', 'е')
-                                return re.sub(r'\s+', ' ', s).strip()
-                            _tl = {_nt(b.record.file_title) for b in _large.books}
-                            _matches = sum(
-                                1 for b in _small.books
-                                if len(_nt(b.record.file_title)) > 8
-                                and _nt(b.record.file_title) in _tl
-                            )
-                            # DEBUG
-                            import pathlib as _pl
-                            _dbg = _pl.Path('C:/Temp/fb2parser/postpass_debug.txt')
-                            _dbg.open('a', encoding='utf-8').write(
-                                f'small={_small.series!r}({len(_small.books)}) '
-                                f'large={_large.series!r}({len(_large.books)}) '
-                                f'matches={_matches}/{len(_small.books)} '
-                                f'sq_s={_series_quality(_small)} sq_l={_series_quality(_large)}\n'
-                                f'  titles_small={[b.record.file_title[:20] for b in _small.books[:3]]}\n'
-                                f'  titles_large={[b.record.file_title[:20] for b in _large.books[:3]]}\n'
-                            )
-                            if _small.books and _matches / len(_small.books) >= 0.75:
-                                _covered = True
-
-                        if _covered:
-                            _small.cleanup_only = True
-                            _small.duplicate_paths = [b.abs_path for b in _small.books]
-                            _small.kept_paths = []
-                            _small.books = []
-                            _suppressed.add(id(_small))
-                            break
+                            if _covered:
+                                _small.cleanup_only = True
+                                _small.duplicate_paths = [b.abs_path for b in _small.books]
+                                _small.kept_paths = []
+                                _small.books = []
+                                _suppressed.add(id(_small))
+                                break
 
         groups.sort(key=lambda g: (g.author.lower(), g.series.lower()))
         self._log(f"Найдено групп для компиляции: {len(groups)}")
