@@ -528,6 +528,15 @@ class CompilerDialog:
 
     def _finalize_scan(self, groups: List[CompilationGroup]):
         """Вызывается после find_groups: пересортировать строки, обновить статус, включить кнопки."""
+        try:
+            self._finalize_scan_impl(groups)
+        except Exception as _e:
+            import traceback as _tb, pathlib as _pl
+            _pl.Path('C:/Temp/fb2parser/finalize_debug.txt').write_text(
+                _tb.format_exc(), encoding='utf-8')
+            self._status_var.set(f'Ошибка: {_e}')
+
+    def _finalize_scan_impl(self, groups: List[CompilationGroup]):
         self._scanning = False
         self._progressbar.pack_forget()
         folder = self._dir_var.get().strip()
@@ -599,16 +608,21 @@ class CompilerDialog:
             f'  |  Объём исходников: {_fmt_size(freed_bytes)}'
         )
         if cleanup_groups:
-            cleanup_dups = sum(len(g.duplicate_paths) for g in cleanup_groups)
+            cleanup_dups = sum(len(g.duplicate_paths or []) for g in cleanup_groups)
             status += f'  |  Устаревших: {cleanup_dups}'
         if alpha:
             status += f'  |  По названию: {alpha}'
         if warn:
             status += f'  |  Частично: {warn}'
-        self._status_var.set(status)
 
-        self._sel_all_btn.configure(state=tk.NORMAL if compilable else tk.DISABLED)
-        self._compile_btn.configure(state=tk.NORMAL if compilable else tk.DISABLED)
+        # Ставим статус через after(0) — после всех оставшихся on_group коллбэков,
+        # которые могут затирать статус "Найдено групп: N…" из-за очереди Tkinter.
+        _compilable = compilable
+        def _set_final_status():
+            self._status_var.set(status)
+            self._sel_all_btn.configure(state=tk.NORMAL if _compilable else tk.DISABLED)
+            self._compile_btn.configure(state=tk.NORMAL if _compilable else tk.DISABLED)
+        self._win.after(0, _set_final_status)
 
     # ------------------------------------------------------------------
     # Взаимодействие
