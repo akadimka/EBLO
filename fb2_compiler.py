@@ -524,6 +524,33 @@ class FB2CompilerService:
         groups: List[CompilationGroup] = []
 
         def _emit(g: CompilationGroup) -> None:
+            # Дедупликация по имени файла (case-insensitive): из пары с одинаковым
+            # именем оставляем больший файл в books, меньший → duplicate_paths.
+            if not g.cleanup_only and g.books:
+                _seen: dict = {}  # lower_name → CompilationBook (наибольший)
+                _name_dups: list = []
+                for _b in g.books:
+                    _key = _b.abs_path.name.lower()
+                    if _key not in _seen:
+                        _seen[_key] = _b
+                    else:
+                        _prev = _seen[_key]
+                        try:
+                            _sz_b    = _b.abs_path.stat().st_size
+                            _sz_prev = _prev.abs_path.stat().st_size
+                        except OSError:
+                            _sz_b = _sz_prev = 0
+                        if _sz_b >= _sz_prev:
+                            _name_dups.append(_prev)
+                            _seen[_key] = _b
+                        else:
+                            _name_dups.append(_b)
+                if _name_dups:
+                    if g.duplicate_paths is None:
+                        g.duplicate_paths = []
+                    for _nd in _name_dups:
+                        g.duplicate_paths.append(_nd.abs_path)
+                    g.books = [_b for _b in g.books if _b not in _name_dups]
             groups.append(g)
             if on_group:
                 on_group(g)
