@@ -1319,6 +1319,17 @@ class FB2CompilerService:
                                 if len(_nt(b.record.file_title)) > 8
                                 and _nt(b.record.file_title) in _tl
                             )
+                            # DEBUG
+                            import pathlib as _pl
+                            _dbg = _pl.Path('C:/Temp/fb2parser/postpass_debug.txt')
+                            _dbg.open('a', encoding='utf-8').write(
+                                f'small={_small.series!r}({len(_small.books)}) '
+                                f'large={_large.series!r}({len(_large.books)}) '
+                                f'matches={_matches}/{len(_small.books)} '
+                                f'sq_s={_series_quality(_small)} sq_l={_series_quality(_large)}\n'
+                                f'  titles_small={[b.record.file_title[:20] for b in _small.books[:3]]}\n'
+                                f'  titles_large={[b.record.file_title[:20] for b in _large.books[:3]]}\n'
+                            )
                             if _small.books and _matches / len(_small.books) >= 0.75:
                                 _covered = True
 
