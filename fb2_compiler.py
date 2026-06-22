@@ -279,6 +279,8 @@ class FB2CompilerService:
                     if n_books > n_volumes:
                         return f'{word} в {n_books} книгах'
                     return word
+                if n_books == 1:
+                    return 'в 1 книге'
                 return f'в {n_books} книгах'
             else:
                 # Серия незавершена — за пределами run'а есть другие тома
