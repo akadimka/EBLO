@@ -550,14 +550,17 @@ class CompilerDialog:
         # Перерисовать строки, изменённые post-pass (on_group добавил их до post-pass).
         # Если группа теперь cleanup_only, а строка имеет тег compile — удаляем и вставляем заново.
         _compile_tags = {'ok', 'warn', 'alpha', 'overlap'}
-        for g in groups:
-            iid = str(id(g))
-            if not self._tree.exists(iid):
-                continue
-            current_tags = set(self._tree.item(iid, 'tags'))
-            if getattr(g, 'cleanup_only', False) and current_tags & _compile_tags:
-                self._tree.delete(iid)
-                self._add_group_row(g)
+        try:
+            for g in groups:
+                iid = str(id(g))
+                if not self._tree.exists(iid):
+                    continue
+                current_tags = set(self._tree.item(iid, 'tags'))
+                if getattr(g, 'cleanup_only', False) and current_tags & _compile_tags:
+                    self._tree.delete(iid)
+                    self._add_group_row(g)
+        except Exception:
+            pass
 
         # Пересортировать строки дерева в соответствии с итоговым отсортированным порядком.
         # find_groups вернул groups уже отсортированными; перемещаем строки в этот порядок.
