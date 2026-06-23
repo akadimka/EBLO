@@ -1403,17 +1403,33 @@ class Pass4Consensus:
                 _max_tokens = max(_token_counts)
                 _largest_authors = [a for a in _author_counts if _token_count(a) == _max_tokens]
                 if len(_largest_authors) != 1:
-                    continue  # несколько вариантов с одинаковым max → неоднозначно
-                _largest = _largest_authors[0]
-                _largest_tokens = _atokens(_largest)
-                # Все остальные варианты должны быть подмножеством наибольшего
-                _all_subsets = all(
-                    _atokens(a) <= _largest_tokens
-                    for a in _author_counts if a != _largest
-                )
-                if not _all_subsets:
-                    continue  # есть авторы не входящие в наибольший набор → не трогаем
-                _majority_author = _largest
+                    # Несколько вариантов с одинаковым max — пробуем тайбрейк по папке.
+                    # Находим «минимальные» варианты (токены которых ⊆ всех остальных вариантов)
+                    # и проверяем, содержится ли один из них в имени папки серии.
+                    _min_tokens = min(_token_counts)
+                    _minimal_authors = [a for a in _author_counts if _token_count(a) == _min_tokens]
+                    # Имя папки серии — parent первой записи
+                    _folder_name = _nfc_lower_yo(
+                        Path(_recs[0].file_path).parent.name
+                    ) if _recs else ''
+                    _folder_confirmed = [
+                        a for a in _minimal_authors
+                        if all(t in _folder_name for t in _atokens(a))
+                    ]
+                    if len(_folder_confirmed) != 1:
+                        continue  # нет однозначного подтверждения из папки → не трогаем
+                    _majority_author = _folder_confirmed[0]
+                else:
+                    _largest = _largest_authors[0]
+                    _largest_tokens = _atokens(_largest)
+                    # Все остальные варианты должны быть подмножеством наибольшего
+                    _all_subsets = all(
+                        _atokens(a) <= _largest_tokens
+                        for a in _author_counts if a != _largest
+                    )
+                    if not _all_subsets:
+                        continue  # есть авторы не входящие в наибольший набор → не трогаем
+                    _majority_author = _largest
             else:
                 # Все одинаковое число авторов — берём по большинству записей
                 _majority_author = _author_counts.most_common(1)[0][0]
