@@ -26,13 +26,19 @@ def _singularize_surname(surname: str) -> str:
         return surname
     
     # Common plural endings for Russian surnames
-    if surname.endswith('ы'):
+    if surname.endswith('ие'):
+        # Стругацкие → Стругацкий
+        return surname[:-2] + 'ий'
+    elif surname.endswith('ые'):
+        # Толстые → Толстой
+        return surname[:-2] + 'ой'
+    elif surname.endswith('ы'):
         # Живовы → Живов
         return surname[:-1]
     elif surname.endswith('и'):
         # Сафины → Сафин
         return surname[:-1]
-    
+
     # Already singular or doesn't match pattern
     return surname
 

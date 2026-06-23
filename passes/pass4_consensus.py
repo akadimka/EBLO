@@ -942,6 +942,23 @@ class Pass4Consensus:
             )
             if not is_multiauthor_folder:
                 continue
+            # Guard: если все авторы имеют общий токен → авторская папка с соавторами,
+            # а не издательская (напр. Верн Жюль + Верн Жюль, Лори Андре → токен 'верн').
+            # Очищать серию в этом случае неправильно.
+            def _has_common_token(authors):
+                token_sets = [
+                    {t.lower().replace('ё', 'е')
+                     for t in _re_ser.split(r'[\s,;]+', a) if len(t) > 2}
+                    for a in authors if a
+                ]
+                if not token_sets:
+                    return False
+                common = token_sets[0].copy()
+                for ts in token_sets[1:]:
+                    common &= ts
+                return bool(common)
+            if _has_common_token(real_authors):
+                continue  # авторы имеют общий токен → не издательская серия
 
             for record in group_records:
                 if not record.proposed_series:
@@ -1416,9 +1433,19 @@ class Pass4Consensus:
                         a for a in _minimal_authors
                         if all(t in _folder_name for t in _atokens(a))
                     ]
-                    if len(_folder_confirmed) != 1:
-                        continue  # нет однозначного подтверждения из папки → не трогаем
-                    _majority_author = _folder_confirmed[0]
+                    if len(_folder_confirmed) == 1:
+                        _majority_author = _folder_confirmed[0]
+                    elif len(_folder_confirmed) > 1:
+                        # Несколько кандидатов — проверяем, одна ли это персона (одинаковые токены)?
+                        _fc_token_sets = [frozenset(_atokens(a)) for a in _folder_confirmed]
+                        if len(set(_fc_token_sets)) == 1:
+                            # Одна персона, разный порядок слов → берём самый частый вариант
+                            _majority_author = max(_folder_confirmed,
+                                                   key=lambda a: _author_counts[a])
+                        else:
+                            continue  # разные люди → неоднозначно, не трогаем
+                    else:
+                        continue  # папка не подтвердила ни одного → не трогаем
                 else:
                     _largest = _largest_authors[0]
                     _largest_tokens = _atokens(_largest)

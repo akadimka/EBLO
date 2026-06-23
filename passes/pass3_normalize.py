@@ -293,10 +293,16 @@ class Pass3Normalize:
                 continue
             if record.proposed_author in ("Сборник", "Соавторство", "[unknown]"):
                 continue
-            capitalized = ' '.join(
-                w if w.lower() in _PARTICLES_LOWER else (w[0].upper() + w[1:] if w else w)
-                for w in record.proposed_author.split(' ')
-            )
+            def _fix_word(w):
+                if not w:
+                    return w
+                if w.lower() in _PARTICLES_LOWER:
+                    return w
+                # Слово целиком в верхнем регистре и не аббревиатура (нет точек, длиннее 1 символа)
+                if w == w.upper() and len(w) > 1 and '.' not in w:
+                    return w[0] + w[1:].lower()
+                return w[0].upper() + w[1:]
+            capitalized = ' '.join(_fix_word(w) for w in record.proposed_author.split(' '))
             if capitalized != record.proposed_author:
                 record.proposed_author = capitalized
 
