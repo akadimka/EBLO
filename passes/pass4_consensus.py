@@ -1421,6 +1421,7 @@ class Pass4Consensus:
             for rec in _recs:
                 if rec.proposed_author.strip() != _majority_author:
                     rec.proposed_author = _majority_author
+                    rec.author_source = f"{rec.author_source}+series-consensus"
                     _author_unified += 1
 
         if _author_unified:
