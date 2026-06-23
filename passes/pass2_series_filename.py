@@ -504,7 +504,10 @@ class Pass2SeriesFilename:
 
                         # Если папка содержит несколько авторов "(Барчук, Прядеев)",
                         # добавляем нематченных соавторов из metadata_authors.
-                        if author_matches and ',' in extracted_author and record.metadata_authors:
+                        # НО: не расширяем если автор уже закреплён родительским folder_dataset —
+                        # папка-датасет имеет наивысший приоритет, соавторы из подпапки не добавляются.
+                        if (author_matches and ',' in extracted_author and record.metadata_authors
+                                and not record.author_source.startswith('folder_dataset')):
                             _folder_surnames = [
                                 re.sub(r'[^\w]', '', s).lower().replace('ё', 'е')
                                 for s in re.split(r',\s*', extracted_author)

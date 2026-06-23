@@ -128,6 +128,11 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
             # Strip pseudonym in parentheses: "Абрахам Дэниел (Джеймс С.А. Кори)" → "Абрахам Дэниел"
             author = re.sub(r'\s*\([^)]*\)', '', author).strip()
     
+    elif pattern == "Author-Collection":
+        # "Алексей Вязовский-Сборник произведений" → автор до дефиса
+        if '-' in name:
+            author = name[:name.index('-')].strip()
+
     elif pattern == "SingleWord Author":
         # Однословный псевдоним/никнейм подтверждён словарём имён — берём как есть
         author = name

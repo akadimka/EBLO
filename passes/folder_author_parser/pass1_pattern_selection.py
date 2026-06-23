@@ -76,11 +76,21 @@ def select_pattern(struct_info: dict,
             pattern = "Author, Author"
     
     # 3. "(Surname) (Name)" (100) - exactly 2 words, no brackets
+    _COLLECTION_WORDS_SET = {
+        'сборник', 'коллекция', 'произведений', 'собрание', 'избранное',
+        'антология', 'компиляция', 'архив', 'полное',
+    }
     if pattern is None:
         if not paren_count:
             words = name.split()
             if len(words) == 2:
-                pattern = "(Surname) (Name)"
+                # Исключаем: "Иванов Иван-Сборник" — слово содержит дефис с collection-суффиксом
+                _has_collection_suffix = any(
+                    '-' in w and w.split('-', 1)[1].lower() in _COLLECTION_WORDS_SET
+                    for w in words
+                )
+                if not _has_collection_suffix:
+                    pattern = "(Surname) (Name)"
     
     # 3. "Series (Author, Author)" (100) - brackets at end with comma inside
     if pattern is None:
@@ -124,6 +134,26 @@ def select_pattern(struct_info: dict,
                 if '«' not in after_dash and '»' not in after_dash:
                     pattern = "Author - Folder Name"
     
+    # 6b. "Author-Collection" - bare hyphen (no spaces) separates 2-word author name
+    # from a collection keyword. Example: "Алексей Вязовский-Сборник произведений"
+    if pattern is None and '-' in name and ' - ' not in name:
+        _hyphen_idx = name.index('-')
+        _before = name[:_hyphen_idx].strip()
+        _after = name[_hyphen_idx + 1:].strip().lower()
+        _COLLECTION_WORDS = {
+            'сборник', 'коллекция', 'произведений', 'собрание', 'избранное',
+            'антология', 'компиляция', 'архив', 'полное',
+        }
+        _after_first = _after.split()[0] if _after.split() else ''
+        _before_words = _before.split()
+        # 2 слова, оба с заглавной буквы → имя автора (словари не обязательны)
+        _looks_like_name = (
+            len(_before_words) == 2 and
+            all(w and w[0].isupper() for w in _before_words)
+        )
+        if _after_first in _COLLECTION_WORDS and _looks_like_name:
+            pattern = "Author-Collection"
+
     # 7. Series (fallback) - single word or just text
     if pattern is None:
         words = name.split()
