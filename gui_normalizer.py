@@ -1162,13 +1162,19 @@ class CSVNormalizerApp:
             
     def get_names_from_csv(self):
         """Загрузить имена авторов из CSV-файла (без запуска пайплайна) и открыть NamesDialog."""
+        _last_csv_dir = (
+            self.settings_manager.get('last_csv_dir') if self.settings_manager else None
+        )
         csv_path = filedialog.askopenfilename(
             title="Выберите CSV-файл",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialdir=self.folder_path.get() or str(Path.home()),
+            initialdir=_last_csv_dir or self.folder_path.get() or str(Path.home()),
         )
         if not csv_path:
             return
+        if self.settings_manager:
+            self.settings_manager.set('last_csv_dir', str(Path(csv_path).parent))
+            self.settings_manager.save()
 
         # Мы на UI-потоке — создаём диалог напрямую, без after/wait
         d = NamesDialog(self.root, [], self.settings_manager)
