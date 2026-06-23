@@ -489,8 +489,8 @@ class Pass4Consensus:
                 if record.proposed_author == consensus_author or record.proposed_author == "Сборник":
                     continue
                 
-                # PROTECTION 1: Never touch folder_dataset
-                if record.author_source == "folder_dataset":
+                # PROTECTION 1: Never touch folder_dataset / folder_hierarchy
+                if record.author_source.startswith(('folder_dataset', 'folder_hierarchy')):
                     continue
                 
                 # NEW LOGIC: Check if current author is a subset of consensus
@@ -1420,6 +1420,8 @@ class Pass4Consensus:
 
             for rec in _recs:
                 if rec.proposed_author.strip() != _majority_author:
+                    if rec.author_source.startswith('folder_dataset'):
+                        continue  # folder_dataset — наивысший приоритет, не перебиваем
                     rec.proposed_author = _majority_author
                     rec.author_source = f"{rec.author_source}+series-consensus"
                     _author_unified += 1
