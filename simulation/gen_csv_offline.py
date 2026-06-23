@@ -144,7 +144,8 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
         for depth in range(1, len(parts)):
             unique_dirs.add('\\'.join(parts[:depth]))
 
-    cache: Dict[Path, Tuple[str, str]] = {}
+    # Ключи — str(abs_path), как в Pass1 (_get_author_for_file_worker)
+    cache: Dict[str, Tuple[str, str]] = {}
     for rel_dir in unique_dirs:
         folder_abs = work_dir / rel_dir
         folder_name = Path(rel_dir).name
@@ -155,10 +156,54 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
             female_names=female_names,
         )
         if author and _has_valid_name(author):
-            cache[folder_abs] = (author, 'high')
+            cache[str(folder_abs)] = (author, 'high')
 
     print(f'[PRECACHE-offline] Папок автора: {len(cache)}')
     return cache, male_names, female_names
+
+
+def apply_folder_dataset(records, author_cache: Dict, work_dir: Path, folder_parse_limit: int):
+    """
+    Применяет author_folder_cache к записям — точно так же как Pass1 в реальном пайплайне.
+    Идёт вверх по иерархии папок (до folder_parse_limit уровней).
+    """
+    from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+
+    applied = 0
+    for rec in records:
+        file_abs = work_dir / rec.file_path
+        current = file_abs.parent
+        levels = 0
+        found_author = ''
+
+        while levels < folder_parse_limit:
+            if current == work_dir:
+                hit = author_cache.get(str(current))
+                if hit:
+                    found_author = hit[0]
+                break
+            if current.name.lower() in FILE_EXTENSION_FOLDER_NAMES:
+                current = current.parent
+                continue
+            hit = author_cache.get(str(current))
+            if hit:
+                found_author = hit[0]
+            try:
+                parent = current.parent
+                if parent == current:
+                    break
+                current = parent
+                levels += 1
+            except Exception:
+                break
+
+        if found_author:
+            rec.proposed_author = found_author
+            rec.author_source   = 'folder_dataset'
+            rec.needs_filename_fallback = False
+            applied += 1
+
+    print(f'[PASS1-offline] folder_dataset применён к {applied} из {len(records)} записей')
 
 
 # ── Главная функция ───────────────────────────────────────────────────────────
@@ -195,6 +240,9 @@ def main():
         records, work_dir, svc.settings, svc.logger
     )
     svc.author_folder_cache = author_cache
+
+    # ── Применяем folder_dataset к записям (то, что делал Pass1 при чтении файлов) ──
+    apply_folder_dataset(records, author_cache, work_dir, svc.folder_parse_limit)
 
     # ── Monkey-patch: Pass1 возвращает наши записи ───────────────────────────
     import passes.pass1_read_files as _p1_mod
