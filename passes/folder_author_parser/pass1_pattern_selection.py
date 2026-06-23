@@ -126,10 +126,15 @@ def select_pattern(struct_info: dict,
     
     # 7. Series (fallback) - single word or just text
     if pattern is None:
-        # If only one word - this is likely not an author, but series name
         words = name.split()
         if len(words) == 1:
-            return None  # Fallback - don't parse single words
-        pattern = "Series"
+            # Однословная папка — автор только если слово есть в словаре имён
+            w = words[0].strip('.,;').lower()
+            if (male_names and w in male_names) or (female_names and w in female_names):
+                pattern = "SingleWord Author"
+            else:
+                return None  # Серия или неизвестный псевдоним
+        else:
+            pattern = "Series"
     
     return pattern
