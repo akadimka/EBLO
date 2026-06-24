@@ -1040,7 +1040,8 @@ class Pass2SeriesFilename:
         # Если папка НЕ дала series → пробуем extraction из filename
         series_candidate = self._extract_series_from_filename(
             record.file_path, validate=False, metadata_series=record.metadata_series,
-            known_series=record.proposed_series or ''
+            known_series=record.proposed_series or '',
+            proposed_author=record.proposed_author or ''
         )
 
         if series_candidate:
@@ -1144,9 +1145,15 @@ class Pass2SeriesFilename:
                                                and bool(record.metadata_series)
                                                and not _meta_is_bl)
                 # Кандидат + номер в имени файла: "... - Серия N." или "... - Серия N "
+                # Также: "Серия. Том N" / "Серия. Книга N" / "Серия. Часть N"
+                _cand_esc = _re.escape(_cand_lower.replace('ё', 'е'))
                 _is_numbered_series = bool(_re.search(
-                    _re.escape(_cand_lower.replace('ё', 'е')) + r'[\s.\-–—]+\d+(?:[\s.]|$)',
+                    _cand_esc + r'[\s.\-–—]+\d+(?:[\s.]|$)',
                     _fn_stem_lower.replace('ё', 'е')
+                )) or bool(_re.search(
+                    _cand_esc + r'[\s.\-–—]+(?:том|часть|книга|кн\.|vol\.?|book)\s+\d+',
+                    _fn_stem_lower.replace('ё', 'е'),
+                    _re.IGNORECASE,
                 ))
                 if not _is_confirmed_by_meta and not _is_meta_prefix and not _is_meta_with_service_suffix and not _is_in_parens and not _is_numbered_series and not _is_block_matcher_confident and (
                    (_title_lower and _cand_lower == _title_lower) or \
@@ -2852,7 +2859,7 @@ class Pass2SeriesFilename:
                             record.proposed_series = top_series
                             record.series_source = "author-consensus"
 
-    def _extract_series_from_filename(self, file_path: str, validate: bool = True, metadata_series: str = "", known_series: str = "") -> str:
+    def _extract_series_from_filename(self, file_path: str, validate: bool = True, metadata_series: str = "", known_series: str = "", proposed_author: str = "") -> str:
         """
         Извлечь серию из имени файла, используя паттерны из конфига.
         
@@ -3003,6 +3010,40 @@ class Pass2SeriesFilename:
             )
             if _confirmed:
                 return f'{_root_name} {_root_num}\\{_sub_name}'
+
+        # ══════════════════════════════════════════════════════════════════
+        # ШАГ 0.5: «Фамилия N НазваниеСерии. Том N» (без тире-разделителя)
+        # Пример: «Краснов 1 Последние дни Российской империи. Том 1»
+        # Файл лежит в коллекционной папке — автор и серия закодированы
+        # прямо в имени файла без стандартного разделителя « - ».
+        # ══════════════════════════════════════════════════════════════════
+        _SURNAME_N_SERIES_TOM = re.compile(
+            r'^([А-ЯЁA-Z][а-яёa-zA-Z-]+)\s+(\d{1,4})\s+([А-ЯЁ].+?)'
+            r'\.\s+(?:Том|Часть|Книга|Кн\.|Book|Vol\.?)\s+\d+\s*$',
+            re.UNICODE,
+        )
+        _snst = _SURNAME_N_SERIES_TOM.match(name_for_parsing)
+        if _snst:
+            _snst_surname = _snst.group(1).lower().replace('ё', 'е')
+            _snst_series_name = _snst.group(3).strip()
+            # Проверяем все авторы (";"-разделитель) и оба конца слова (фамилия м.б. первым или последним)
+            _surname_ok = not proposed_author
+            if proposed_author and not _surname_ok:
+                for _auth_part in re.split(r'[;]\s*', proposed_author):
+                    _words = _auth_part.strip().split()
+                    if not _words:
+                        continue
+                    for _candidate in (_words[0].lower().replace('ё', 'е'),
+                                       _words[-1].lower().replace('ё', 'е')):
+                        if (_snst_surname == _candidate
+                                or _snst_surname.startswith(_candidate)
+                                or _candidate.startswith(_snst_surname)):
+                            _surname_ok = True
+                            break
+                    if _surname_ok:
+                        break
+            if _surname_ok and _snst_series_name:
+                return _snst_series_name
 
         # ══════════════════════════════════════════════════════════════════
         # ШАГ 1 (NEW): Попробовать BlockLevelPatternMatcher 🎯
