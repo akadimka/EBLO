@@ -136,14 +136,14 @@ def select_pattern(struct_info: dict,
     
     # 6b. "Author-Collection" - bare hyphen (no spaces) separates 2-word author name
     # from a collection keyword. Example: "Алексей Вязовский-Сборник произведений"
+    _COLLECTION_WORDS = {
+        'сборник', 'коллекция', 'произведений', 'собрание', 'избранное',
+        'антология', 'компиляция', 'архив', 'полное',
+    }
     if pattern is None and '-' in name and ' - ' not in name:
         _hyphen_idx = name.index('-')
         _before = name[:_hyphen_idx].strip()
         _after = name[_hyphen_idx + 1:].strip().lower()
-        _COLLECTION_WORDS = {
-            'сборник', 'коллекция', 'произведений', 'собрание', 'избранное',
-            'антология', 'компиляция', 'архив', 'полное',
-        }
         _after_first = _after.split()[0] if _after.split() else ''
         _before_words = _before.split()
         # 2 слова, оба с заглавной буквы → имя автора (словари не обязательны)
@@ -153,6 +153,17 @@ def select_pattern(struct_info: dict,
         )
         if _after_first in _COLLECTION_WORDS and _looks_like_name:
             pattern = "Author-Collection"
+
+    # 6c. "Author Collection" - space-only separator between 2-word name and collection keyword.
+    # Example: "Вадим Панов  Собрание сочинений" (single or double space)
+    if pattern is None:
+        _words_sp = name.split()  # split() collapses multiple spaces
+        if len(_words_sp) >= 3:
+            _sp_before = _words_sp[:2]
+            _sp_after_first = _words_sp[2].lower()
+            _looks_like_name_sp = all(w and w[0].isupper() for w in _sp_before)
+            if _sp_after_first in _COLLECTION_WORDS and _looks_like_name_sp:
+                pattern = "Author Collection"
 
     # 7. Series (fallback) - single word or just text
     if pattern is None:

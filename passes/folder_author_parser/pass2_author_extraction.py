@@ -133,6 +133,11 @@ def extract_author(struct_info: dict, pattern: Optional[str]) -> str:
         if '-' in name:
             author = name[:name.index('-')].strip()
 
+    elif pattern == "Author Collection":
+        # "Вадим Панов  Собрание сочинений" → первые два слова
+        words = name.split()
+        author = ' '.join(words[:2])
+
     elif pattern == "SingleWord Author":
         # Однословный псевдоним/никнейм подтверждён словарём имён — берём как есть
         author = name
