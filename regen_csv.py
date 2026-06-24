@@ -805,6 +805,7 @@ class RegenCSVService:
 
             self._postcheck_enrich_folder_hierarchy()
             self._postcheck_filename_prefix_pattern()
+            self._postcheck_strip_metadata_coauthors_not_in_filename()
             self._clear_series_for_compilations()
             self.logger.log("[OK] Series cleared for compilations")
 
@@ -889,6 +890,35 @@ class RegenCSVService:
             traceback.print_exc()
             return False
     
+    def _postcheck_strip_metadata_coauthors_not_in_filename(self) -> None:
+        """Убирает соавторов из metadata-автора если их фамилия не встречается в имени файла.
+
+        Пример: «Краснов 1 Последние дни...» → автор из metadata «Краснов Петр, Криворотов Василий»
+        → «Криворотов» не в имени файла → оставляем только «Краснов Петр».
+        Применяется только к записям с author_source == 'metadata' и несколькими авторами.
+        """
+        import re as _re
+        _count = 0
+        for record in self.records:
+            if record.author_source != 'metadata':
+                continue
+            if not record.proposed_author or ',' not in record.proposed_author:
+                continue
+            stem = Path(record.file_path).stem.lower().replace('ё', 'е')
+            parts = [a.strip() for a in record.proposed_author.split(',')]
+            # Фамилия = первое слово каждого автора (формат «Фамилия Имя»)
+            kept = [
+                a for a in parts
+                if a and a.split()[0].lower().replace('ё', 'е') in stem
+            ]
+            if not kept or len(kept) == len(parts):
+                continue  # все авторы есть в имени файла, или никого нет — не трогаем
+            record.proposed_author = ', '.join(kept)
+            _count += 1
+        if _count:
+            print(f"[POST-CHECK] Stripped {_count} metadata co-authors absent from filename")
+            self.logger.log(f"[OK] POST-CHECK: Stripped {_count} metadata co-authors not in filename")
+
     def _clear_series_for_compilations(self) -> None:
         """Clear series for compilation/collection records.
         
