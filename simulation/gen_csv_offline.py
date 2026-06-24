@@ -213,6 +213,7 @@ def main():
     parser.add_argument('--db',     default=str(SIM_DIR / 'metadata_cache.db'))
     parser.add_argument('--out',    default=str(SIM_DIR / 'regen.csv'))
     parser.add_argument('--config', default=str(ROOT_DIR / 'config.json'))
+    parser.add_argument('--filter-path', default='', help='Фильтр: обрабатывать только записи, чей file_path содержит эту подстроку (для отладки)')
     args = parser.parse_args()
 
     db_path  = Path(args.db)
@@ -224,6 +225,10 @@ def main():
 
     # ── Читаем записи из БД ──────────────────────────────────────────────────
     records, root_str = load_records_from_db(db_path)
+    if args.filter_path:
+        before = len(records)
+        records = [r for r in records if args.filter_path in r.file_path]
+        print(f'[filter-path] {args.filter_path!r}: {before} → {len(records)} записей')
     work_dir = Path(root_str.replace('/', '\\')) if root_str else Path('.')
 
     # ── Создаём сервис ───────────────────────────────────────────────────────
