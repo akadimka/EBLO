@@ -91,7 +91,7 @@ class Pass3Normalize:
             # Special case: filename extraction of shared surname (like "Белаш", "Каменские")
             # If proposed_author is single word (surname only) and metadata has multiple
             # authors with this surname, restore them all
-            if (record.author_source == "filename" and 
+            if (record.author_source == "filename" and
                 len(record.proposed_author.strip().split()) == 1 and
                 record.metadata_authors):
                 # Check if metadata authors share the same surname
@@ -124,7 +124,7 @@ class Pass3Normalize:
                     for ending in ('ские', 'ский', 'ского', 'скому', 'ским', 'ске',
                                    'ская', 'скую', 'ской',
                                    'ое', 'ого', 'ому', 'ым', 'ом',
-                                   'ий', 'ого', 'ому', 'ым', 'ом'):
+                                   'ий', 'ие', 'ого', 'ому', 'ым', 'ом'):
                         if surname_lower.endswith(ending):
                             return surname_lower[:-len(ending)]
                     
@@ -132,7 +132,7 @@ class Pass3Normalize:
                 
                 matching_authors = []
                 candidate_root = extract_surname_root(surname_candidate)
-                
+
                 for a in metadata_authors_list:
                     # Check if surname root matches
                     # Support both exact word match and root-based matching
@@ -158,8 +158,8 @@ class Pass3Normalize:
                     
                     normalized_authors.sort(key=get_surname_key)
                     record.proposed_author = '; '.join(normalized_authors)
-                    # Mark that this was restored - don't skip normalization as it's already done
-                    record.skip_normalization = False
+                    # Skip second normalization pass — authors are already in correct format
+                    record.skip_normalization = True
                 else:
                     record.skip_normalization = False
             else:
@@ -403,16 +403,22 @@ class Pass3Normalize:
                     if any(w in _SURNAME_PARTICLES for w in words_lower):
                         pass  # compound surname — keep all words as-is
                     else:
-                        # Try AuthorName normalization: if it produces exactly 2 words,
-                        # it successfully identified first+last (e.g. "Кристофер Джон Сэнсом"
-                        # → "Сэнсом Кристофер"). Otherwise fall back to first-2-words
-                        # truncation (safe for Russian patronymics like Иванов Иван Иванович).
-                        from name_normalizer import AuthorName as _AN
-                        _an = _AN(auth)
-                        if _an.is_valid and len(_an.normalized.split()) == 2:
-                            auth = _an.normalized
+                        # Skip truncation for co-author expressions like "Аркадий и Борис Стругацкие"
+                        # where "и" is a connector word, not part of a single person's name.
+                        words_lower_set = {w.lower() for w in words}
+                        if 'и' in words_lower_set:
+                            pass  # keep as-is — co-author expression, handled elsewhere
                         else:
-                            auth = ' '.join(words[:2])
+                            # Try AuthorName normalization: if it produces exactly 2 words,
+                            # it successfully identified first+last (e.g. "Кристофер Джон Сэнсом"
+                            # → "Сэнсом Кристофер"). Otherwise fall back to first-2-words
+                            # truncation (safe for Russian patronymics like Иванов Иван Иванович).
+                            from name_normalizer import AuthorName as _AN
+                            _an = _AN(auth)
+                            if _an.is_valid and len(_an.normalized.split()) == 2:
+                                auth = _an.normalized
+                            else:
+                                auth = ' '.join(words[:2])
                 fixed = []
                 for w in auth.split():
                     if _re_dot.match(r'^[А-ЯЁA-Z][а-яёa-zA-Z]?\.?$', w) and _is_abbreviation(w):

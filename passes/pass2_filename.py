@@ -327,11 +327,23 @@ class Pass2Filename:
                 # with this word, DON'T expand - leave surname-only for PASS 3 restoration
                 if len(extracted_author.split()) == 1 and len(fb2_authors) > 1:
                     # Check if this single word matches multiple FB2 authors
-                    extracted_words = {extracted_lower}
+                    # Use both exact word match and root-based matching (handles Russian endings:
+                    # "Стругацкие" root "стругацки" matches "Стругацкий" root "стругацки")
+                    def _surname_root_p2(s):
+                        for ending in ('ские', 'ский', 'ского', 'скому', 'ским', 'ске',
+                                       'ская', 'скую', 'ской',
+                                       'ое', 'ого', 'ому', 'ым', 'ом',
+                                       'ий', 'ие', 'ого', 'ому', 'ым', 'ом'):
+                            if s.endswith(ending):
+                                return s[:-len(ending)]
+                        return s
+                    extracted_root = _surname_root_p2(extracted_lower)
                     matching_count = 0
                     for fb2_author in fb2_authors:
-                        fb2_words = set(fb2_author.lower().split())
-                        if extracted_words.issubset(fb2_words):
+                        fb2_words = fb2_author.lower().split()
+                        if extracted_lower in fb2_words:
+                            matching_count += 1
+                        elif any(_surname_root_p2(w) == extracted_root for w in fb2_words):
                             matching_count += 1
 
                     # If matches multiple authors, don't expand
@@ -374,6 +386,9 @@ class Pass2Filename:
                             match_idx = fb2_words_list.index(extracted_lower)
                             if match_idx > 0 and not _has_particle:
                                 rest = [w for i, w in enumerate(fb2_author.split()) if i != match_idx]
+                                # "X и Y Surname" pattern — co-author expression, don't reorder
+                                if 'и' in {w.lower() for w in rest}:
+                                    return extracted_author
                                 reordered = fb2_author.split()[match_idx] + ' ' + ' '.join(rest)
                                 self._add_to_author_cache(extracted_author, reordered)
                                 self._last_meta_expanded = True
@@ -413,9 +428,15 @@ class Pass2Filename:
                 self.logger.log(f"[PASS 2] WARNING: Failed to validate author against metadata: {e}")
         
         # FB2 lookup found nothing — use cross-file cache hit if available (single-word fallback)
+        # Don't use co-author expressions ("X и Y Surname") as cache expansions for single-word
+        # extractions — Pass 3 multi-author restoration handles these correctly.
         if cache_hit:
-            return cache_hit
-        
+            _cache_words = {w.lower() for w in cache_hit.split()}
+            if is_single_word and 'и' in _cache_words:
+                pass  # skip — co-author expression; let Pass 3 restore
+            else:
+                return cache_hit
+
         # No match anywhere, return original extraction
         return extracted_author
     
@@ -639,7 +660,11 @@ class Pass2Filename:
                         matched_authors.append(meta_author)
                     else:
                         rest = [w for i, w in enumerate(meta_words) if i != idx]
-                        matched_authors.append(word + ' ' + ' '.join(rest))
+                        # "X и Y Surname" co-author expression — don't reorder, return as-is
+                        if 'и' in {w.lower() for w in rest}:
+                            matched_authors.append(meta_author)
+                        else:
+                            matched_authors.append(word + ' ' + ' '.join(rest))
                     break  # одна запись metadata → один совпавший автор
 
         if len(matched_authors) == 1:
@@ -938,6 +963,11 @@ class Pass2Filename:
                             cached = surname_cached
 
             if cached and len(cached.split()) > len(author_words):
+                # Don't upgrade single-word surname to co-author expression ("X и Y Surname").
+                # Such expressions contain standalone "и" and should be handled by Pass 3
+                # multi-author restoration instead of being propagated via cache.
+                if len(author_words) == 1 and 'и' in {w.lower() for w in cached.split()}:
+                    continue
                 record.proposed_author = cached
                 upgraded += 1
         if upgraded:
