@@ -898,9 +898,10 @@ class RegenCSVService:
         Применяется только к записям с author_source == 'metadata' и несколькими авторами.
         """
         import re as _re
+        _APPLICABLE_SOURCES = {'metadata', 'metadata+series-consensus'}
         _count = 0
         for record in self.records:
-            if record.author_source != 'metadata':
+            if record.author_source not in _APPLICABLE_SOURCES:
                 continue
             if not record.proposed_author or ',' not in record.proposed_author:
                 continue
