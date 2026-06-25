@@ -193,6 +193,25 @@ class Pass6Abbreviations:
         if dedup_count:
             self.logger.log(f"[PASS 6] Deduplicated {dedup_count} author strings")
 
+        # Сортировка соавторов по фамилии (алфавитный порядок)
+        sort_count = 0
+        for record in records:
+            if not record.proposed_author or record.proposed_author == "Сборник":
+                continue
+            sep = '; ' if '; ' in record.proposed_author else (', ' if ', ' in record.proposed_author else None)
+            if not sep:
+                continue
+            parts = [p.strip() for p in record.proposed_author.split(sep)]
+            if len(parts) < 2:
+                continue
+            # Не сортируем выражения вида "Аркадий и Борис Стругацкие" (нет разделителя → уже одна строка)
+            sorted_parts = sorted(parts, key=lambda x: x.split()[0].lower() if x.split() else x.lower())
+            if sorted_parts != parts:
+                record.proposed_author = sep.join(sorted_parts)
+                sort_count += 1
+        if sort_count:
+            self.logger.log(f"[PASS 6] Sorted co-authors alphabetically in {sort_count} records")
+
         # Финальная проверка: серия не может совпадать с автором
         cleared_count = 0
         for record in records:
