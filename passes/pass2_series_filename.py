@@ -2385,6 +2385,11 @@ class Pass2SeriesFilename:
             author = _ET_AL_PATTERN.sub('', author).strip()
             return author
 
+        _tfp_propagate = [
+            p.lower() for p in
+            (self.settings.get('translator_folder_prefixes', []) or [])
+        ]
+
         propagated = 0
         for record in records:
             if record.author_source == "folder_dataset":
@@ -2396,6 +2401,12 @@ class Pass2SeriesFilename:
                 p for p in path_parts
                 if p.lower() not in FILE_EXTENSION_FOLDER_NAMES
             )
+
+            # Пропускаем файлы в папках-переводчиков (translator_folder_prefixes)
+            if _tfp_propagate and any(
+                p.lower().startswith(tuple(_tfp_propagate)) for p in path_parts
+            ):
+                continue
 
             # Идём от корня (самая высокая папка) к файлу, останавливаемся на первом совпадении
             for part in path_parts:

@@ -395,6 +395,27 @@ class RegenCSVService:
             if propagated:
                 self.logger.log(f"[OK] PASS 1.5: Propagated folder_dataset author to {propagated} files")
 
+            # ===== TRANSLATOR FOLDERS: сброс folder_dataset автора =====
+            # Файлы в папках типа «Переводы Б. Акунина - Г. Чхартишвили» содержат
+            # чужие книги — автором является переводчик (из родительской папки), а не
+            # сам автор произведения. Сбрасываем folder_dataset, чтобы Pass2
+            # извлёк реального автора из имени файла.
+            _tfp = [p.lower() for p in
+                    (self.settings.settings.get('translator_folder_prefixes', [])
+                     if hasattr(self.settings, 'settings') else [])]
+            if _tfp:
+                _tr_cleared = 0
+                for _rec in self.records:
+                    if _rec.author_source != 'folder_dataset':
+                        continue
+                    _parts = Path(_rec.file_path).parts
+                    if any(p.lower().startswith(tuple(_tfp)) for p in _parts[:-1]):
+                        _rec.proposed_author = ''
+                        _rec.author_source = ''
+                        _tr_cleared += 1
+                if _tr_cleared:
+                    print(f"[TRANSLATOR] Cleared folder_dataset author for {_tr_cleared} files in translator folders")
+
             if progress_callback:
                 progress_callback(20, 100, "Pass 2: Извлечение авторов")
             _t = time.perf_counter()
@@ -579,6 +600,12 @@ class RegenCSVService:
                                 (self.settings.settings.get('genre_folder_prefixes', [])
                                  if hasattr(self.settings, 'settings') else [])]
                         self._genre_folder_prefixes_cache = _gfp
+                    _tfp_ser = getattr(self, '_translator_folder_prefixes_cache', None)
+                    if _tfp_ser is None:
+                        _tfp_ser = [p.lower() for p in
+                                    (self.settings.settings.get('translator_folder_prefixes', [])
+                                     if hasattr(self.settings, 'settings') else [])]
+                        self._translator_folder_prefixes_cache = _tfp_ser
 
                     series_folders = []
                     for _sf in subfolders:
@@ -595,6 +622,13 @@ class RegenCSVService:
                             )
                             if _is_genre_collection:
                                 continue  # жанровый sub-collection — не серия
+                            # Дополнительная проверка: папка-переводчик («Переводы X»)
+                            # — содержит чужие книги, не является серией автора.
+                            _is_translator_folder = any(
+                                _sf_lower.startswith(_tp) for _tp in _tfp_ser
+                            )
+                            if _is_translator_folder:
+                                continue  # папка переводов — не серия
                             series_folders.append(_sf)
                             continue
                         # Даже если автор найден в имени подпапки — жанровая метка
