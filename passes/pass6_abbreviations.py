@@ -209,6 +209,21 @@ class Pass6Abbreviations:
         if dedup_count:
             self.logger.log(f"[PASS 6] Deduplicated {dedup_count} author strings")
 
+        # Применяем author_surname_conversions к финальному значению автора
+        # (покрывает случаи когда парсер вернул Верн. Жюль вместо Верн Жюль)
+        _conversions = (self.settings.get_author_surname_conversions() if self.settings else None) or {}
+        conv_count = 0
+        for record in records:
+            if not record.proposed_author or not _conversions:
+                continue
+            if record.proposed_author in _conversions:
+                new_val = _conversions[record.proposed_author]
+                if new_val != record.proposed_author:
+                    record.proposed_author = new_val
+                    conv_count += 1
+        if conv_count:
+            self.logger.log(f"[PASS 6] Applied surname conversions to {conv_count} author values")
+
         # Сортировка соавторов по фамилии (алфавитный порядок)
         sort_count = 0
         for record in records:
