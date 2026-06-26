@@ -135,6 +135,9 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
         return False
 
     conversions = settings.get_author_surname_conversions() or {}
+    collection_names = {
+        s.lower() for s in (settings.get_author_subfolder_collections() or [])
+    }
 
     # Собираем уникальные папки (от корня до папки файла)
     unique_dirs: Set[str] = set()
@@ -145,14 +148,15 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
             unique_dirs.add('\\'.join(parts[:depth]))
 
     # Ключи — str(abs_path), как в Pass1 (_get_author_for_file_worker)
+    import re as _re
     cache: Dict[str, Tuple[str, str]] = {}
     for rel_dir in unique_dirs:
         folder_abs = work_dir / rel_dir
         folder_name = Path(rel_dir).name
+        parent_name = Path(rel_dir).parent.name.lower()
+        force_author = parent_name in collection_names
+
         folder_name_for_parse = conversions.get(folder_name, folder_name)
-        # If the folder name is explicitly listed in conversions (even mapping to itself),
-        # use the conversion value verbatim — this lets operators pin Latin pseudonyms
-        # like "Myrmice Orlyett" without parse_author_from_folder_name reordering them.
         if folder_name in conversions:
             author = folder_name_for_parse
         else:
@@ -161,7 +165,12 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
                 male_names=male_names,
                 female_names=female_names,
             )
-        if author and _has_valid_name(author):
+
+        if force_author:
+            if not author:
+                author = _re.sub(r'\s*\(.*?\)', '', folder_name).strip()
+            cache[str(folder_abs)] = (author, 'high')
+        elif author and _has_valid_name(author):
             cache[str(folder_abs)] = (author, 'high')
 
     print(f'[PRECACHE-offline] Папок автора: {len(cache)}')

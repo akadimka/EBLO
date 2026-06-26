@@ -96,9 +96,13 @@ class Precache:
         print("[PRECACHE] Building author folder hierarchy...")
         
         conversions = self.settings.get_author_surname_conversions()
-        
+        collection_names = {
+            s.lower() for s in (self.settings.get_author_subfolder_collections() or [])
+        }
+
         def scan_folder_hierarchy(folder: Path, depth: int = 0,
-                                   inside_author_folder: bool = False) -> Optional[Tuple[str, str]]:
+                                   inside_author_folder: bool = False,
+                                   force_author: bool = False) -> Optional[Tuple[str, str]]:
             """Recursively scan folders and cache authors.
 
             Args:
@@ -191,14 +195,23 @@ class Precache:
             except (PermissionError, OSError):
                 pass
 
-            # If author folder with FB2 files AND name parses as author AND contains valid names
-            if author_name and has_fb2_files and self._contains_valid_name(author_name):
+            # force_author: папка внутри коллекции — всегда автор, без проверки словаря
+            # (fb2 могут быть в подпапках серии, а не напрямую)
+            is_author = (
+                force_author
+                or (has_fb2_files and author_name and self._contains_valid_name(author_name))
+            )
+
+            if is_author:
+                # Если force_author и parse не дал имя — используем имя папки verbatim
+                # (очищаем скобочный комментарий, напр. "Бауэр-Николай (Лиходей)" → "Бауэр-Николай")
+                if not author_name:
+                    import re as _re
+                    author_name = _re.sub(r'\s*\(.*?\)', '', folder_name).strip()
                 if depth > 0:
                     result = (author_name, "high")
                     self.author_folder_cache[folder] = result
                     print(f"[CACHE] Added HIGH: {folder.name} → '{author_name}'")
-                # Рекурсируем внутрь, но уже с флагом inside_author_folder=True —
-                # подпапки являются сериями, а не авторами.
                 try:
                     for subdir in folder.iterdir():
                         if subdir.is_dir() and not subdir.name.startswith('.'):
@@ -220,10 +233,13 @@ class Precache:
                 self.author_folder_cache[folder] = result
 
             # Recursively scan subfolders (не авторская папка — ищем глубже)
+            # Если эта папка — коллекция, её дочерние папки принудительно авторские
+            this_is_collection = folder_name.lower() in collection_names
             try:
                 for subdir in folder.iterdir():
                     if subdir.is_dir() and not subdir.name.startswith('.'):
-                        scan_folder_hierarchy(subdir, depth + 1)
+                        scan_folder_hierarchy(subdir, depth + 1,
+                                              force_author=this_is_collection)
             except (PermissionError, OSError):
                 pass
 

@@ -467,6 +467,11 @@ class SettingsManager:
         lst = self.settings.get('series_folder_prefixes_to_strip')
         return list(lst) if lst else []
 
+    def get_author_subfolder_collections(self):
+        """Папки-коллекции, чьи непосредственные подпапки всегда считаются авторскими."""
+        lst = self.settings.get('author_subfolder_collections')
+        return list(lst) if lst else []
+
     def set_service_words(self, lst):
         """Устанавливает список служебных слов и сохраняет конфиг.
         Removes duplicates (case-insensitive) while preserving order."""
