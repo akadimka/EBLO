@@ -113,11 +113,14 @@ class Precache:
             if folder == self.work_dir:
                 wd_name = folder.name
                 wd_name_for_parse = conversions.get(wd_name, wd_name)
-                wd_author = parse_author_from_folder_name(
-                    wd_name_for_parse,
-                    male_names=self.male_names,
-                    female_names=self.female_names,
-                )
+                if wd_name in conversions:
+                    wd_author = wd_name_for_parse
+                else:
+                    wd_author = parse_author_from_folder_name(
+                        wd_name_for_parse,
+                        male_names=self.male_names,
+                        female_names=self.female_names,
+                    )
                 wd_is_author = bool(wd_author and self._contains_valid_name(wd_author))
                 if wd_is_author:
                     # Cache work_dir as author so Pass1 assigns folder_dataset to ALL files
@@ -163,12 +166,17 @@ class Precache:
             # Apply conversions to folder name
             folder_name_to_parse = conversions.get(folder_name, folder_name)
 
-            # Apply PASS0+PASS1+PASS2 structural analysis
-            author_name = parse_author_from_folder_name(
-                folder_name_to_parse,
-                male_names=self.male_names,
-                female_names=self.female_names,
-            )
+            # If folder name is explicitly in conversions, use the value verbatim —
+            # this pins Latin pseudonyms like "Myrmice Orlyett" without word reordering.
+            if folder_name in conversions:
+                author_name = folder_name_to_parse
+            else:
+                # Apply PASS0+PASS1+PASS2 structural analysis
+                author_name = parse_author_from_folder_name(
+                    folder_name_to_parse,
+                    male_names=self.male_names,
+                    female_names=self.female_names,
+                )
 
             # Check if folder contains FB2 files
             has_fb2_files = False

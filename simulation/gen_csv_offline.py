@@ -150,11 +150,17 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
         folder_abs = work_dir / rel_dir
         folder_name = Path(rel_dir).name
         folder_name_for_parse = conversions.get(folder_name, folder_name)
-        author = parse_author_from_folder_name(
-            folder_name_for_parse,
-            male_names=male_names,
-            female_names=female_names,
-        )
+        # If the folder name is explicitly listed in conversions (even mapping to itself),
+        # use the conversion value verbatim — this lets operators pin Latin pseudonyms
+        # like "Myrmice Orlyett" without parse_author_from_folder_name reordering them.
+        if folder_name in conversions:
+            author = folder_name_for_parse
+        else:
+            author = parse_author_from_folder_name(
+                folder_name_for_parse,
+                male_names=male_names,
+                female_names=female_names,
+            )
         if author and _has_valid_name(author):
             cache[str(folder_abs)] = (author, 'high')
 

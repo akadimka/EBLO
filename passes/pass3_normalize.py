@@ -54,9 +54,20 @@ class Pass3Normalize:
         print("[PASS 3] Normalizing author names...")
         
         normalized_count = 0
-        
+
+        # Build set of pinned author names from author_surname_conversions values.
+        # These are used verbatim and must not be reordered by normalize_format.
+        _conversions = (self.settings.get_author_surname_conversions() if self.settings else None) or {}
+        _pinned_authors = {v.lower() for v in _conversions.values()}
+
         for record in records:
             if not record.proposed_author or record.proposed_author == "Сборник":
+                continue
+
+            # Skip normalization for authors pinned via author_surname_conversions.
+            # These are typically Latin pseudonyms or fixed-form names that must not
+            # be reordered (e.g. "Myrmice Orlyett", "Solveig Ericson").
+            if record.proposed_author.lower() in _pinned_authors:
                 continue
 
             # Дедупликация авторов: "Гаусс Максим, Гаусс Максим" → "Гаусс Максим"
