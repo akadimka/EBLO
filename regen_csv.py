@@ -889,6 +889,12 @@ class RegenCSVService:
                     # Then strip remaining illegal chars (excluding ':' already handled)
                     rec.proposed_series = re.sub(r'[/*?"<>=|]', '', rec.proposed_series).strip()
                     rec.proposed_series = _strip_trailing_dot(rec.proposed_series)
+                    # Strip unbalanced closing brackets from broken metadata (e.g. "Тринадцатый)")
+                    _s_open = rec.proposed_series.count('(')
+                    _s_close = rec.proposed_series.count(')')
+                    if _s_close > _s_open:
+                        rec.proposed_series = rec.proposed_series.rstrip(')')
+                        rec.proposed_series = rec.proposed_series.rstrip()
                     # Capitalize first letter
                     if rec.proposed_series:
                         rec.proposed_series = rec.proposed_series[0].upper() + rec.proposed_series[1:]
