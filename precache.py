@@ -100,10 +100,16 @@ class Precache:
             s.lower() for s in (self.settings.get_author_subfolder_collections() or [])
         }
         genre_prefixes = [p.lower() for p in (self.settings.get_genre_folder_prefixes() or [])]
+        import re as _re_pat
+        author_patterns = [
+            _re_pat.compile(p)
+            for p in (self.settings.get_author_folder_name_patterns() or [])
+        ]
 
         def scan_folder_hierarchy(folder: Path, depth: int = 0,
                                    inside_author_folder: bool = False,
-                                   force_author: bool = False) -> Optional[Tuple[str, str]]:
+                                   force_author: bool = False,
+                                   inside_genre_folder: bool = False) -> Optional[Tuple[str, str]]:
             """Recursively scan folders and cache authors.
 
             Args:
@@ -196,15 +202,39 @@ class Precache:
             except (PermissionError, OSError):
                 pass
 
+            # Дети genre-папок — это серии внутри цикла, не авторы
+            if inside_genre_folder:
+                return None
+
             # Пропускаем жанровые/издательские папки — они не являются авторами
             if any(folder_name.lower().startswith(p) for p in genre_prefixes):
                 try:
                     for subdir in folder.iterdir():
                         if subdir.is_dir() and not subdir.name.startswith('.'):
-                            scan_folder_hierarchy(subdir, depth + 1)
+                            scan_folder_hierarchy(subdir, depth + 1,
+                                                  inside_genre_folder=True)
                 except (PermissionError, OSError):
                     pass
                 return None
+
+            # Паттерны вида "NN. Серия - Автор" → берём capture group 1 как автора
+            for pat in author_patterns:
+                m = pat.match(folder_name)
+                if m:
+                    pattern_author = m.group(1).strip()
+                    if pattern_author and depth > 0:
+                        result = (pattern_author, 'high')
+                        self.author_folder_cache[folder] = result
+                        print(f"[CACHE] Pattern match: {folder.name} → '{pattern_author}'")
+                        try:
+                            for subdir in folder.iterdir():
+                                if subdir.is_dir() and not subdir.name.startswith('.'):
+                                    scan_folder_hierarchy(subdir, depth + 1,
+                                                          inside_author_folder=True)
+                        except (PermissionError, OSError):
+                            pass
+                        return result
+                    break
 
             # force_author: папка внутри коллекции — всегда автор, без проверки словаря
             # folder_name in conversions: явно пинённый псевдоним (самомапинг) — тоже без валидации

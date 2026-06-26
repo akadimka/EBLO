@@ -139,6 +139,10 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
         s.lower() for s in (settings.get_author_subfolder_collections() or [])
     }
     genre_prefixes = [p.lower() for p in (settings.get_genre_folder_prefixes() or [])]
+    import re as _re2
+    author_patterns = [
+        _re2.compile(p) for p in (settings.get_author_folder_name_patterns() or [])
+    ]
 
     # Собираем уникальные папки (от корня до папки файла)
     unique_dirs: Set[str] = set()
@@ -148,14 +152,41 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
         for depth in range(1, len(parts)):
             unique_dirs.add('\\'.join(parts[:depth]))
 
+    # Строим множество genre-prefix папок (по абсолютному пути) для проверки родителей
+    genre_folder_abs: set = set()
+
     # Ключи — str(abs_path), как в Pass1 (_get_author_for_file_worker)
     import re as _re
     cache: Dict[str, Tuple[str, str]] = {}
-    for rel_dir in unique_dirs:
+    for rel_dir in sorted(unique_dirs):  # сортируем чтобы родители обрабатывались раньше детей
         folder_abs = work_dir / rel_dir
         folder_name = Path(rel_dir).name
         parent_name = Path(rel_dir).parent.name.lower()
+        parent_abs = str((work_dir / rel_dir).parent)
         force_author = parent_name in collection_names
+
+        # Пропускаем жанровые/издательские папки — они не являются авторами
+        fn_lower = folder_name.lower()
+        if any(fn_lower.startswith(p) for p in genre_prefixes):
+            genre_folder_abs.add(str(folder_abs))
+            continue
+
+        # Дети genre-папок тоже не являются авторами (это серии внутри цикла)
+        if parent_abs in genre_folder_abs:
+            genre_folder_abs.add(str(folder_abs))  # транзитивно
+            continue
+
+        # Паттерны вида "NN. Серия - Автор" → берём capture group 1 как автора
+        pattern_author = None
+        for pat in author_patterns:
+            m = pat.match(folder_name)
+            if m:
+                pattern_author = m.group(1).strip()
+                break
+
+        if pattern_author:
+            cache[str(folder_abs)] = (pattern_author, 'high')
+            continue
 
         folder_name_for_parse = conversions.get(folder_name, folder_name)
         if folder_name in conversions:
@@ -166,11 +197,6 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
                 male_names=male_names,
                 female_names=female_names,
             )
-
-        # Пропускаем жанровые/издательские папки — они не являются авторами
-        fn_lower = folder_name.lower()
-        if any(fn_lower.startswith(p) for p in genre_prefixes):
-            continue
 
         if force_author or folder_name in conversions:
             if not author:

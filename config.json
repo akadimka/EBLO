@@ -1500,6 +1500,9 @@
     "Русский фантастический боевик",
     "Фанфики"
   ],
+  "author_folder_name_patterns": [
+    "^\\d+\\.\\s+.+\\s+-\\s+(.+)$"
+  ],
   "system_folder_names": [
     "fb2",
     "epub",

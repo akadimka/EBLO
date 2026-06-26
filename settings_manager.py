@@ -477,6 +477,11 @@ class SettingsManager:
         lst = self.settings.get('genre_folder_prefixes')
         return list(lst) if lst else []
 
+    def get_author_folder_name_patterns(self):
+        """Regex-паттерны для извлечения автора из имени папки (capture group 1)."""
+        lst = self.settings.get('author_folder_name_patterns')
+        return list(lst) if lst else []
+
     def set_service_words(self, lst):
         """Устанавливает список служебных слов и сохраняет конфиг.
         Removes duplicates (case-insensitive) while preserving order."""
