@@ -751,17 +751,6 @@ class Pass2Filename:
         """
         print("[PASS 2] Extracting authors from filenames (structural analysis)...")
         
-        # Debug: Log loaded patterns
-        print(f"[PASS 2 DEBUG] Loaded {len(self.patterns)} patterns")
-        print(f"[PASS 2 DEBUG] Service words count: {len(self.service_words)}")
-        
-        # Count source distribution
-        source_counts = {}
-        for r in records:
-            source = getattr(r, 'author_source', '')
-            source_counts[source] = source_counts.get(source, 0) + 1
-        print(f"[PASS 2 DEBUG] Record sources BEFORE: {source_counts}")
-        
         processed_count = 0
         skipped_count = 0
         error_count = 0
