@@ -99,6 +99,7 @@ class Precache:
         collection_names = {
             s.lower() for s in (self.settings.get_author_subfolder_collections() or [])
         }
+        genre_prefixes = [p.lower() for p in (self.settings.get_genre_folder_prefixes() or [])]
 
         def scan_folder_hierarchy(folder: Path, depth: int = 0,
                                    inside_author_folder: bool = False,
@@ -194,6 +195,16 @@ class Precache:
                         break
             except (PermissionError, OSError):
                 pass
+
+            # Пропускаем жанровые/издательские папки — они не являются авторами
+            if any(folder_name.lower().startswith(p) for p in genre_prefixes):
+                try:
+                    for subdir in folder.iterdir():
+                        if subdir.is_dir() and not subdir.name.startswith('.'):
+                            scan_folder_hierarchy(subdir, depth + 1)
+                except (PermissionError, OSError):
+                    pass
+                return None
 
             # force_author: папка внутри коллекции — всегда автор, без проверки словаря
             # folder_name in conversions: явно пинённый псевдоним (самомапинг) — тоже без валидации

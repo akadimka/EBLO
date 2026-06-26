@@ -472,6 +472,11 @@ class SettingsManager:
         lst = self.settings.get('author_subfolder_collections')
         return list(lst) if lst else []
 
+    def get_genre_folder_prefixes(self):
+        """Папки с жанровыми/издательскими префиксами — не являются авторами."""
+        lst = self.settings.get('genre_folder_prefixes')
+        return list(lst) if lst else []
+
     def set_service_words(self, lst):
         """Устанавливает список служебных слов и сохраняет конфиг.
         Removes duplicates (case-insensitive) while preserving order."""

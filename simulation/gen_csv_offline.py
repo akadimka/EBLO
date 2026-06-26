@@ -138,6 +138,7 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
     collection_names = {
         s.lower() for s in (settings.get_author_subfolder_collections() or [])
     }
+    genre_prefixes = [p.lower() for p in (settings.get_genre_folder_prefixes() or [])]
 
     # Собираем уникальные папки (от корня до папки файла)
     unique_dirs: Set[str] = set()
@@ -165,6 +166,11 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
                 male_names=male_names,
                 female_names=female_names,
             )
+
+        # Пропускаем жанровые/издательские папки — они не являются авторами
+        fn_lower = folder_name.lower()
+        if any(fn_lower.startswith(p) for p in genre_prefixes):
+            continue
 
         if force_author or folder_name in conversions:
             if not author:
