@@ -196,9 +196,11 @@ class Precache:
                 pass
 
             # force_author: папка внутри коллекции — всегда автор, без проверки словаря
+            # folder_name in conversions: явно пинённый псевдоним (самомапинг) — тоже без валидации
             # (fb2 могут быть в подпапках серии, а не напрямую)
             is_author = (
                 force_author
+                or folder_name in conversions
                 or (has_fb2_files and author_name and self._contains_valid_name(author_name))
             )
 

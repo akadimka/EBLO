@@ -166,10 +166,11 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
                 female_names=female_names,
             )
 
-        if force_author:
+        if force_author or folder_name in conversions:
             if not author:
                 author = _re.sub(r'\s*\(.*?\)', '', folder_name).strip()
-            cache[str(folder_abs)] = (author, 'high')
+            if author:
+                cache[str(folder_abs)] = (author, 'high')
         elif author and _has_valid_name(author):
             cache[str(folder_abs)] = (author, 'high')
 
