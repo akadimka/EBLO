@@ -248,6 +248,10 @@ class RegenCSVService:
                 folder_name = cleaned
         
         # ШАГ 1: Попробуем применить паттерны и найти группу "series"
+        # Исключение: если папка начинается с '(' — скобка в начале является частью названия,
+        # а не разделителем "(Серия) Автор". Пропускаем паттерны, берём имя как есть.
+        if folder_name.startswith('('):
+            return folder_name.strip()
         for pattern_str, pattern_regex, group_names in self.folder_patterns:
             match = pattern_regex.search(folder_name)
             if match:
@@ -841,6 +845,8 @@ class RegenCSVService:
             self._postcheck_filename_prefix_pattern()
             self._postcheck_strip_metadata_coauthors_not_in_filename()
             self._postcheck_series_folder_blacklist()
+            self._postcheck_build_subfolder_hierarchy()
+            self._postcheck_expand_truncated_series()  # повторно, после strip-префиксов (РОС. Подсерия → РОС\Подсерия)
             self._postcheck_strip_leading_number()  # повторно, после backslash-стрипинга
             self._postcheck_fill_empty_authors()
             self._postcheck_strip_digit_prefix_author()
@@ -1166,6 +1172,84 @@ class RegenCSVService:
             print(f"[POST-CHECK] Stripped digit prefix from {_count} series values")
             self.logger.log(f"[OK] POST-CHECK: Stripped digit prefix from {_count} series")
 
+    def _postcheck_build_subfolder_hierarchy(self) -> None:
+        """Строит серию «Родительская\\Подсерия» когда файл вложен глубже одного уровня от автора.
+
+        Для структуры Автор\\СерияВерхнего\\Подсерия\\файл.fb2 предлагаемая серия будет
+        только «Подсерия». Этот постчек добавляет префикс «СерияВерхнего\\» если:
+          - source = folder_dataset (папочный источник)
+          - прямая родительская папка файла совпадает с proposed_series (текущая серия)
+          - дедушка-папка не является авторской (не в author_folder_cache) и не корнем
+          - дедушка-папка не является коллекционной папкой (не в collection_keywords)
+        """
+        from pathlib import Path as _P
+        from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
+
+        # Нормализованные ключи author_folder_cache (lowercase paths)
+        _author_cache_lower = {k.lower() for k in self.author_folder_cache}
+        _coll_kw = {w.lower() for w in (self.collection_keywords or [])}
+        _work_lower = str(self.work_dir).lower().rstrip('/\\')
+
+        _count = 0
+        for record in self.records:
+            if record.series_source not in ('folder_dataset',):
+                continue
+            if not record.proposed_series:
+                continue
+
+            fp = _P(record.file_path)
+            parent = fp.parent          # Подсерия-папка (Ком)
+            grandparent = parent.parent  # Возможная серия верхнего уровня (Проект Э.К.С.П.А.Н.С.И.Я)
+
+            # Корень — не обрабатываем
+            if str(grandparent).lower().rstrip('/\\') == _work_lower:
+                continue
+
+            gp_name = grandparent.name
+            if not gp_name:
+                continue
+
+            # Прозрачные папки расширений пропускаем
+            if gp_name.lower() in FILE_EXTENSION_FOLDER_NAMES:
+                continue
+
+            # Дедушка не должен быть авторской папкой
+            gp_abs = str(self.work_dir / grandparent).lower()
+            if gp_abs in _author_cache_lower:
+                continue
+
+            # Дедушка не должен совпадать с proposed_author (авторский псевдоним/логин)
+            if record.proposed_author:
+                gp_norm = gp_name.lower().replace('ё', 'е').strip()
+                auth_norm = record.proposed_author.lower().replace('ё', 'е').strip()
+                # Проверяем совпадение по любому токену фамилии
+                auth_parts = auth_norm.split()
+                if gp_norm == auth_norm or (auth_parts and auth_parts[0] in gp_norm and len(gp_norm) <= len(auth_norm) + 5):
+                    continue
+
+            # Дедушка не должен быть коллекционным keyword
+            if any(gp_name.lower().startswith(kw) for kw in _coll_kw):
+                continue
+
+            # Прямая родительская папка должна совпадать с proposed_series (нормализованно)
+            parent_name_norm = parent.name.lower().replace('ё', 'е').strip()
+            ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
+            if parent_name_norm != ps_norm:
+                continue
+
+            # Суффиксы типа "(Законченный)" убираем из имени деда
+            gp_clean = re.sub(r'\s*\([^)]*\)\s*$', '', gp_name).strip()
+            if not gp_clean:
+                continue
+
+            record.proposed_series = gp_clean + '\\' + record.proposed_series
+            record.series_source = record.series_source + '+subfolder_hierarchy'
+            _count += 1
+
+        if _count:
+            print(f"[POST-CHECK] Built subfolder hierarchy for {_count} series values")
+            self.logger.log(f"[OK] POST-CHECK: Built subfolder hierarchy in {_count} records")
+
     def _postcheck_enrich_folder_hierarchy(self) -> None:
         """Обогащает folder_hierarchy серии filename-префиксом когда filename-серия более полная."""
         def _ns(s: str) -> str:
@@ -1342,6 +1426,29 @@ class RegenCSVService:
                     ))
         _title_series_fp_count = 0
         _title_num_re = re.compile(r'\s+\d{1,2}\s*$')
+        # author-consensus без metadata → серия == title → ложная серия
+        _ac_cleared = 0
+        for record in self.records:
+            if (record.series_source or '') != 'author-consensus':
+                continue
+            if not record.proposed_series or record.metadata_series:
+                continue
+            ft = (record.file_title or '').strip().lower().replace('ё', 'е')
+            ps = record.proposed_series.strip().lower().replace('ё', 'е')
+            if ft and ft == ps:
+                _pair = (
+                    (record.proposed_author or '').strip().lower().replace('ё', 'е'),
+                    ps,
+                )
+                if _pair not in _confirmed_series_pairs:
+                    record.proposed_series = ''
+                    record.series_source = ''
+                    record.series_number = ''
+                    _ac_cleared += 1
+        if _ac_cleared:
+            print(f"[POST-CHECK] Cleared {_ac_cleared} author-consensus series==title (no metadata)")
+            self.logger.log(f"[OK] POST-CHECK: Cleared {_ac_cleared} author-consensus series==title")
+
         for record in self.records:
             if not record.proposed_series:
                 continue
@@ -1557,14 +1664,34 @@ class RegenCSVService:
         for record in self.records:
             if not record.proposed_series or not record.metadata_series:
                 continue
-            if 'filename' not in record.series_source:
-                continue
             ps_l = _nd(record.proposed_series.lower().replace('ё', 'е').strip())
             ms_l = _nd(record.metadata_series.lower().replace('ё', 'е').strip())
-            if len(ps_l) >= 3 and ms_l.startswith(ps_l) and len(ms_l) > len(ps_l):
-                extra = ms_l[len(ps_l):].strip()
-                if extra and (extra[0].isalnum() or extra[0] in '-–—'):
-                    record.proposed_series = _nd(record.metadata_series.strip())
+            # Rule 1: proposed is a truncated prefix of metadata (filename sources only)
+            if 'filename' in record.series_source:
+                if len(ps_l) >= 3 and ms_l.startswith(ps_l) and len(ms_l) > len(ps_l):
+                    extra = ms_l[len(ps_l):].strip()
+                    if extra and (extra[0].isalnum() or extra[0] in '-–—:'):
+                        # Preserve uppercase prefix from proposed (e.g. "РОС") if all-caps
+                        ps_orig = record.proposed_series.strip()
+                        ms_orig = _nd(record.metadata_series.strip())
+                        if ps_orig == ps_orig.upper() and ps_orig.isalpha():
+                            suffix = ms_orig[len(ps_l):]
+                            expanded = ps_orig + suffix
+                        else:
+                            expanded = ms_orig
+                        record.proposed_series = expanded
+                        record.series_source = record.series_source + '+meta_expanded'
+                        _count += 1
+                        continue
+            # Rule 2: meta = "PREFIX: SUBSERIES", proposed = "SUBSERIES"
+            # Build "PREFIX\SUBSERIES" hierarchy (backslash = series separator in this system)
+            # Applies to any source (filename, folder_dataset) since match is exact
+            if ':' in record.metadata_series and len(ps_l) >= 3:
+                colon_idx = ms_l.index(':')
+                prefix_raw = record.metadata_series[:colon_idx].strip()
+                subseries_l = ms_l[colon_idx + 1:].strip().lstrip('- ')
+                if subseries_l and subseries_l == ps_l and prefix_raw:
+                    record.proposed_series = prefix_raw + '\\' + record.proposed_series
                     record.series_source = record.series_source + '+meta_expanded'
                     _count += 1
         if _count:
@@ -1604,6 +1731,9 @@ class RegenCSVService:
                 # Папочный источник авторитетен — пользователь сам создал структуру
                 if record.series_source in ('folder_dataset', 'folder_hierarchy',
                                             'folder_meta_consensus', 'folder_metadata_confirmed'):
+                    continue
+                # Записи, расширенные через метаданные — надёжны, не сбрасываем
+                if 'meta_expanded' in record.series_source:
                     continue
                 ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
                 if ps_norm == folder_name_norm or folder_name_norm.startswith(ps_norm) or ps_norm.startswith(folder_name_norm) or (len(ps_norm) >= 5 and ps_norm in folder_name_norm):
