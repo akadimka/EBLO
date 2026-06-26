@@ -199,8 +199,19 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
             )
 
         if force_author or folder_name in conversions:
-            if not author:
-                author = _re.sub(r'\s*\(.*?\)', '', folder_name).strip()
+            if force_author:
+                # Для force_author: всегда стрипим скобки ПЕРЕД парсингом
+                clean = _re.sub(r'\s*\(.*?\)', '', folder_name).strip()
+                author = parse_author_from_folder_name(
+                    clean, male_names=male_names, female_names=female_names)
+                # Если парсер вернул пусто и есть дефис — дефис как разделитель имени
+                if not author and '-' in clean:
+                    author = parse_author_from_folder_name(
+                        clean.replace('-', ' '),
+                        male_names=male_names, female_names=female_names)
+                # Последний fallback — использовать clean-имя как есть
+                if not author:
+                    author = clean
             if author:
                 cache[str(folder_abs)] = (author, 'high')
         elif author and _has_valid_name(author):

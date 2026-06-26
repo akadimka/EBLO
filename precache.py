@@ -246,9 +246,19 @@ class Precache:
             )
 
             if is_author:
-                # Если force_author и parse не дал имя — используем имя папки verbatim
-                # (очищаем скобочный комментарий, напр. "Бауэр-Николай (Лиходей)" → "Бауэр-Николай")
-                if not author_name:
+                if force_author:
+                    # Для force_author: всегда стрипим скобки ПЕРЕД парсингом
+                    import re as _re
+                    clean = _re.sub(r'\s*\(.*?\)', '', folder_name).strip()
+                    author_name = parse_author_from_folder_name(
+                        clean, male_names=self.male_names, female_names=self.female_names)
+                    if not author_name and '-' in clean:
+                        author_name = parse_author_from_folder_name(
+                            clean.replace('-', ' '),
+                            male_names=self.male_names, female_names=self.female_names)
+                    if not author_name:
+                        author_name = clean
+                elif not author_name:
                     import re as _re
                     author_name = _re.sub(r'\s*\(.*?\)', '', folder_name).strip()
                 if depth > 0:
