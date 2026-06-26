@@ -153,7 +153,7 @@ class Pass6Abbreviations:
                 continue
 
             original = record.proposed_author
-            
+
             # Check for multi-author case with both separators ('; ' from folder, ', ' from filename)
             if '; ' in record.proposed_author:
                 authors = record.proposed_author.split('; ')
@@ -164,8 +164,24 @@ class Pass6Abbreviations:
                 expanded_authors = [self._expand_author(a, authors_map) for a in authors]
                 record.proposed_author = ', '.join(expanded_authors)
             else:
-                record.proposed_author = self._expand_author(original, authors_map)
-            
+                candidate = self._expand_author(original, authors_map)
+                # Don't upgrade via authors_map if expansion adds a first name that
+                # contradicts the record's own metadata (different person with same surname).
+                # E.g. folder "Скиф" → authors_map has "Скиф Анна" (different author).
+                if candidate != original and len(original.split()) == 1:
+                    meta = (getattr(record, 'metadata_authors', '') or '').lower()
+                    if meta:
+                        # Verify the new first name is in metadata
+                        new_words = [w.lower() for w in candidate.split()[1:] if len(w) > 2]
+                        if new_words and not any(w in meta for w in new_words):
+                            candidate = original  # metadata contradicts expansion
+                    else:
+                        # No metadata — only expand if source is not folder_dataset
+                        # (folder name is authoritative; without metadata we can't verify)
+                        if record.author_source == 'folder_dataset':
+                            candidate = original
+                record.proposed_author = candidate
+
             if record.proposed_author != original:
                 expanded_count += 1
         
