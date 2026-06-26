@@ -841,6 +841,7 @@ class RegenCSVService:
             self._postcheck_filename_prefix_pattern()
             self._postcheck_strip_metadata_coauthors_not_in_filename()
             self._postcheck_series_folder_blacklist()
+            self._postcheck_strip_leading_number()  # повторно, после backslash-стрипинга
             self._clear_series_for_compilations()
             self.logger.log("[OK] Series cleared for compilations")
 
@@ -986,9 +987,22 @@ class RegenCSVService:
             # Обрезать служебный префикс папки
             for prefix in prefixes:
                 if s.startswith(prefix):
-                    record.proposed_series = s[len(prefix):]
+                    remainder = s[len(prefix):]
+                    record.proposed_series = remainder
+                    s = remainder
                     stripped += 1
                     break
+
+            # Generic: если в серии остался '\', берём только часть после последнего '\'
+            if '\\' in record.proposed_series:
+                record.proposed_series = record.proposed_series.rsplit('\\', 1)[-1].strip()
+                stripped += 1
+
+            # Повторно проверяем blacklist после стрипинга
+            if record.proposed_series and record.proposed_series.lower() in blacklist:
+                record.proposed_series = ''
+                record.series_source = ''
+                cleared += 1
 
         if cleared:
             print(f"[POST-CHECK] Cleared {cleared} organizational folder series (blacklist)")
