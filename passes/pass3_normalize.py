@@ -413,6 +413,8 @@ class Pass3Normalize:
                     words_lower = [w.lower() for w in words]
                     if any(w in _SURNAME_PARTICLES for w in words_lower):
                         pass  # compound surname — keep all words as-is
+                    elif '(' in auth:
+                        pass  # pseudonym suffix "(Real Name)" — keep as-is, truncation breaks brackets
                     else:
                         # Skip truncation for co-author expressions like "Аркадий и Борис Стругацкие"
                         # where "и" is a connector word, not part of a single person's name.
