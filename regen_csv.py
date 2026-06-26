@@ -843,6 +843,7 @@ class RegenCSVService:
             self._postcheck_series_folder_blacklist()
             self._postcheck_strip_leading_number()  # повторно, после backslash-стрипинга
             self._postcheck_fill_empty_authors()
+            self._postcheck_strip_digit_prefix_author()
             self._clear_series_for_compilations()
             self.logger.log("[OK] Series cleared for compilations")
 
@@ -902,6 +903,22 @@ class RegenCSVService:
                 if rec.proposed_author:
                     rec.proposed_author = _ILLEGAL_AUTHOR.sub('', rec.proposed_author).strip()
                     rec.proposed_author = _strip_trailing_dot(rec.proposed_author)
+                    # Strip dot-as-word-separator: "Конторщиков. Виталий" → "Конторщиков Виталий"
+                    # Applies to metadata-sourced authors where trailing dot survived reordering.
+                    # Rule: word ≥3 chars, ending in lowercase, no internal dots → separator dot.
+                    def _strip_dot_sep(s: str) -> str:
+                        def _r(m):
+                            w = m.group(1)
+                            if len(w) >= 3 and w[-1].islower() and '.' not in w:
+                                return w + ' ' + m.group(2)
+                            return m.group(0)
+                        return re.sub(r'(\S+)\. ([А-ЯЁA-Z])', _r, s)
+                    rec.proposed_author = _strip_dot_sep(rec.proposed_author)
+                    # Balance unmatched opening brackets from broken metadata
+                    _open = rec.proposed_author.count('(')
+                    _close = rec.proposed_author.count(')')
+                    if _open > _close:
+                        rec.proposed_author += ')' * (_open - _close)
             self.logger.log("[OK] Final sanitization applied")
             
             # ===== Save CSV =====
@@ -1089,6 +1106,43 @@ class RegenCSVService:
         if filled:
             print(f"[POST-CHECK] Filled {filled} empty author records (fallback)")
             self.logger.log(f"[OK] POST-CHECK: Filled {filled} empty authors")
+
+    def _postcheck_strip_digit_prefix_author(self) -> None:
+        """Если proposed_author начинается с цифрового префикса (NN. или NN.Слово),
+        откидываем префикс и сверяем кандидата с metadata_authors.
+        Фиксируем только при подтверждении метой — мета используется для проверки, не замены.
+        """
+        _digit_re = re.compile(r'^\d+\.?\s*', re.UNICODE)
+        _count = 0
+
+        def _words(s: str):
+            """Множество слов из строки (lower, без пунктуации)."""
+            return set(re.sub(r'[^а-яёa-z]', ' ', s.lower().replace('ё', 'е')).split())
+
+        for record in self.records:
+            a = record.proposed_author
+            if not a or not _digit_re.match(a):
+                continue
+            candidate = _digit_re.sub('', a).strip()
+            if not candidate:
+                continue
+            meta = record.metadata_authors or ''
+            if not meta:
+                continue
+            # Проверяем пересечение слов кандидата и меты
+            cand_words = _words(candidate)
+            meta_words = _words(meta)
+            if not cand_words:
+                continue
+            # Считаем подтверждённым если хотя бы половина слов кандидата есть в мете
+            overlap = cand_words & meta_words
+            if len(overlap) >= max(1, len(cand_words) // 2):
+                record.proposed_author = candidate
+                _count += 1
+
+        if _count:
+            print(f"[POST-CHECK] Stripped digit prefix from {_count} author values (confirmed by metadata)")
+            self.logger.log(f"[OK] POST-CHECK: Stripped digit prefix from {_count} author values")
 
     def _postcheck_strip_leading_number(self) -> None:
         """Убирает ведущий «N. » числовой префикс из названия серии (артефакт имени файла)."""

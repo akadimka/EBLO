@@ -65,6 +65,23 @@ def parse_author_from_folder_name(folder_name: str,
         if name_lower.startswith(word.lower()):
             return ""  # This is a category, not an author
     
+    # ==================== PRE-PASS: Strip dot-as-word-separator ====================
+    # Folders like "Бах. Ричард" use ". " as a separator between surname and first name.
+    # Replace ". " with " " when the word before the dot:
+    #   - is >= 3 chars long (not a single-letter initial)
+    #   - ends in a lowercase letter (not an abbreviation like "Дж." or "МИФ.")
+    #   - contains no internal dots (not "Дж.Дж." or "С.Дж.")
+    import re as _re_pre
+    def _strip_dot_separator(s: str) -> str:
+        def _repl(m: '_re_pre.Match') -> str:
+            word = m.group(1)
+            nxt = m.group(2)
+            if len(word) >= 3 and word[-1].islower() and '.' not in word:
+                return word + ' ' + nxt
+            return m.group(0)
+        return _re_pre.sub(r'(\S+)\. ([А-ЯЁA-Z])', _repl, s)
+    name = _strip_dot_separator(name)
+
     # ==================== PASS0: Structural Analysis ====================
     struct_info = analyze_structure(name)
     
