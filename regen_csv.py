@@ -842,6 +842,7 @@ class RegenCSVService:
             self._postcheck_strip_metadata_coauthors_not_in_filename()
             self._postcheck_series_folder_blacklist()
             self._postcheck_strip_leading_number()  # повторно, после backslash-стрипинга
+            self._postcheck_fill_empty_authors()
             self._clear_series_for_compilations()
             self.logger.log("[OK] Series cleared for compilations")
 
@@ -1060,6 +1061,34 @@ class RegenCSVService:
         if _count:
             print(f"[POST-CHECK] Rescued {_count} series from metadata after series==author cleanup")
             self.logger.log(f"[OK] POST-CHECK: Rescued {_count} series from metadata")
+
+    def _postcheck_fill_empty_authors(self) -> None:
+        """Заполняет записи с пустым автором:
+        - имя файла содержит (Автор) → извлечь из скобок
+        - имя файла начинается с 'Сборник' → 'Сборник'
+        - иначе → 'Неизвестный автор'
+        """
+        _paren_re = re.compile(r'\(([^)]+)\)\s*(?:\.fb2)?$', re.IGNORECASE)
+        filled = 0
+        for record in self.records:
+            if record.proposed_author:
+                continue
+            filename = Path(record.file_path).stem  # без расширения
+            # Попытка извлечь автора из скобок в имени файла
+            m = _paren_re.search(filename)
+            if m:
+                record.proposed_author = m.group(1).strip()
+                record.author_source = 'filename_parens'
+            elif filename.startswith('Сборник'):
+                record.proposed_author = 'Сборник'
+                record.author_source = 'fallback'
+            else:
+                record.proposed_author = 'Неизвестный автор'
+                record.author_source = 'fallback'
+            filled += 1
+        if filled:
+            print(f"[POST-CHECK] Filled {filled} empty author records (fallback)")
+            self.logger.log(f"[OK] POST-CHECK: Filled {filled} empty authors")
 
     def _postcheck_strip_leading_number(self) -> None:
         """Убирает ведущий «N. » числовой префикс из названия серии (артефакт имени файла)."""
