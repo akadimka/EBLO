@@ -457,6 +457,16 @@ class SettingsManager:
             return []
         return list(lst)
 
+    def get_series_folder_blacklist(self):
+        """Возвращает список организационных значений серий для очистки."""
+        lst = self.settings.get('series_folder_blacklist')
+        return list(lst) if lst else []
+
+    def get_series_folder_prefixes_to_strip(self):
+        """Возвращает список префиксов папок для обрезки из значений серий."""
+        lst = self.settings.get('series_folder_prefixes_to_strip')
+        return list(lst) if lst else []
+
     def set_service_words(self, lst):
         """Устанавливает список служебных слов и сохраняет конфиг.
         Removes duplicates (case-insensitive) while preserving order."""

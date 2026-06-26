@@ -840,6 +840,7 @@ class RegenCSVService:
             self._postcheck_enrich_folder_hierarchy()
             self._postcheck_filename_prefix_pattern()
             self._postcheck_strip_metadata_coauthors_not_in_filename()
+            self._postcheck_series_folder_blacklist()
             self._clear_series_for_compilations()
             self.logger.log("[OK] Series cleared for compilations")
 
@@ -953,6 +954,48 @@ class RegenCSVService:
         if _count:
             print(f"[POST-CHECK] Stripped {_count} metadata co-authors absent from filename")
             self.logger.log(f"[OK] POST-CHECK: Stripped {_count} metadata co-authors not in filename")
+
+    def _postcheck_series_folder_blacklist(self) -> None:
+        """Очищает организационные значения серий и обрезает служебные префиксы папок.
+
+        Читает из конфига:
+        - series_folder_blacklist: точные значения для полной очистки серии
+        - series_folder_prefixes_to_strip: префиксы для обрезки (оставляем остаток)
+        """
+        blacklist = [s.lower() for s in (self.settings.get_series_folder_blacklist() or [])]
+        prefixes = self.settings.get_series_folder_prefixes_to_strip() or []
+
+        if not blacklist and not prefixes:
+            return
+
+        cleared = 0
+        stripped = 0
+        for record in self.records:
+            if not record.proposed_series:
+                continue
+            s = record.proposed_series
+            s_lower = s.lower()
+
+            # Точное совпадение с blacklist → очистить серию
+            if s_lower in blacklist:
+                record.proposed_series = ''
+                record.series_source = ''
+                cleared += 1
+                continue
+
+            # Обрезать служебный префикс папки
+            for prefix in prefixes:
+                if s.startswith(prefix):
+                    record.proposed_series = s[len(prefix):]
+                    stripped += 1
+                    break
+
+        if cleared:
+            print(f"[POST-CHECK] Cleared {cleared} organizational folder series (blacklist)")
+            self.logger.log(f"[OK] POST-CHECK: Cleared {cleared} organizational series from blacklist")
+        if stripped:
+            print(f"[POST-CHECK] Stripped folder prefix from {stripped} series values")
+            self.logger.log(f"[OK] POST-CHECK: Stripped folder prefix from {stripped} series values")
 
     def _clear_series_for_compilations(self) -> None:
         """Clear series for compilation/collection records.
