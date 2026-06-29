@@ -1220,7 +1220,9 @@ class RegenCSVService:
 
             # Дедушка не должен совпадать с proposed_author (авторский псевдоним/логин)
             if record.proposed_author:
-                gp_norm = gp_name.lower().replace('ё', 'е').strip()
+                # Стрипим скобочный суффикс до сравнения: "Дэай Свок (Day Souok)" → "Дэай Свок"
+                gp_name_stripped = re.sub(r'\s*\([^)]*\)\s*$', '', gp_name).strip()
+                gp_norm = gp_name_stripped.lower().replace('ё', 'е').strip()
                 auth_norm = record.proposed_author.lower().replace('ё', 'е').strip()
                 # Проверяем совпадение по любому токену фамилии
                 auth_parts = auth_norm.split()
