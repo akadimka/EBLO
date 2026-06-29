@@ -1218,15 +1218,39 @@ class RegenCSVService:
             if gp_abs in _author_cache_lower:
                 continue
 
+            # Стрипим скобочный суффикс один раз для всех проверок ниже
+            gp_name_stripped = re.sub(r'\s*\([^)]*\)\s*$', '', gp_name).strip()
+
             # Дедушка не должен совпадать с proposed_author (авторский псевдоним/логин)
             if record.proposed_author:
-                # Стрипим скобочный суффикс до сравнения: "Дэай Свок (Day Souok)" → "Дэай Свок"
-                gp_name_stripped = re.sub(r'\s*\([^)]*\)\s*$', '', gp_name).strip()
                 gp_norm = gp_name_stripped.lower().replace('ё', 'е').strip()
                 auth_norm = record.proposed_author.lower().replace('ё', 'е').strip()
-                # Проверяем совпадение по любому токену фамилии
                 auth_parts = auth_norm.split()
                 if gp_norm == auth_norm or (auth_parts and auth_parts[0] in gp_norm and len(gp_norm) <= len(auth_norm) + 5):
+                    continue
+                # Псевдоним в скобках: "Дубина-Родион (Дарки)" → parenthetical == proposed_author
+                gp_parens = re.findall(r'\(([^)]+)\)', gp_name)
+                if any(p.lower().replace('ё', 'е').strip() == auth_norm for p in gp_parens):
+                    continue
+
+            # Слова metadata_authors совпадают со словами дедушки (sorted word set)
+            # Ловит: "Дубина-Родион" vs metadata "Родион Дубина"
+            if record.metadata_authors and record.metadata_authors != '[unknown]':
+                _first_meta = record.metadata_authors.split(';')[0].split(',')[0].strip()
+                if _first_meta:
+                    def _mw(s):
+                        return sorted(w.strip('.,;').lower().replace('ё', 'е')
+                                      for w in s.replace('-', ' ').split() if len(w) > 1)
+                    if _mw(gp_name_stripped) == _mw(_first_meta):
+                        continue
+
+            # Дедушка выглядит как "Фамилия-Имя": один дефис, оба слова с заглавной буквы
+            # Ловит: "Дубовиков-Виталий" когда метаданные содержат неправильного автора
+            if '-' in gp_name_stripped and ' ' not in gp_name_stripped:
+                _gp_parts = gp_name_stripped.split('-')
+                if (len(_gp_parts) == 2
+                        and all(p and p[0].isupper() for p in _gp_parts)
+                        and all(p[1:].islower() or not p[1:] for p in _gp_parts)):
                     continue
 
             # Дедушка не должен быть коллекционным keyword
