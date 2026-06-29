@@ -70,6 +70,13 @@ class Pass3Normalize:
             if record.proposed_author.lower() in _pinned_authors:
                 continue
 
+            # Apply conversions by KEY — catches metadata-sourced authors that were
+            # never processed by folder-cache lookup (e.g. "Т и Д Зимины" → "Зимины Т. и Д.").
+            if record.proposed_author in _conversions:
+                record.proposed_author = _conversions[record.proposed_author]
+                normalized_count += 1
+                continue
+
             # Дедупликация авторов: "Гаусс Максим, Гаусс Максим" → "Гаусс Максим"
             sep = '; ' if '; ' in record.proposed_author else ', '
             _parts = [a.strip() for a in record.proposed_author.replace(';', ',').split(',')]
