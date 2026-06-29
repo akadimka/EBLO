@@ -261,6 +261,21 @@ def apply_folder_dataset(records, author_cache: Dict, work_dir: Path, folder_par
             rec.author_source   = 'folder_dataset'
             rec.needs_filename_fallback = False
             applied += 1
+        elif rec.metadata_authors and rec.metadata_authors != '[unknown]':
+            # Fallback: folder cache missed — try bottom-up match against metadata_authors.
+            # Handles hyphen-named folders (Фамилия-Имя) and genre-subtree exclusions.
+            from passes.pass1_read_files import _find_author_series_by_metadata
+            file_abs = work_dir / rec.file_path
+            author_fb, series_fb = _find_author_series_by_metadata(
+                file_abs, work_dir, rec.metadata_authors, folder_parse_limit)
+            if author_fb:
+                rec.proposed_author = author_fb
+                rec.author_source   = 'folder_dataset'
+                rec.needs_filename_fallback = False
+                if series_fb:
+                    rec.proposed_series = series_fb
+                    rec.series_source   = 'folder_dataset'
+                applied += 1
 
     print(f'[PASS1-offline] folder_dataset применён к {applied} из {len(records)} записей')
 

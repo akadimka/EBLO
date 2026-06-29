@@ -68,6 +68,20 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
         else:
             author, author_source = "", ""
 
+        # Fallback: if folder cache missed, try bottom-up walk matching folder names
+        # against this file's metadata_authors (handles hyphen-named folders, reversed
+        # word order, folders inside genre-prefix subtrees skipped by Precache).
+        meta_series_from_folder = ""
+        if not author and meta.get('authors') and meta['authors'] != '[unknown]':
+            author_fb, series_fb = _find_author_series_by_metadata(
+                fb2_file, work_dir, meta['authors'],
+                folder_parse_limit
+            )
+            if author_fb:
+                author = author_fb
+                author_source = 'folder_dataset'
+                meta_series_from_folder = series_fb
+
         # Create record
         record = BookRecord(
             file_path=str(fb2_file.relative_to(work_dir)),
@@ -77,8 +91,8 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
             author_source=author_source or "",
             metadata_series=meta['series'] or "",
             series_number=meta.get('series_number', ''),
-            proposed_series="",
-            series_source="",
+            proposed_series=meta_series_from_folder,
+            series_source='folder_dataset' if meta_series_from_folder else "",
             metadata_genre=meta['genre'] or "",
             needs_filename_fallback=(author == ""),
             content_hash=content_hash,
@@ -89,6 +103,59 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
     except Exception as e:
         print(f"[WORKER ERROR] {fb2_file_path_str}: {e}")
         return None
+
+
+def _find_author_series_by_metadata(
+    fb2_file: Path, work_dir: Path,
+    metadata_authors: str, folder_parse_limit: int
+) -> Tuple[str, str]:
+    """Bottom-up walk: find author folder by matching folder name against metadata_authors.
+
+    Returns (author_name, series_name) where:
+      - author_name: normalized author from the matched folder
+      - series_name: name of the folder one level closer to the file (= the series)
+
+    Handles hyphen-as-separator (e.g. "Евгеничев-Дмитрий" vs "Дмитрий Евгеничев")
+    and reversed word order by comparing sorted word sets.
+    """
+    if not metadata_authors or metadata_authors == '[unknown]':
+        return '', ''
+
+    def _norm_words(s: str):
+        return sorted(
+            w.strip('.,;').lower().replace('ё', 'е')
+            for w in s.replace('-', ' ').split()
+            if len(w) > 1
+        )
+
+    # Take first author only (before semicolons/commas used for multiple authors)
+    first_author = metadata_authors.split(';')[0].split(',')[0].strip()
+    if not first_author:
+        return '', ''
+    meta_words = _norm_words(first_author)
+    if not meta_words:
+        return '', ''
+
+    current = fb2_file.parent
+    child: Optional[Path] = None
+    levels = 0
+
+    while current != work_dir and levels < folder_parse_limit:
+        if current.name.lower() in FILE_EXTENSION_FOLDER_NAMES:
+            child = current
+            current = current.parent
+            continue
+        folder_words = _norm_words(current.name)
+        if folder_words == meta_words:
+            series_name = child.name if child else ''
+            # Normalize folder name: replace hyphen-as-separator so "Фамилия-Имя" → "Фамилия Имя"
+            folder_normalized = current.name.replace('-', ' ').strip() if '-' in current.name else current.name
+            return folder_normalized, series_name
+        child = current
+        current = current.parent
+        levels += 1
+
+    return '', ''
 
 
 def _get_author_for_file_worker(fb2_file: Path, work_dir: Path,
