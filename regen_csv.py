@@ -1418,6 +1418,13 @@ class RegenCSVService:
                 if s_norm.startswith('от автор'):
                     is_conflict = True
 
+            # Тип Е: серия-через-дефис совпадает с автором-через-пробел.
+            # E.g. proposed_series="Емельянов-Антон", proposed_author="Емельянов Антон" —
+            # авторская папка Фамилия-Имя пропущена кэшем и попала в серию.
+            if not is_conflict and '-' in record.proposed_series and record.series_source == 'folder_dataset':
+                if s_norm.replace('-', ' ').strip() == a_norm:
+                    is_conflict = True
+
             if is_conflict:
                 # Если серия уже имеет иерархию "Автор\Серия" — автор-компонент лишний,
                 # но настоящая серия (часть после \) валидна — берём её, не metadata.
