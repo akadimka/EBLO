@@ -304,6 +304,7 @@ class Pass3Normalize:
                 continue
             if record.proposed_author in ("Сборник", "Соавторство", "[unknown]"):
                 continue
+            _ROMAN_CHARS = frozenset('IVXLCDM')
             def _fix_word(w):
                 if not w:
                     return w
@@ -311,6 +312,9 @@ class Pass3Normalize:
                     return w
                 # Слово целиком в верхнем регистре и не аббревиатура (нет точек, длиннее 1 символа)
                 if w == w.upper() and len(w) > 1 and '.' not in w:
+                    # Римские цифры (I, V, X, L, C, D, M) оставляем в верхнем регистре
+                    if all(c in _ROMAN_CHARS for c in w):
+                        return w
                     return w[0] + w[1:].lower()
                 return w[0].upper() + w[1:]
             capitalized = ' '.join(_fix_word(w) for w in record.proposed_author.split(' '))
