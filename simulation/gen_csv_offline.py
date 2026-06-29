@@ -222,7 +222,7 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
     return cache, male_names, female_names
 
 
-def apply_folder_dataset(records, author_cache: Dict, work_dir: Path, folder_parse_limit: int):
+def apply_folder_dataset(records, author_cache: Dict, work_dir: Path, folder_parse_limit: int, conversions: Dict = None):
     """
     Применяет author_folder_cache к записям — точно так же как Pass1 в реальном пайплайне.
     Идёт вверх по иерархии папок (до folder_parse_limit уровней).
@@ -270,6 +270,9 @@ def apply_folder_dataset(records, author_cache: Dict, work_dir: Path, folder_par
             author_fb, series_fb = _find_author_series_by_metadata(
                 file_abs, work_dir, rec.metadata_authors, folder_parse_limit)
             if author_fb:
+                # Apply author_surname_conversions (e.g. "Стругацкие Аркадий и Борис" → "Стругацкий Аркадий, Стругацкий Борис")
+                if conversions:
+                    author_fb = conversions.get(author_fb, author_fb)
                 rec.proposed_author = author_fb
                 rec.author_source   = 'folder_dataset'
                 rec.needs_filename_fallback = False
@@ -322,7 +325,8 @@ def main():
     svc.author_folder_cache = author_cache
 
     # ── Применяем folder_dataset к записям (то, что делал Pass1 при чтении файлов) ──
-    apply_folder_dataset(records, author_cache, work_dir, svc.folder_parse_limit)
+    _conversions = svc.settings.get_author_surname_conversions() or {}
+    apply_folder_dataset(records, author_cache, work_dir, svc.folder_parse_limit, conversions=_conversions)
 
     # ── Monkey-patch: Pass1 возвращает наши записи ───────────────────────────
     import passes.pass1_read_files as _p1_mod

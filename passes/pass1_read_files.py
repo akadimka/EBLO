@@ -78,6 +78,10 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
                 folder_parse_limit
             )
             if author_fb:
+                # Apply author_surname_conversions so folder-name variants like
+                # "Стругацкие Аркадий и Борис" map to "Стругацкий Аркадий, Стругацкий Борис"
+                _convs = settings_dict.get('author_surname_conversions', {}) if settings_dict else {}
+                author_fb = _convs.get(author_fb, author_fb)
                 author = author_fb
                 author_source = 'folder_dataset'
                 meta_series_from_folder = series_fb
