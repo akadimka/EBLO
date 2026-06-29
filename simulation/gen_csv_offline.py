@@ -59,7 +59,8 @@ def load_records_from_db(db_path: Path) -> Tuple[List, str]:
         authors    = (meta.get('authors') or '').strip()
         series     = (meta.get('series') or '').strip()
         title      = (meta.get('title') or '').strip()
-        genre      = (meta.get('genre') or '').strip()
+        _genre_raw = meta.get('genre') or ''
+        genre      = '' if _genre_raw == 'None' else _genre_raw.strip()
         snum       = str(meta.get('series_number') or '').strip()
 
         # Относительный путь для folder-parsing логики

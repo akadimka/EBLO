@@ -1880,7 +1880,7 @@ class RegenCSVService:
                     record.series_source,
                     record.series_number,
                     record.file_title,
-                    record.metadata_genre,
+                    record.metadata_genre if record.metadata_genre and record.metadata_genre != 'None' else '',
                     'DELETE' if getattr(record, 'delete_flag', False) else ''
                 ])
 

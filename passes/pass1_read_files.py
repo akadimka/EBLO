@@ -93,7 +93,7 @@ def process_file_worker(fb2_file_path_str: str, work_dir_str: str,
             series_number=meta.get('series_number', ''),
             proposed_series=meta_series_from_folder,
             series_source='folder_dataset' if meta_series_from_folder else "",
-            metadata_genre=meta['genre'] or "",
+            metadata_genre=meta['genre'] if meta.get('genre') and meta['genre'] != 'None' else "",
             needs_filename_fallback=(author == ""),
             content_hash=content_hash,
         )
