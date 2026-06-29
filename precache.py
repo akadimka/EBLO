@@ -78,7 +78,7 @@ class Precache:
                 return True
         
         return False
-    
+
     def execute(self) -> Dict[Path, Tuple[str, str]]:
         """Execute PRECACHE: Build author folder cache.
         
@@ -284,6 +284,7 @@ class Precache:
             elif author_name and depth > 0 and self._contains_valid_name(author_name):
                 result = (author_name, "low")
                 self.author_folder_cache[folder] = result
+
 
             # Recursively scan subfolders (не авторская папка — ищем глубже)
             # Если эта папка — коллекция, её дочерние папки принудительно авторские

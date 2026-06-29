@@ -1403,6 +1403,19 @@ class RegenCSVService:
                         # source остаётся folder_dataset
                         _series_eq_author_cleared += 1
                         continue
+                # Дефисный автор: серия совпадает с автором потому что авторская папка
+                # пропущена кэшем (напр. "Фамилия-Имя"). Реальная серия — прямой родительский
+                # каталог файла, если он отличается от текущей proposed_series.
+                if '-' in record.proposed_series and record.series_source == 'folder_dataset':
+                    from pathlib import Path as _P
+                    _fp_parent = _P(record.file_path).parent.name
+                    _ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
+                    _pp_norm = _fp_parent.lower().replace('ё', 'е').strip()
+                    if _fp_parent and _pp_norm != _ps_norm and not self._contains_blacklist_word_regen(_fp_parent):
+                        record.proposed_series = _fp_parent
+                        # source остаётся folder_dataset
+                        _series_eq_author_cleared += 1
+                        continue
                 # Проверяем metadata_series через blacklist перед заменой
                 _meta_replacement = record.metadata_series or ''
                 if _meta_replacement and self._contains_blacklist_word_regen(_meta_replacement):
