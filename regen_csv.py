@@ -1393,6 +1393,16 @@ class RegenCSVService:
                     is_conflict = True
 
             if is_conflict:
+                # Если серия уже имеет иерархию "Автор\Серия" — автор-компонент лишний,
+                # но настоящая серия (часть после \) валидна — берём её, не metadata.
+                if '\\' in record.proposed_series:
+                    parts = record.proposed_series.split('\\', 1)
+                    tail = parts[1].strip()
+                    if tail:
+                        record.proposed_series = tail
+                        # source остаётся folder_dataset
+                        _series_eq_author_cleared += 1
+                        continue
                 # Проверяем metadata_series через blacklist перед заменой
                 _meta_replacement = record.metadata_series or ''
                 if _meta_replacement and self._contains_blacklist_word_regen(_meta_replacement):
@@ -1663,6 +1673,8 @@ class RegenCSVService:
         _count = 0
         for record in self.records:
             if not record.proposed_series or not record.metadata_series:
+                continue
+            if 'meta_expanded' in record.series_source:
                 continue
             ps_l = _nd(record.proposed_series.lower().replace('ё', 'е').strip())
             ms_l = _nd(record.metadata_series.lower().replace('ё', 'е').strip())
