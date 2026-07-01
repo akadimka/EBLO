@@ -175,7 +175,7 @@ class Pass2Filename:
                 continue
             
             author_lower = author.lower().strip()
-            
+
             # Cache the full name
             self.author_cache[author_lower] = author
             
@@ -311,7 +311,12 @@ class Pass2Filename:
         # cache hits when the extracted form is a single word.
         cache_hit = self.author_cache.get(extracted_lower)
         is_single_word = len(extracted_author.split()) == 1
-        if cache_hit and not is_single_word:
+        # Don't use cache at all when extracted contains " и " (joined-names expression).
+        # The JOINED-NAMES guard in execute() needs the original multi-author form;
+        # any cache hit here would return a mangled single-author canonical, bypassing it.
+        import re as _re_ji
+        _is_joined_names = bool(_re_ji.search(r'\s+[иИ]\s+', extracted_author))
+        if cache_hit and not is_single_word and not _is_joined_names:
             return cache_hit
         # For single-word: fall through to FB2 check; use cache only as final fallback
 
@@ -430,7 +435,8 @@ class Pass2Filename:
         # FB2 lookup found nothing — use cross-file cache hit if available (single-word fallback)
         # Don't use co-author expressions ("X и Y Surname") as cache expansions for single-word
         # extractions — Pass 3 multi-author restoration handles these correctly.
-        if cache_hit:
+        # Also skip cache when extracted itself is a joined-names expression (handled by JOINED-NAMES guard).
+        if cache_hit and not _is_joined_names:
             _cache_words = {w.lower() for w in cache_hit.split()}
             if is_single_word and 'и' in _cache_words:
                 pass  # skip — co-author expression; let Pass 3 restore
