@@ -948,6 +948,14 @@ class Pass2Filename:
                             ]
                             if any(w not in _meta for w in _new_non_surname):
                                 surname_cached = None
+                        # Don't upgrade when current author already has a first name that
+                        # differs from the cached first name — it's a different person.
+                        # E.g. "Михайлов Дем" must not be upgraded to "Михайлов Руслан Алексеевич".
+                        if surname_cached and len(author_words) >= 2 and len(surname_cached.split()) >= 2:
+                            _cur_fn = author_words[1].lower().replace('ё', 'е').rstrip('.')
+                            _cached_fn = surname_cached.split()[1].lower().replace('ё', 'е').rstrip('.')
+                            if len(_cur_fn) > 2 and _cur_fn != _cached_fn and not _cached_fn.startswith(_cur_fn):
+                                surname_cached = None
                         if surname_cached:
                             cached = surname_cached
 
