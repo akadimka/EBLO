@@ -1154,6 +1154,13 @@ class Pass2Filename:
         cleaned = re.sub(r'\s*\(перевод[^)]*\)\s*$', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*\(пер\)\s*$', '', cleaned, flags=re.IGNORECASE)
 
+        # Strip pseudonym/note in parens that appears BEFORE the first ". " separator.
+        # "Фамилия Имя (Псевдоним). Название" → "Фамилия Имя. Название"
+        # Without this, the parens create an extra block that breaks 2-block patterns.
+        _m = re.match(r'^(.+?)\s*\([^)]+\)(\s*\..+)', cleaned)
+        if _m:
+            cleaned = _m.group(1).strip() + _m.group(2)
+
         # Normalize guillemet quotes «...» → "..." so block scorer handles them correctly.
         # «Z» scores 0.0 in block matcher; "Z" scores correctly.
         cleaned = cleaned.replace('«', '"').replace('»', '"')
