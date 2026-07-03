@@ -281,6 +281,30 @@ def apply_folder_dataset(records, author_cache: Dict, work_dir: Path, folder_par
                     rec.series_source   = 'folder_dataset'
                 applied += 1
 
+    # Grandparent propagation: if sibling subfolders under the same grandparent
+    # all got folder_dataset equal to the grandparent folder name, apply it to
+    # unfilled records too (handles files with missing/empty metadata_authors).
+    from collections import defaultdict as _defdict
+    _gp_map: Dict = _defdict(list)
+    for rec in records:
+        _gp_map[str((work_dir / rec.file_path).parent.parent)].append(rec)
+    for gp_str, grp in _gp_map.items():
+        gp_name = Path(gp_str).name
+        if not gp_name:
+            continue
+        _filled = [r for r in grp
+                   if r.author_source == 'folder_dataset' and r.proposed_author
+                   and r.proposed_author.lower() == gp_name.lower()]
+        _unfilled = [r for r in grp
+                     if r.author_source != 'folder_dataset' or not r.proposed_author]
+        if _filled and _unfilled:
+            _author = _filled[0].proposed_author
+            for r in _unfilled:
+                r.proposed_author = _author
+                r.author_source = 'folder_dataset'
+                r.needs_filename_fallback = False
+                applied += 1
+
     print(f'[PASS1-offline] folder_dataset применён к {applied} из {len(records)} записей')
 
 

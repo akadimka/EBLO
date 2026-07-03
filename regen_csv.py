@@ -399,6 +399,33 @@ class RegenCSVService:
             if propagated:
                 self.logger.log(f"[OK] PASS 1.5: Propagated folder_dataset author to {propagated} files")
 
+            # PASS 1.5 grandparent propagation: subfolders where all filled siblings
+            # share a folder_dataset author equal to the grandparent folder name —
+            # apply the same author to unfilled sibling-subfolder records.
+            from collections import defaultdict as _defdict15
+            _gp15: dict = _defdict15(list)
+            for rec in self.records:
+                _gp15[str(Path(rec.file_path).parent.parent)].append(rec)
+            _gp_prop = 0
+            for gp_str, grp in _gp15.items():
+                gp_name = Path(gp_str).name
+                if not gp_name:
+                    continue
+                _filled15 = [r for r in grp
+                             if r.author_source == 'folder_dataset' and r.proposed_author
+                             and r.proposed_author.lower() == gp_name.lower()]
+                _unfilled15 = [r for r in grp
+                               if r.author_source != 'folder_dataset' or not r.proposed_author]
+                if _filled15 and _unfilled15:
+                    _auth15 = _filled15[0].proposed_author
+                    for r in _unfilled15:
+                        r.proposed_author = _auth15
+                        r.author_source = 'folder_dataset'
+                        r.needs_filename_fallback = False
+                        _gp_prop += 1
+            if _gp_prop:
+                self.logger.log(f"[OK] PASS 1.5: Grandparent propagation applied to {_gp_prop} files")
+
             # ===== TRANSLATOR FOLDERS: сброс folder_dataset автора =====
             # Файлы в папках типа «Переводы Б. Акунина - Г. Чхартишвили» содержат
             # чужие книги — автором является переводчик (из родительской папки), а не
