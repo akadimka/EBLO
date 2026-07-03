@@ -203,7 +203,7 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
             )
 
         if force_author or folder_name in conversions:
-            if force_author:
+            if force_author and folder_name not in conversions:
                 # Для force_author: всегда стрипим скобки ПЕРЕД парсингом
                 clean = _re.sub(r'\s*\(.*?\)', '', folder_name).strip()
                 author = parse_author_from_folder_name(

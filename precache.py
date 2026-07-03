@@ -255,7 +255,7 @@ class Precache:
             )
 
             if is_author:
-                if force_author:
+                if force_author and folder_name not in conversions:
                     # Для force_author: всегда стрипим скобки ПЕРЕД парсингом
                     import re as _re
                     clean = _re.sub(r'\s*\(.*?\)', '', folder_name).strip()
