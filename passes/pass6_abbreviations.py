@@ -169,17 +169,18 @@ class Pass6Abbreviations:
                 # contradicts the record's own metadata (different person with same surname).
                 # E.g. folder "Скиф" → authors_map has "Скиф Анна" (different author).
                 if candidate != original and len(original.split()) == 1:
-                    meta = (getattr(record, 'metadata_authors', '') or '').lower()
-                    if meta:
-                        # Verify the new first name is in metadata
-                        new_words = [w.lower() for w in candidate.split()[1:] if len(w) > 2]
-                        if new_words and not any(w in meta for w in new_words):
-                            candidate = original  # metadata contradicts expansion
+                    # folder_dataset: имя папки авторитетно — не расширяем через authors_map
+                    # ни при каких условиях (в т.ч. когда metadata содержит расширение),
+                    # чтобы все файлы папки имели одинакового автора.
+                    if record.author_source == 'folder_dataset':
+                        candidate = original
                     else:
-                        # No metadata — only expand if source is not folder_dataset
-                        # (folder name is authoritative; without metadata we can't verify)
-                        if record.author_source == 'folder_dataset':
-                            candidate = original
+                        meta = (getattr(record, 'metadata_authors', '') or '').lower()
+                        if meta:
+                            # Verify the new first name is in metadata
+                            new_words = [w.lower() for w in candidate.split()[1:] if len(w) > 2]
+                            if new_words and not any(w in meta for w in new_words):
+                                candidate = original  # metadata contradicts expansion
                 record.proposed_author = candidate
 
             if record.proposed_author != original:
