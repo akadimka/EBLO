@@ -172,10 +172,13 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
             genre_folder_abs.add(str(folder_abs))
             continue
 
-        # Дети genre-папок тоже не являются авторами (это серии внутри цикла)
+        # Дети genre-папок тоже не являются авторами (это серии внутри цикла).
+        # Исключение: force_author=True означает, что папка — авторская коллекция
+        # (например "Hеофициальная серия книг" → "Bel Jonson") — не пропускаем.
         if parent_abs in genre_folder_abs:
-            genre_folder_abs.add(str(folder_abs))  # транзитивно
-            continue
+            if not force_author:
+                genre_folder_abs.add(str(folder_abs))  # транзитивно
+                continue
 
         # Паттерны вида "NN. Серия - Автор" → берём capture group 1 как автора
         pattern_author = None
@@ -210,6 +213,10 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
                     author = parse_author_from_folder_name(
                         clean.replace('-', ' '),
                         male_names=male_names, female_names=female_names)
+                # Если распарсенное имя не содержит известных имён (псевдоним на латинице
+                # вроде "Bel Jonson") — использовать имя папки как есть, без перестановки слов
+                if author and not _has_valid_name(author):
+                    author = clean
                 # Последний fallback — использовать clean-имя как есть
                 if not author:
                     author = clean

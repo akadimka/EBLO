@@ -259,7 +259,7 @@ class Pass3Normalize:
                 # ФИ order (Фамилия first). If normalize_format reordered the words (first word
                 # changed), the heuristics fired incorrectly — keep original ФИ order instead.
                 # Examples: "Линдквист Йон Айвиде", "Феррандис Хуан Франсиско"
-                if (record.author_source in ("filename", "filename+meta_expanded")
+                if (record.author_source in ("filename", "filename+meta_expanded", "folder_dataset")
                         and normalized_candidate
                         and len(record.proposed_author.split()) >= 2
                         and metadata_for_normalization == ""):

@@ -202,8 +202,17 @@ class Precache:
             except (PermissionError, OSError):
                 pass
 
-            # Дети genre-папок — это серии внутри цикла, не авторы
+            # Дети genre-папок — это серии внутри цикла, не авторы.
+            # Исключение: если сама папка — авторская коллекция (in collection_names),
+            # её подпапки всё равно являются авторами — рекурсируем с force_author=True.
             if inside_genre_folder:
+                if folder_name.lower() in collection_names:
+                    try:
+                        for subdir in folder.iterdir():
+                            if subdir.is_dir() and not subdir.name.startswith('.'):
+                                scan_folder_hierarchy(subdir, depth + 1, force_author=True)
+                    except (PermissionError, OSError):
+                        pass
                 return None
 
             # Пропускаем жанровые/издательские папки — они не являются авторами
@@ -256,6 +265,10 @@ class Precache:
                         author_name = parse_author_from_folder_name(
                             clean.replace('-', ' '),
                             male_names=self.male_names, female_names=self.female_names)
+                    # Если в распарсенном имени нет известных имён (псевдоним на латинице
+                    # вроде "Bel Jonson") — использовать имя папки как есть
+                    if author_name and not self._contains_valid_name(author_name):
+                        author_name = clean
                     if not author_name:
                         author_name = clean
                 elif not author_name:
