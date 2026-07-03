@@ -1286,20 +1286,27 @@ class RegenCSVService:
             if any(gp_name.lower().startswith(kw) for kw in _coll_kw):
                 continue
 
-            # Прямая родительская папка должна совпадать с proposed_series (нормализованно)
             parent_name_norm = parent.name.lower().replace('ё', 'е').strip()
             ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
-            if parent_name_norm != ps_norm:
-                continue
-
-            # Суффиксы типа "(Законченный)" убираем из имени деда
+            gp_norm = gp_name.lower().replace('ё', 'е').strip()
             gp_clean = re.sub(r'\s*\([^)]*\)\s*$', '', gp_name).strip()
             if not gp_clean:
                 continue
 
-            record.proposed_series = gp_clean + '\\' + record.proposed_series
-            record.series_source = record.series_source + '+subfolder_hierarchy'
-            _count += 1
+            if parent_name_norm == ps_norm:
+                # Случай А: родитель совпадает с текущей серией — prepend дедушку
+                # "Девятимечье\Е. Фиолетовый Мир\1.fb2", series="Е. Фиолетовый Мир" → "Девятимечье\Е. Фиолетовый Мир"
+                record.proposed_series = gp_clean + '\\' + record.proposed_series
+                record.series_source = record.series_source + '+subfolder_hierarchy'
+                _count += 1
+            elif gp_norm == ps_norm:
+                # Случай Б: дедушка совпадает с текущей серией — append родителя.
+                # "Девятимечье\З. Синий мир\1.fb2", series="Девятимечье" → "Девятимечье\З. Синий мир"
+                parent_clean = re.sub(r'\s*\([^)]*\)\s*$', '', parent.name).strip()
+                if parent_clean:
+                    record.proposed_series = record.proposed_series + '\\' + parent_clean
+                    record.series_source = record.series_source + '+subfolder_hierarchy'
+                    _count += 1
 
         if _count:
             print(f"[POST-CHECK] Built subfolder hierarchy for {_count} series values")
