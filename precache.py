@@ -265,7 +265,13 @@ class Precache:
                         author_name = parse_author_from_folder_name(
                             clean.replace('-', ' '),
                             male_names=self.male_names, female_names=self.female_names)
-                    # Если в распарсенном имени нет известных имён (псевдоним на латинице
+                    # Если парсер вернул строку как есть и она содержит дефис —
+                    # пробуем без дефиса ("Андреев-Александр Владимирович" → "Андреев Александр Владимирович").
+                    if '-' in clean and (not author_name or author_name == clean):
+                        nodash = clean.replace('-', ' ')
+                        if self._contains_valid_name(nodash):
+                            author_name = nodash
+                    # Если распарсенное имя не содержит известных имён (псевдоним на латинице
                     # вроде "Bel Jonson") — использовать имя папки как есть
                     if author_name and not self._contains_valid_name(author_name):
                         author_name = clean

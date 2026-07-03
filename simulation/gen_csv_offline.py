@@ -213,11 +213,17 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
                     author = parse_author_from_folder_name(
                         clean.replace('-', ' '),
                         male_names=male_names, female_names=female_names)
+                # Если парсер вернул строку как есть (не смог ничего извлечь) и она содержит
+                # дефис — пробуем без дефиса ("Андреев-Александр Владимирович" → "Андреев Александр Владимирович").
+                if '-' in clean and (not author or author == clean):
+                    nodash = clean.replace('-', ' ')
+                    if _has_valid_name(nodash):
+                        author = nodash
                 # Если распарсенное имя не содержит известных имён (псевдоним на латинице
-                # вроде "Bel Jonson") — использовать имя папки как есть, без перестановки слов
+                # вроде "Bel Jonson") — использовать имя папки как есть, без перестановки слов.
                 if author and not _has_valid_name(author):
                     author = clean
-                # Последний fallback — использовать clean-имя как есть
+                # Последний fallback — использовать clean-имя как есть.
                 if not author:
                     author = clean
             if author:
