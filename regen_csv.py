@@ -1253,7 +1253,9 @@ class RegenCSVService:
                 gp_norm = gp_name_stripped.lower().replace('ё', 'е').strip()
                 auth_norm = record.proposed_author.lower().replace('ё', 'е').strip()
                 auth_parts = auth_norm.split()
-                if gp_norm == auth_norm or (auth_parts and auth_parts[0] in gp_norm and len(gp_norm) <= len(auth_norm) + 5):
+                if (gp_norm == auth_norm
+                        or gp_norm.startswith(auth_norm)
+                        or (auth_parts and auth_parts[0] in gp_norm and len(gp_norm) <= len(auth_norm) + 5)):
                     continue
                 # Псевдоним в скобках: "Дубина-Родион (Дарки)" → parenthetical == proposed_author
                 gp_parens = re.findall(r'\(([^)]+)\)', gp_name)
