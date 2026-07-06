@@ -228,8 +228,15 @@ def build_author_cache(records, work_dir: Path, settings, logger) -> Dict:
                     author = clean
             if author:
                 cache[str(folder_abs)] = (author, 'high')
-        elif author and _has_valid_name(author):
-            cache[str(folder_abs)] = (author, 'high')
+        else:
+            # Паттерн «Серия (Фамилия)»: одно кириллическое слово в скобках в конце —
+            # ловит "Воин Грёзы (Широков)" где фамилия без имени не в словаре имён.
+            _paren_m = _re.match(
+                r'^.+\(([А-ЯЁ][а-яёА-ЯЁ\-]{2,}(?:\s[А-ЯЁ][а-яёА-ЯЁ\-]{2,})?)\)\s*$',
+                folder_name,
+            )
+            if author and (_has_valid_name(author) or _paren_m):
+                cache[str(folder_abs)] = (author, 'high')
 
     print(f'[PRECACHE-offline] Папок автора: {len(cache)}')
     return cache, male_names, female_names

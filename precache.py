@@ -76,7 +76,6 @@ class Precache:
                 return True
             if word_norm in self.male_names or word_norm in self.female_names:
                 return True
-        
         return False
 
     def execute(self) -> Dict[Path, Tuple[str, str]]:
@@ -248,10 +247,18 @@ class Precache:
             # force_author: папка внутри коллекции — всегда автор, без проверки словаря
             # folder_name in conversions: явно пинённый псевдоним (самомапинг) — тоже без валидации
             # (fb2 могут быть в подпапках серии, а не напрямую)
+            # Паттерн «Серия (Фамилия)»: одно кириллическое слово в скобках в конце —
+            # ловит "Воин Грёзы (Широков)" где фамилия без имени не в словаре имён.
+            import re as _re_isau
+            _paren_surname = _re_isau.match(
+                r'^.+\(([А-ЯЁ][а-яёА-ЯЁ\-]{2,}(?:\s[А-ЯЁ][а-яёА-ЯЁ\-]{2,})?)\)\s*$',
+                folder_name,
+            )
             is_author = (
                 force_author
                 or folder_name in conversions
                 or (has_fb2_files and author_name and self._contains_valid_name(author_name))
+                or (has_fb2_files and bool(_paren_surname))
             )
 
             if is_author:
