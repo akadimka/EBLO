@@ -872,6 +872,7 @@ class RegenCSVService:
             self._postcheck_filename_prefix_pattern()
             self._postcheck_strip_metadata_coauthors_not_in_filename()
             self._postcheck_series_folder_blacklist()
+            self._postcheck_normalize_series_arc_number()
             self._postcheck_build_subfolder_hierarchy()
             self._postcheck_expand_truncated_series()  # повторно, после strip-префиксов (РОС. Подсерия → РОС\Подсерия)
             self._postcheck_strip_leading_number()  # повторно, после backslash-стрипинга
@@ -1198,6 +1199,46 @@ class RegenCSVService:
         if _count:
             print(f"[POST-CHECK] Stripped digit prefix from {_count} series values")
             self.logger.log(f"[OK] POST-CHECK: Stripped digit prefix from {_count} series")
+
+    def _postcheck_normalize_series_arc_number(self) -> None:
+        """Нормализует «Серия N» → «Серия» когда у того же автора есть записи с «Серия».
+
+        Случай: автор назвал первые тома «Словом и делом 1», а следующие — «Словом и делом».
+        Все записи с «X N» (X + пробел + одна-две цифры) нормализуются к «X»,
+        если (author, X) встречается хотя бы в одной записи того же автора.
+        """
+        import re as _re
+        _TRAIL_DIGIT = _re.compile(r'^(.+?)\s+(\d{1,2})\s*$')
+
+        # Строим множество (author_norm, series_norm) для всех записей без хвостовой цифры
+        from series_normalizer import _nfc_lower_yo as _nky
+        base_series: set = set()
+        for rec in self.records:
+            if not rec.proposed_series or '\\' in rec.proposed_series:
+                continue
+            if _TRAIL_DIGIT.match(rec.proposed_series):
+                continue
+            a = _nky(rec.proposed_author or '').strip()
+            s = _nky(rec.proposed_series).strip()
+            if a and s:
+                base_series.add((a, s))
+
+        _count = 0
+        for rec in self.records:
+            if not rec.proposed_series or '\\' in rec.proposed_series:
+                continue
+            m = _TRAIL_DIGIT.match(rec.proposed_series)
+            if not m:
+                continue
+            base = m.group(1).strip()
+            a = _nky(rec.proposed_author or '').strip()
+            if (a, _nky(base)) in base_series:
+                rec.proposed_series = base
+                _count += 1
+
+        if _count:
+            print(f"[POST-CHECK] Normalized series+arc-number → base series: {_count} records")
+            self.logger.log(f"[OK] POST-CHECK: Normalized series+arc-number in {_count} records")
 
     def _postcheck_build_subfolder_hierarchy(self) -> None:
         """Строит серию «Родительская\\Подсерия» когда файл вложен глубже одного уровня от автора.
