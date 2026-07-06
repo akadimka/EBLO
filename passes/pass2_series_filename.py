@@ -1568,6 +1568,11 @@ class Pass2SeriesFilename:
                 # (пример: «ПТУшник N. ПТУшник» → arc="ПТУшник" = series "ПТУшник")
                 if arc_norm == _series_k:
                     continue
+                # Если arc = «серия + порядковый номер» — это том, не дуга.
+                # «Ученик теней 3» при серии «Ученик теней» — book 3, не arc.
+                _arc_no_trail = re.sub(r'\s+\d+\s*$', '', arc_norm).strip()
+                if _arc_no_trail == _series_k:
+                    continue
                 # Берём наиболее длинный arc_display как каноническое название дуги
                 arc_canonical = max((arc_display for _, _, arc_display in arc_entries), key=len)
                 vols = sorted(vol_num for _, vol_num, _ in arc_entries)
