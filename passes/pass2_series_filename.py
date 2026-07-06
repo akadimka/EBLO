@@ -800,6 +800,38 @@ class Pass2SeriesFilename:
                         author_folder_idx = i
                         break
 
+            # folder_dataset + голая фамилия (без пробелов) → раскрыть из метаданных.
+            # Проверяем прямую родительскую папку файла (path_parts[-2]):
+            # если она имеет паттерн "Серия (Фамилия)" с нашей фамилией — расширяем.
+            # "Широков" + folder "Воин Грёзы (Широков)" + meta "Алексей Широков" → "Широков Алексей".
+            if (record.author_source == "folder_dataset"
+                    and record.proposed_author
+                    and ' ' not in record.proposed_author
+                    and record.metadata_authors
+                    and record.metadata_authors not in ('[unknown]', '')
+                    and len(path_parts) >= 2):
+                _direct_parent = path_parts[-2]
+                _surname_lc = record.proposed_author.lower().replace('ё', 'е')
+                if ('(' in _direct_parent
+                        and _surname_lc in _direct_parent.lower().replace('ё', 'е')):
+                    from name_normalizer import normalize_author_name as _norm_au
+                    _expanded = None
+                    for _raw_au in record.metadata_authors.replace(';', ',').split(','):
+                        _raw_au = _raw_au.strip()
+                        if not _raw_au:
+                            continue
+                        _norm = _norm_au(_raw_au)
+                        if _norm.split()[0].lower().replace('ё', 'е') == _surname_lc:
+                            _expanded = _norm
+                            break
+                        if _surname_lc in [w.lower().replace('ё', 'е')
+                                           for w in _raw_au.split()]:
+                            _expanded = _norm
+                            break
+                    if _expanded:
+                        record.proposed_author = _expanded
+                        record.author_source = "metadata_folder_confirmed"
+
             if author_folder_idx is not None:
                 i = author_folder_idx
                 part = path_parts[i]
