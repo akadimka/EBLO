@@ -873,6 +873,7 @@ class RegenCSVService:
             self._postcheck_strip_metadata_coauthors_not_in_filename()
             self._postcheck_series_folder_blacklist()
             self._postcheck_normalize_series_arc_number()
+            self._postcheck_clear_author_as_series()
             self._postcheck_build_subfolder_hierarchy()
             self._postcheck_expand_truncated_series()  # повторно, после strip-префиксов (РОС. Подсерия → РОС\Подсерия)
             self._postcheck_strip_leading_number()  # повторно, после backslash-стрипинга
@@ -1240,6 +1241,45 @@ class RegenCSVService:
             print(f"[POST-CHECK] Normalized series+arc-number → base series: {_count} records")
             self.logger.log(f"[OK] POST-CHECK: Normalized series+arc-number in {_count} records")
 
+    def _postcheck_clear_author_as_series(self) -> None:
+        """Очищает proposed_series если оно совпадает с proposed_author или является авторской папкой.
+
+        Серия никогда не должна равняться имени автора. Случаи:
+        1. proposed_series == proposed_author (прямое совпадение)
+        2. proposed_series совпадает с именем папки, которая есть в author_folder_cache
+           (Pass 1 ошибочно использовал авторскую папку как серию — коллекция\\Автор\\файл.fb2)
+        """
+        from pathlib import Path as _P
+        _author_folder_names = {
+            _P(k).name.lower().replace('ё', 'е')
+            for k in self.author_folder_cache
+        }
+
+        _count = 0
+        for record in self.records:
+            if not record.proposed_series:
+                continue
+            ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
+
+            # Случай 1: серия == автор
+            if record.proposed_author:
+                au_norm = record.proposed_author.lower().replace('ё', 'е').strip()
+                if ps_norm == au_norm:
+                    record.proposed_series = ''
+                    record.series_source = ''
+                    _count += 1
+                    continue
+
+            # Случай 2: серия — это имя авторской папки из кэша
+            if ps_norm in _author_folder_names and record.series_source == 'folder_dataset':
+                record.proposed_series = ''
+                record.series_source = ''
+                _count += 1
+
+        if _count:
+            print(f"[POST-CHECK] Cleared series == author/author-folder in {_count} records")
+            self.logger.log(f"[OK] POST-CHECK: Cleared series == author/author-folder in {_count} records")
+
     def _postcheck_build_subfolder_hierarchy(self) -> None:
         """Строит серию «Родительская\\Подсерия» когда файл вложен глубже одного уровня от автора.
 
@@ -1325,6 +1365,11 @@ class RegenCSVService:
 
             # Дедушка не должен быть коллекционным keyword
             if any(gp_name.lower().startswith(kw) for kw in _coll_kw):
+                continue
+
+            # Родитель (прямая папка файла) не должен быть авторской папкой
+            parent_abs = str(self.work_dir / parent).lower()
+            if parent_abs in _author_cache_lower:
                 continue
 
             parent_name_norm = parent.name.lower().replace('ё', 'е').strip()
