@@ -369,7 +369,11 @@ class FB2CompilerService:
             sub = sub.strip()
             root_no_num = re.sub(r'\s+\d{1,4}\s*$', '', root).strip()
             # Корень без числа — подсерии независимы (Отрок_Сотник\Отрок vs \Сотник).
+            # Исключение: подсерия начинается с буквенного порядкового номера «А.», «Б.», «В.»…
+            # Такие подсерии объединяются в один бакет по корню (Серия\Б. X + Серия\В. Y → Серия).
             if root_no_num == root:
+                if re.match(r'^[А-ЯЁ]\.\s', sub):
+                    return _punct_norm(root)
                 return _punct_norm(series)
             # Корень с числом (Серия 1\X, Серия 3\Y):
             # ключ = «Серия|X» — объединяем только одноимённые подсерии,
@@ -2518,6 +2522,13 @@ class FB2CompilerService:
                 _pl = int(_sub_lead_m.group(1))
                 if _pl < 1900:
                     parent_num = _pl
+            elif re.match(r'^([А-ЯЁ])\.\s', _sub_leading_part):
+                # Кириллическая буквенная нумерация: А.=1, Б.=2, В.=3 … (без Ё)
+                _CYR_ORD = 'АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'
+                _letter = _sub_leading_part[0].upper()
+                _idx = _CYR_ORD.find(_letter)
+                if _idx >= 0:
+                    parent_num = _idx + 1
 
         # secondary: номер подсерии внутри позиции родителя
         sub_ordinal = 0
