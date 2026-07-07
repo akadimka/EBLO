@@ -10,9 +10,32 @@
 import threading
 import re
 import html
+import ctypes
 from pathlib import Path
 from typing import Optional, Callable, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
+
+
+def _detect_optimal_workers(path: Path) -> int:
+    """Определить оптимальное число потоков по типу диска."""
+    try:
+        anchor = str(path.resolve())
+        # UNC-путь \\server\share — точно сеть
+        if anchor.startswith('\\\\'):
+            return 12
+        drive = path.resolve().anchor  # например "C:\\" или "Z:\\"
+        drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+        # 4 = DRIVE_REMOTE (mapped network drive)
+        if drive_type == 4:
+            return 12
+        # 3 = DRIVE_FIXED (SSD/HDD), 2 = DRIVE_REMOVABLE
+        # Для HDD конкурентный доступ вреден — используем 1.
+        # Отличить SSD от HDD без WMI сложно, поэтому консервативно: 4.
+        # На SSD это нейтрально, на HDD — приемлемо.
+        return 4
+    except Exception:
+        return 4
 
 try:
     from logger import Logger
@@ -154,25 +177,39 @@ class GenreAssignmentService:
             self.logger.log(f"FB2 файлы не найдены в {folder_path}")
             return 0
         
-        self.logger.log(f"Начато присвоение жанра '{genre_name}' для {len(fb2_files)} файлов")
-        
+        max_workers = _detect_optimal_workers(folder)
+        self.logger.log(
+            f"Начато присвоение жанра '{genre_name}' для {len(fb2_files)} файлов "
+            f"(потоков: {max_workers})"
+        )
+
         self.processed_count = 0
-        
-        for idx, fb2_path in enumerate(fb2_files, start=1):
-            filename = fb2_path.name
-            
-            if progress_callback:
-                progress_callback(idx, len(fb2_files), filename)
-            
-            try:
-                if self._assign_genre_to_file(fb2_path, genre_name):
+        total = len(fb2_files)
+        completed = [0]  # изменяемый счётчик для замыкания
+        lock = threading.Lock()
+
+        def _process(fb2_path: Path):
+            ok = self._assign_genre_to_file(fb2_path, genre_name)
+            with lock:
+                completed[0] += 1
+                idx = completed[0]
+                if progress_callback:
+                    progress_callback(idx, total, fb2_path.name)
+                if ok:
                     self.processed_count += 1
-                    self.logger.log(f"  [{idx}/{len(fb2_files)}] Жанр присвоен: {filename}")
+                    self.logger.log(f"  [{idx}/{total}] Жанр присвоен: {fb2_path.name}")
                 else:
-                    self.logger.log(f"  [{idx}/{len(fb2_files)}] ОШИБКА: {filename}")
-            except Exception as e:
-                self.logger.log(f"  [{idx}/{len(fb2_files)}] ОШИБКА при обработке {filename}: {str(e)}")
-        
+                    self.logger.log(f"  [{idx}/{total}] ОШИБКА: {fb2_path.name}")
+            return ok
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [pool.submit(_process, p) for p in fb2_files]
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception as e:
+                    self.logger.log(f"  ОШИБКА потока: {e}")
+
         self.logger.log(f"Завершено! Жанр изменен у {self.processed_count} файлов")
         
         if completion_callback:
