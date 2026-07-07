@@ -873,8 +873,10 @@ class RegenCSVService:
             self._postcheck_strip_metadata_coauthors_not_in_filename()
             self._postcheck_series_folder_blacklist()
             self._postcheck_normalize_series_arc_number()
+            self._postcheck_strip_bracket_annotations_from_series()
             self._postcheck_clear_author_as_series()
             self._postcheck_build_subfolder_hierarchy()
+            self._postcheck_strip_author_prefix_from_series()
             self._postcheck_expand_truncated_series()  # повторно, после strip-префиксов (РОС. Подсерия → РОС\Подсерия)
             self._postcheck_strip_leading_number()  # повторно, после backslash-стрипинга
             self._postcheck_fill_empty_authors()
@@ -1241,6 +1243,84 @@ class RegenCSVService:
             print(f"[POST-CHECK] Normalized series+arc-number → base series: {_count} records")
             self.logger.log(f"[OK] POST-CHECK: Normalized series+arc-number in {_count} records")
 
+    def _postcheck_strip_author_prefix_from_series(self) -> None:
+        """Стрипит авторский префикс из названия серии.
+
+        Паттерн «И. Фамилия - Серия» или «И. Фамилия Серия» возникает когда
+        папка называется «Б. Акунин История Российского государства».
+        Стрипим префикс если он совпадает с proposed_author (по фамилии).
+        Обрабатывает оба компонента иерархической серии («Корень\\Подсерия»).
+        """
+        import re as _re
+        # Паттерн: «И.» или «И. И.» перед фамилией в начале строки
+        _AUTH_PREFIX = _re.compile(
+            r'^(?:[А-ЯЁA-Z]\.\s*){1,2}([А-ЯЁA-Z][а-яёa-z]+)[\s\-–—]+',
+        )
+
+        def _strip_prefix(s: str, author: str) -> str:
+            m = _AUTH_PREFIX.match(s)
+            if not m:
+                return s
+            surname = m.group(1).lower().replace('ё', 'е')
+            au_norm = author.lower().replace('ё', 'е')
+            if surname in au_norm:
+                return s[m.end():].strip()
+            return s
+
+        _count = 0
+        for rec in self.records:
+            if not rec.proposed_series or not rec.proposed_author:
+                continue
+            ps = rec.proposed_series
+            if '\\' in ps:
+                root, sub = ps.split('\\', 1)
+                new_sub = _strip_prefix(sub.strip(), rec.proposed_author)
+                if new_sub != sub.strip():
+                    rec.proposed_series = root + '\\' + new_sub
+                    _count += 1
+            else:
+                new_ps = _strip_prefix(ps, rec.proposed_author)
+                if new_ps != ps:
+                    rec.proposed_series = new_ps
+                    _count += 1
+
+        if _count:
+            print(f"[POST-CHECK] Stripped author prefix from series in {_count} records")
+            self.logger.log(f"[OK] POST-CHECK: Stripped author prefix from series in {_count} records")
+
+    def _postcheck_strip_bracket_annotations_from_series(self) -> None:
+        """Стрипит квадратно-скобочные аннотации из названия серии.
+
+        Паттерны: «Дьяволы [Аберкромби]», «Хроники Хьёрварда [= Летописи]»,
+        «Бег [Мюллер-Браун]» — все trailing [...] убираются из имени серии.
+        Обрабатывает оба компонента иерархической серии.
+        """
+        import re as _re
+        _BRACKET = _re.compile(r'\s*\[.*?\]\s*$')
+
+        def _strip(s: str) -> str:
+            return _BRACKET.sub('', s).strip()
+
+        _count = 0
+        for rec in self.records:
+            if not rec.proposed_series or '[' not in rec.proposed_series:
+                continue
+            ps = rec.proposed_series
+            if '\\' in ps:
+                root, sub = ps.split('\\', 1)
+                new_root = _strip(root)
+                new_sub = _strip(sub)
+                new_ps = (new_root + '\\' + new_sub) if new_sub else new_root
+            else:
+                new_ps = _strip(ps)
+            if new_ps != ps:
+                rec.proposed_series = new_ps
+                _count += 1
+
+        if _count:
+            print(f"[POST-CHECK] Stripped bracket annotations from series in {_count} records")
+            self.logger.log(f"[OK] POST-CHECK: Stripped bracket annotations in {_count} records")
+
     def _postcheck_clear_author_as_series(self) -> None:
         """Очищает proposed_series если оно совпадает с proposed_author или является авторской папкой.
 
@@ -1259,11 +1339,11 @@ class RegenCSVService:
         for record in self.records:
             if not record.proposed_series:
                 continue
-            ps_norm = record.proposed_series.lower().replace('ё', 'е').strip()
+            ps_norm = record.proposed_series.lower().replace('ё', 'е').strip().rstrip('.')
 
             # Случай 1: серия == автор
             if record.proposed_author:
-                au_norm = record.proposed_author.lower().replace('ё', 'е').strip()
+                au_norm = record.proposed_author.lower().replace('ё', 'е').strip().rstrip('.')
                 if ps_norm == au_norm:
                     record.proposed_series = ''
                     record.series_source = ''
@@ -1271,7 +1351,7 @@ class RegenCSVService:
                     continue
 
             # Случай 2: серия — это имя авторской папки из кэша
-            if ps_norm in _author_folder_names and record.series_source == 'folder_dataset':
+            if ps_norm in _author_folder_names and 'folder_dataset' in (record.series_source or ''):
                 record.proposed_series = ''
                 record.series_source = ''
                 _count += 1
@@ -1324,6 +1404,10 @@ class RegenCSVService:
             # Дедушка не должен быть авторской папкой
             gp_abs = str(self.work_dir / grandparent).lower()
             if gp_abs in _author_cache_lower:
+                continue
+
+            # Дедушка — одиночная буква (алфавитный индекс, не серия)
+            if len(gp_name.strip()) == 1:
                 continue
 
             # Стрипим скобочный суффикс один раз для всех проверок ниже
