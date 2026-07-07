@@ -96,3 +96,6 @@ meta/
 
 images/
 Images/
+
+# Machine-specific config (paths, window state)
+config.json

@@ -9,20 +9,30 @@ import json
 from pathlib import Path
 import copy
 
+# Keys that belong to config.json (machine-specific, gitignored after first push).
+# Everything else lives in app_settings.json (always in git).
+_MACHINE_KEYS = frozenset({
+    'library_path', 'last_scan_path', 'normalizer_folder', 'genres_file_path',
+    'test_window_path', 'duplicate_finder_path', 'compiler_scan_dir', 'last_csv_dir',
+    'window_sizes', 'genre_tree_state', 'generate_csv', 'settings_file_path',
+})
+
+
 class SettingsManager:
     """
     Manages application settings and configuration.
-    
+
     / Управляет настройками приложения и конфигурацией.
     """
-    
+
     def __init__(self, config_path):
         """
         Initialize settings manager.
-        
+
         / Инициализация менеджера настроек.
         """
         self.config_path = Path(config_path)
+        self.app_settings_path = self.config_path.parent / 'app_settings.json'
         self.settings = {
             'library_path': '',
             'last_scan_path': '',
@@ -41,13 +51,13 @@ class SettingsManager:
         self.load()
 
     def load(self):
-        """Load settings from config file / Загрузить настройки из файла конфига."""
+        """Load settings from config.json and app_settings.json."""
+        if self.app_settings_path.exists():
+            with open(self.app_settings_path, 'r', encoding='utf-8') as f:
+                self.settings.update(json.load(f))
         if self.config_path.exists():
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                loaded = json.load(f)
-                # Обновляем только загруженные значения, сохраняя defaults для отсутствующих ключей
-                self.settings.update(loaded)
-        # Сохраняем копию загруженных настроек для проверки изменений
+                self.settings.update(json.load(f))
         self._loaded_settings = copy.deepcopy(self.settings)
 
     def _has_changes(self):
@@ -57,15 +67,18 @@ class SettingsManager:
         return self.settings != self._loaded_settings
 
     def save(self):
-        """Save settings to config file if changed / Сохранить настройки в файл конфига если были изменения."""
-        # Проверяем, были ли действительные изменения
+        """Save settings to config.json (machine keys) and app_settings.json (the rest)."""
         if not self._has_changes():
             return
-        
+
+        machine = {k: v for k, v in self.settings.items() if k in _MACHINE_KEYS}
+        app = {k: v for k, v in self.settings.items() if k not in _MACHINE_KEYS}
+
         with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(self.settings, f, ensure_ascii=False, indent=2)
-        
-        # После сохранения обновляем копию
+            json.dump(machine, f, ensure_ascii=False, indent=2)
+        with open(self.app_settings_path, 'w', encoding='utf-8') as f:
+            json.dump(app, f, ensure_ascii=False, indent=2)
+
         self._loaded_settings = copy.deepcopy(self.settings)
 
     def get(self, key: str, default=None):
@@ -92,6 +105,7 @@ class SettingsManager:
         self.settings['settings_file_path'] = path
         if path:
             self.config_path = Path(path)
+            self.app_settings_path = self.config_path.parent / 'app_settings.json'
         self.save()
 
     def auto_init_file_paths(self) -> None:
