@@ -873,10 +873,10 @@ class RegenCSVService:
             self._postcheck_strip_metadata_coauthors_not_in_filename()
             self._postcheck_series_folder_blacklist()
             self._postcheck_normalize_series_arc_number()
-            self._postcheck_strip_bracket_annotations_from_series()
             self._postcheck_clear_author_as_series()
             self._postcheck_build_subfolder_hierarchy()
             self._postcheck_strip_author_prefix_from_series()
+            self._postcheck_strip_bracket_annotations_from_series()
             self._postcheck_expand_truncated_series()  # повторно, после strip-префиксов (РОС. Подсерия → РОС\Подсерия)
             self._postcheck_strip_leading_number()  # повторно, после backslash-стрипинга
             self._postcheck_fill_empty_authors()
@@ -1296,7 +1296,8 @@ class RegenCSVService:
         Обрабатывает оба компонента иерархической серии.
         """
         import re as _re
-        _BRACKET = _re.compile(r'\s*\[.*?\]\s*$')
+        # Стрипим [...] с опциональным закрывающим » после скобки
+        _BRACKET = _re.compile(r'\s*\[.*?\]\s*»?\s*$')
 
         def _strip(s: str) -> str:
             return _BRACKET.sub('', s).strip()
