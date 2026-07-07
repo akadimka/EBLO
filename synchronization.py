@@ -217,23 +217,12 @@ class SynchronizationService:
             if progress_callback:
                 progress_callback(5, 100, "Генерация CSV из исходной папки")
             
-            records = self._generate_csv_data(progress_callback)
-
-            # ── Фильтр по папкам с присвоенным жанром ─────────────────────────
-            if allowed_folders:
-                allowed_abs = {Path(p).resolve() for p in allowed_folders}
-                before = len(records)
-                records = [
-                    r for r in records
-                    if any(
-                        (self.last_scan_path / r.file_path).resolve().is_relative_to(folder)
-                        for folder in allowed_abs
-                    )
-                ]
-                self._log(
-                    f"Фильтр по жанровым папкам: {before} → {len(records)} записей "
-                    f"({before - len(records)} пропущено без жанра)"
-                )
+            # Передаём allowed_folders прямо в пайплайн — Precache и Pass1
+            # сканируют только выбранные папки, а не всю work_dir.
+            _filter = {Path(p).resolve() for p in allowed_folders} if allowed_folders else None
+            records = self._generate_csv_data(progress_callback, filter_paths=_filter)
+            if _filter:
+                self._log(f"Пайплайн ограничен {len(_filter)} папками с жанром")
 
             self.stats['total_files'] = len(records)
 
@@ -308,23 +297,29 @@ class SynchronizationService:
             self._log("=" * 60)
             raise
     
-    def _generate_csv_data(self, progress_callback: Optional[Callable] = None) -> List:
+    def _generate_csv_data(self, progress_callback: Optional[Callable] = None,
+                           filter_paths=None) -> List:
         """Generate CSV data from last_scan_path without saving to file.
-        
+
         Args:
             progress_callback: Function(current, total, status_str) for progress
-            
+            filter_paths: Optional set of absolute Path objects — only these folders
+                          are scanned by Precache and Pass1. None = scan everything.
+
         Returns:
             List of BookRecord objects
         """
         self._log(f"Генерация CSV из: {self.last_scan_path}")
         self._log(f"Путь существует: {self.last_scan_path.exists()}")
-        
+        if filter_paths:
+            self._log(f"Фильтр папок: {len(filter_paths)} папок")
+
         try:
             records = self.csv_service.generate_csv(
                 str(self.last_scan_path),
-                output_csv_path=None,  # Don't save CSV file
-                progress_callback=progress_callback
+                output_csv_path=None,
+                progress_callback=progress_callback,
+                filter_paths=filter_paths
             )
             
             self._log(f"CSV сгенерирован: {len(records)} записей")

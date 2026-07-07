@@ -267,22 +267,26 @@ class BookRecord:
 class Pass1ReadFiles:
     """PASS 1: Read FB2 files and extract initial metadata."""
     
-    def __init__(self, work_dir: Path, author_folder_cache: Dict[Path, Tuple[str, str]], 
-                 extractor, logger, folder_parse_limit: int):
+    def __init__(self, work_dir: Path, author_folder_cache: Dict[Path, Tuple[str, str]],
+                 extractor, logger, folder_parse_limit: int,
+                 filter_paths=None):
         """Initialize PASS 1.
-        
+
         Args:
             work_dir: Working directory with FB2 files
             author_folder_cache: Cached author folders from PRECACHE
             extractor: FB2AuthorExtractor instance
             logger: Logger instance
             folder_parse_limit: Maximum depth for folder parsing
+            filter_paths: Optional list/set of absolute Path objects — only files
+                          inside these folders are processed. None = all files.
         """
         self.work_dir = work_dir
         self.author_folder_cache = author_folder_cache
         self.extractor = extractor
         self.logger = logger
         self.folder_parse_limit = folder_parse_limit
+        self.filter_paths = {Path(p).resolve() for p in filter_paths} if filter_paths else None
     
     def execute(self) -> List[BookRecord]:
         """Execute PASS 1: Read FB2 files and create BookRecords.
@@ -296,6 +300,11 @@ class Pass1ReadFiles:
         print("[PASS 1] Reading FB2 files...")
 
         fb2_files = fb2_rglob(self.work_dir)
+        if self.filter_paths:
+            fb2_files = [
+                f for f in fb2_files
+                if any(f.resolve().is_relative_to(fp) for fp in self.filter_paths)
+            ]
         total = len(fb2_files)
         if total == 0:
             self.logger.log("[PASS 1] No FB2 files found")

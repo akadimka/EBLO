@@ -81,7 +81,8 @@ class RegenCSVService:
         # По умолчанию CSV сохраняется; generate_csv(output_csv_path=None) отключает запись
         self._do_save_csv = True
     
-    def generate_csv(self, folder_path: str, output_csv_path=None, progress_callback=None):
+    def generate_csv(self, folder_path: str, output_csv_path=None, progress_callback=None,
+                     filter_paths=None):
         """
         Generate CSV from FB2 files in folder.
         Wrapper for regenerate() that returns records for GUI compatibility.
@@ -106,7 +107,8 @@ class RegenCSVService:
 
         try:
             # Run regeneration with progress callback
-            success = self.regenerate(progress_callback=progress_callback)
+            success = self.regenerate(progress_callback=progress_callback,
+                                      filter_paths=filter_paths)
             
             if success:
                 return self.records
@@ -318,7 +320,7 @@ class RegenCSVService:
                 return True
         return False
     
-    def regenerate(self, progress_callback=None) -> bool:
+    def regenerate(self, progress_callback=None, filter_paths=None) -> bool:
         """Execute full CSV regeneration pipeline.
         
         Args:
@@ -350,7 +352,7 @@ class RegenCSVService:
             _t = time.perf_counter()
             precache = Precache(self.work_dir, self.settings, self.logger,
                                self.folder_parse_limit)
-            self.author_folder_cache = precache.execute()
+            self.author_folder_cache = precache.execute(filter_paths=filter_paths)
             print(f"[PRECACHE] → {time.perf_counter()-_t:.2f}s")
             self.logger.log("[OK] Author folder hierarchy cached")
 
@@ -360,7 +362,8 @@ class RegenCSVService:
             _t = time.perf_counter()
             pass1 = Pass1ReadFiles(self.work_dir, self.author_folder_cache,
                                   self.extractor, self.logger,
-                                  self.folder_parse_limit)
+                                  self.folder_parse_limit,
+                                  filter_paths=filter_paths)
             self.records = pass1.execute()
             print(f"[PASS 1] → {time.perf_counter()-_t:.2f}s")
             

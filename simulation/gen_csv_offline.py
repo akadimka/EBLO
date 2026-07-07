@@ -378,7 +378,7 @@ def main():
     class _Pass1FromDB:
         def __init__(self, *a, **kw):
             pass
-        def execute(self):
+        def execute(self, **kw):
             return records
 
     _orig_pass1 = _p1_mod.Pass1ReadFiles
@@ -391,7 +391,7 @@ def main():
             self.female_names = female_names
             self.author_folder_cache = author_cache
 
-        def execute(self):
+        def execute(self, **kw):
             return author_cache
 
     _orig_precache = None

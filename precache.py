@@ -78,9 +78,16 @@ class Precache:
                 return True
         return False
 
-    def execute(self) -> Dict[Path, Tuple[str, str]]:
+    def execute(self, filter_paths=None) -> Dict[Path, Tuple[str, str]]:
         """Execute PRECACHE: Build author folder cache.
-        
+
+        Args:
+            filter_paths: Optional list/set of absolute Path objects. When provided,
+                          only these folders (and their subtrees) are scanned. The
+                          parent chain up to work_dir is also scanned to detect
+                          author_subfolder_collections context, but NOT cached as
+                          authors themselves — only the subtrees of filter_paths are.
+
         Returns:
             Dictionary {folder_path: (author_name, confidence)}
         """
@@ -108,7 +115,8 @@ class Precache:
         def scan_folder_hierarchy(folder: Path, depth: int = 0,
                                    inside_author_folder: bool = False,
                                    force_author: bool = False,
-                                   inside_genre_folder: bool = False) -> Optional[Tuple[str, str]]:
+                                   inside_genre_folder: bool = False,
+                                   _no_recurse: bool = False) -> Optional[Tuple[str, str]]:
             """Recursively scan folders and cache authors.
 
             Args:
@@ -314,6 +322,8 @@ class Precache:
 
             # Recursively scan subfolders (не авторская папка — ищем глубже)
             # Если эта папка — коллекция, её дочерние папки принудительно авторские
+            if _no_recurse:
+                return None
             this_is_collection = folder_name.lower() in collection_names
             try:
                 for subdir in folder.iterdir():
@@ -327,10 +337,33 @@ class Precache:
         
         # Start scanning
         try:
-            scan_folder_hierarchy(self.work_dir, depth=0)
+            if filter_paths:
+                _filter_abs = {Path(p).resolve() for p in filter_paths}
+                # Для каждой выбранной папки: сначала пройти цепочку родителей вверх до
+                # work_dir чтобы определить контекст (force_author, inside_genre_folder и т.д.),
+                # затем полностью просканировать саму выбранную папку.
+                # Родители сканируются только для контекста — без рекурсии в их дочерние папки.
+                for target in _filter_abs:
+                    # Строим цепочку папок от work_dir до target (не включая target)
+                    try:
+                        rel = target.relative_to(self.work_dir)
+                    except ValueError:
+                        continue
+                    parts = rel.parts
+                    # Проходим каждый уровень от work_dir вниз, без рекурсии в стороны
+                    current = self.work_dir
+                    depth = 0
+                    for part in parts[:-1]:  # все уровни кроме самого target
+                        current = current / part
+                        scan_folder_hierarchy(current, depth=depth, _no_recurse=True)
+                        depth += 1
+                    # Полное сканирование самой выбранной папки
+                    scan_folder_hierarchy(target, depth=depth)
+            else:
+                scan_folder_hierarchy(self.work_dir, depth=0)
             print(f"[PRECACHE] Cached {len(self.author_folder_cache)} author folders\n")
             self.logger.log(f"[PRECACHE] Cached {len(self.author_folder_cache)} author folders")
         except Exception as e:
             self.logger.log(f"[PRECACHE] Error: {e}")
-        
+
         return self.author_folder_cache
