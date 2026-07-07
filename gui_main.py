@@ -394,16 +394,28 @@ class MainWindow(tk.Tk):
         # Рекурсивно добавить подпапки
         self._add_tree_items(root_item, folder, levels_to_expand=0, current_level=0)
     
+    @staticmethod
+    def _folder_has_fb2(folder_path):
+        """Вернуть True если в папке (рекурсивно) есть хотя бы один fb2/fb2.zip файл."""
+        for _, _, files in os.walk(folder_path):
+            for f in files:
+                fl = f.lower()
+                if fl.endswith('.fb2') or fl.endswith('.fb2.zip'):
+                    return True
+        return False
+
     def _add_tree_items(self, parent_item, folder_path, levels_to_expand=1, current_level=0, max_depth=20):
-        """Рекурсивно добавить папки в дерево."""
+        """Рекурсивно добавить папки в дерево (только те, что содержат fb2 файлы)."""
         if current_level >= max_depth:
             return
-        
+
         try:
             items = sorted(os.listdir(folder_path))
             for item in items:
                 item_path = os.path.join(folder_path, item)
                 if os.path.isdir(item_path) and not item.startswith('.'):
+                    if not self._folder_has_fb2(item_path):
+                        continue
                     should_open = current_level < levels_to_expand
                     tree_item = self.folder_tree.insert(parent_item, 'end', text=item, open=should_open)
                     self.folder_tree.item(tree_item, tags=(item_path,))
