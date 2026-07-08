@@ -1378,7 +1378,7 @@ class RegenCSVService:
         from extraction_constants import FILE_EXTENSION_FOLDER_NAMES
 
         # Нормализованные ключи author_folder_cache (lowercase paths)
-        _author_cache_lower = {k.lower() for k in self.author_folder_cache}
+        _author_cache_lower = {str(k).lower() for k in self.author_folder_cache}
         _coll_kw = {w.lower() for w in (self.collection_keywords or [])}
         _work_lower = str(self.work_dir).lower().rstrip('/\\')
 
