@@ -334,7 +334,8 @@ class Pass2SeriesFilename:
 
     def __init__(self, logger: Logger = None, male_names: set = None, female_names: set = None):
         self.logger = logger or Logger()
-        self.settings = SettingsManager('config.json')
+        _cfg = Path(__file__).parent.parent / 'config.json'
+        self.settings = SettingsManager(str(_cfg))
         self.block_selector = BlockLevelPatternSelector()
         self.male_names = male_names or set()
         self.female_names = female_names or set()
