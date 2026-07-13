@@ -3582,12 +3582,13 @@ class FB2CompilerService:
             '</description>\n'
         )
 
-        # Тела книг — каждая книга в отдельном <body id="vol_N"> с <title>
-        body_parts = []
+        # Тела книг — все в одном <body>, каждая книга как <section id="vol_N">.
+        # Это обеспечивает рабочие якорные ссылки: FB2-ридеры переходят по id на
+        # <section>, но не на <body>.
+        book_sections = []
         for idx, (title, body_xml) in enumerate(bodies, 1):
             safe_title = _html.escape(title)
             # Снимаем ВСЕ <body>/<body name="..."> и </body> теги.
-            # count=1 создавал вложенные <body> если исходник содержал несколько тел.
             body_content = re.sub(r'<(?:fb:)?body(?:\s[^>]*)?>',  '', body_xml, flags=re.IGNORECASE)
             body_content = re.sub(r'</(?:fb:)?body>',              '', body_content, flags=re.IGNORECASE)
             # Убираем <title>...</title> в первой секции (заменим своим)
@@ -3613,33 +3614,107 @@ class FB2CompilerService:
                     f'</section>\n'
                 )
 
-            body_parts.append(
-                f'<body id="vol_{idx}">\n'
+            # Локальное оглавление глав книги (заодно проставляет id секциям)
+            chapter_toc, body_content = self._build_chapter_toc(body_content, f'vol{idx}')
+
+            book_sections.append(
+                f'<section id="vol_{idx}">\n'
                 f'<title><p>{idx}. {safe_title}</p></title>\n'
                 f'{cover_section}'
+                f'{chapter_toc}'
                 f'{body_content.strip()}\n'
-                f'</body>'
+                f'</section>'
             )
 
-        # Страница оглавления — только если томов больше одного
-        toc_body = ''
+        # Главное оглавление серии — только если томов больше одного.
+        # Ссылки на <section id="vol_N"> работают во всех FB2-ридерах.
+        toc_section = ''
         if n_books > 1:
             toc_lines = []
             for idx, (title, _) in enumerate(bodies, 1):
                 safe_title = _html.escape(title)
                 toc_lines.append(f'<p><a l:href="#vol_{idx}">{idx}. {safe_title}</a></p>')
-            toc_body = (
-                '<body>\n'
-                '<section>\n'
+            toc_section = (
+                '<section id="toc">\n'
                 '<title><p>Содержание</p></title>\n'
                 + '\n'.join(toc_lines) +
                 '\n</section>\n'
-                '</body>\n'
             )
 
+        main_body = '<body>\n' + toc_section + '\n'.join(book_sections) + '\n</body>\n'
         binary_section = ('\n' + '\n'.join(binaries)) if binaries else ''
-        raw = description + toc_body + '\n'.join(body_parts) + binary_section + '\n</FictionBook>\n'
+        raw = description + main_body + binary_section + '\n</FictionBook>\n'
         return self._pretty_xml(raw)
+
+    @staticmethod
+    def _build_chapter_toc(body_content: str, id_prefix: str) -> tuple:
+        """Построить блок «Содержание» для глав одной книги.
+
+        Находит все top-level <section> с <title>.
+        Если у секции нет id — проставляет id="<prefix>_chN" прямо в body_content.
+        Возвращает (toc_xml, patched_body_content).
+        toc_xml — пустая строка если глав меньше двух.
+        """
+        id_attr_re = re.compile(r'\bid\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+        title_re   = re.compile(r'<title\b[^>]*>(.*?)</title>', re.IGNORECASE | re.DOTALL)
+        p_re       = re.compile(r'<p\b[^>]*>(.*?)</p>', re.IGNORECASE | re.DOTALL)
+        tag_re     = re.compile(r'<(/?)section(\s[^>]*)?>',  re.IGNORECASE)
+
+        chapters = []   # [(sec_id, title_text, match_start, match_end, had_id)]
+        depth = 0
+        ch_idx = 0
+        content = body_content
+
+        for m in tag_re.finditer(content):
+            is_close = bool(m.group(1))
+            if is_close:
+                depth -= 1
+            else:
+                if depth == 0:
+                    attrs = m.group(2) or ''
+                    id_m = id_attr_re.search(attrs)
+                    had_id = bool(id_m)
+                    sec_id = id_m.group(1) if id_m else None
+
+                    after = content[m.end():]
+                    title_m = title_re.search(after)
+                    if title_m:
+                        # Проверяем что title до следующей top-level section
+                        next_top = tag_re.search(after)
+                        while next_top and next_top.group(1):   # skip closing tags
+                            next_top = tag_re.search(after, next_top.end())
+                        if not next_top or title_m.start() < next_top.start():
+                            raw_title = title_m.group(1)
+                            p_m = p_re.search(raw_title)
+                            chapter_text = re.sub(r'<[^>]+>', '', p_m.group(1) if p_m else raw_title).strip()
+                            if chapter_text:
+                                ch_idx += 1
+                                if not sec_id:
+                                    sec_id = f'{id_prefix}_ch{ch_idx}'
+                                chapters.append((sec_id, chapter_text, m.start(), m.end(), had_id))
+                depth += 1
+
+        if len(chapters) < 2:
+            return '', body_content
+
+        # Проставляем id в секции которых его не было — идём с конца чтобы не сбивать позиции
+        patched = content
+        for sec_id, _, start, end, had_id in reversed(chapters):
+            if not had_id:
+                old_tag = patched[start:end]
+                # Вставляем id=" перед закрывающим >
+                new_tag = old_tag[:-1] + f' id="{sec_id}">'
+                patched = patched[:start] + new_tag + patched[end:]
+
+        lines = [f'<p><a l:href="#{_html.escape(cid)}">{_html.escape(ctitle)}</a></p>'
+                 for cid, ctitle, *_ in chapters]
+        toc_xml = (
+            '<section>\n'
+            '<title><p>Содержание</p></title>\n'
+            + '\n'.join(lines) +
+            '\n</section>\n'
+        )
+        return toc_xml, patched
 
     @staticmethod
     def _pretty_xml(xml_str: str) -> str:
